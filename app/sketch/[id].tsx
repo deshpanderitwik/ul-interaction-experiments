@@ -1,8 +1,9 @@
 import { Canvas, Circle, Path, Skia } from '@shopify/react-native-skia';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getSketch } from '../../sketches/registry';
 
@@ -38,18 +39,18 @@ export default function SketchScreen() {
   // "Immersive" = chrome hidden, ready for a clean iOS screen recording.
   const [immersive, setImmersive] = useState(false);
   const insets = useSafeAreaInsets();
-  // Require a double-tap (top-right) to bring the chrome back, so a stray tap
-  // mid-recording doesn't reveal the UI.
-  const lastTap = useRef(0);
-  const handleRestoreTap = () => {
-    const now = Date.now();
-    if (now - lastTap.current < 320) {
-      setImmersive(false);
-      lastTap.current = 0;
-    } else {
-      lastTap.current = now;
-    }
-  };
+  // Double-tap (top-right) to bring the chrome back, so a stray single tap
+  // mid-recording doesn't reveal the UI. Implemented with gesture-handler so it
+  // reliably wins over any touch handling inside the sketch underneath.
+  const restoreGesture = useMemo(
+    () =>
+      Gesture.Tap()
+        .numberOfTaps(2)
+        .maxDuration(600)
+        .runOnJS(true)
+        .onEnd(() => setImmersive(false)),
+    [],
+  );
 
   if (!sketch) {
     return (
@@ -83,10 +84,9 @@ export default function SketchScreen() {
       {/* In immersive mode the eye is gone with the header; a transparent
           top-right hotspot restores the chrome on a double-tap. */}
       {immersive && (
-        <Pressable
-          onPress={handleRestoreTap}
-          style={[styles.restoreHotspot, { top: insets.top, right: insets.right }]}
-        />
+        <GestureDetector gesture={restoreGesture}>
+          <View style={[styles.restoreHotspot, { top: insets.top, right: insets.right }]} />
+        </GestureDetector>
       )}
     </View>
   );
@@ -102,5 +102,5 @@ const styles = StyleSheet.create({
   },
   missingText: { color: '#8a8a99', fontSize: 16 },
   eyeBtn: { paddingHorizontal: 4, paddingVertical: 4 },
-  restoreHotspot: { position: 'absolute', width: 72, height: 64 },
+  restoreHotspot: { position: 'absolute', width: 140, height: 120 },
 });

@@ -1,29 +1,33 @@
-import { Link } from 'expo-router';
+import { Link, Stack } from 'expo-router';
 import { FlatList, Pressable, StyleSheet, Text } from 'react-native';
+import UpdateButton from '../components/UpdateButton';
 import { sketches } from '../sketches/registry';
 
 export default function Home() {
   return (
-    <FlatList
-      style={styles.list}
-      contentContainerStyle={styles.content}
-      data={sketches}
-      keyExtractor={(s) => s.id}
-      ListHeaderComponent={
-        <Text style={styles.lead}>
-          {sketches.length} interaction experiment
-          {sketches.length === 1 ? '' : 's'}
-        </Text>
-      }
-      renderItem={({ item }) => (
-        <Link href={`/sketch/${item.id}`} asChild>
-          <Pressable style={styles.row}>
-            <Text style={styles.rowTitle}>{item.title}</Text>
-            <Text style={styles.rowDesc}>{item.description}</Text>
-          </Pressable>
-        </Link>
-      )}
-    />
+    <>
+      <Stack.Screen options={{ headerRight: () => <UpdateButton /> }} />
+      <FlatList
+        style={styles.list}
+        contentContainerStyle={styles.content}
+        data={sketches}
+        keyExtractor={(s) => s.id}
+        ListHeaderComponent={
+          <Text style={styles.lead}>
+            {sketches.length} interaction experiment
+            {sketches.length === 1 ? '' : 's'}
+          </Text>
+        }
+        renderItem={({ item }) => (
+          <Link href={`/sketch/${item.id}`} asChild>
+            <Pressable style={styles.row}>
+              <Text style={styles.rowTitle}>{item.title}</Text>
+              <Text style={styles.rowDesc}>{item.description}</Text>
+            </Pressable>
+          </Link>
+        )}
+      />
+    </>
   );
 }
 

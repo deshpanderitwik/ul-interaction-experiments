@@ -68,6 +68,9 @@ function Ring({
     return (clock.value - wv.born) / LIFE;
   });
   const center = useDerivedValue(() => {
+    // touch the clock so this recomputes each frame and sees the in-place
+    // position written by spawn() (mutation alone doesn't trigger recompute)
+    clock.value;
     const wv = waves.value[index];
     return vec(wv.x, wv.y);
   });

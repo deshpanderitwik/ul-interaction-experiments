@@ -1,14 +1,24 @@
 import { Canvas, Circle, Path, Skia } from '@shopify/react-native-skia';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { getSketch } from '../../sketches/registry';
 
 // A crisp monochrome eye, drawn with Skia so it needs no icon font and ships
 // over-the-air on the existing native build.
+//
+// Skia's <Canvas> is a native Metal view whose first frame is opaque — against
+// the dark header that reads as a white flash on every mount. We render it
+// transparent (opaque={false}) and fade it in once it has painted, so the
+// opaque first frame happens while invisible.
 function EyeIcon({ color = '#e8e8f0', size = 24 }: { color?: string; size?: number }) {
   const outline = useMemo(() => {
     const p = Skia.Path.Make();
@@ -18,18 +28,27 @@ function EyeIcon({ color = '#e8e8f0', size = 24 }: { color?: string; size?: numb
     p.close();
     return p;
   }, []);
+
+  const opacity = useSharedValue(0);
+  useEffect(() => {
+    opacity.value = withTiming(1, { duration: 120 });
+  }, [opacity]);
+  const fade = useAnimatedStyle(() => ({ opacity: opacity.value }));
+
   return (
-    <Canvas style={{ width: size, height: size }}>
-      <Path
-        path={outline}
-        color={color}
-        style="stroke"
-        strokeWidth={2}
-        strokeJoin="round"
-        strokeCap="round"
-      />
-      <Circle cx={12} cy={12} r={3.4} color={color} style="stroke" strokeWidth={2} />
-    </Canvas>
+    <Animated.View style={[{ width: size, height: size }, fade]}>
+      <Canvas style={{ flex: 1 }} opaque={false}>
+        <Path
+          path={outline}
+          color={color}
+          style="stroke"
+          strokeWidth={2}
+          strokeJoin="round"
+          strokeCap="round"
+        />
+        <Circle cx={12} cy={12} r={3.4} color={color} style="stroke" strokeWidth={2} />
+      </Canvas>
+    </Animated.View>
   );
 }
 

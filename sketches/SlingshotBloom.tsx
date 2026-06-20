@@ -1,8 +1,17 @@
-import { Canvas, Circle, Fill, Line, vec } from '@shopify/react-native-skia';
+import {
+  Canvas,
+  Circle,
+  Fill,
+  Line,
+  SweepGradient,
+  useClock,
+  vec,
+} from '@shopify/react-native-skia';
 import { useEffect, useState } from 'react';
 import { LayoutRectangle, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import {
+  type SharedValue,
   useDerivedValue,
   useFrameCallback,
   useSharedValue,
@@ -16,17 +25,77 @@ const MAXV = 3200; // launch speed cap
 const RESTITUTION = 0.8; // energy kept on a wall bounce
 const DRAG = 0.994; // per-frame air friction
 const STOP = 26; // below this speed, the ball settles
+const MIN_HIT = 120; // min impact speed to spawn a shockwave
 
-// mode: 0 idle · 1 aiming · 2 flying
+// shockwave pool
+const POOL = 7;
+const LIFE = 520; // ms a shockwave lives
+const BASE_R = 6; // starting ring radius
+const MAX_R = 130; // ring radius at end of life
+const BASE_SW = 16; // starting stroke width (thins to 1)
+const RAINBOW = [
+  '#ff004c',
+  '#ff7a00',
+  '#ffe000',
+  '#39ff14',
+  '#00e5ff',
+  '#3b5bff',
+  '#b14bff',
+  '#ff004c', // repeat first so the sweep wraps seamlessly
+];
+
+type Wave = { x: number; y: number; born: number };
+
 function clamp(v: number, lo: number, hi: number) {
   'worklet';
   return Math.min(hi, Math.max(lo, v));
 }
 
-// Brick 2 — flight + bounce. Release turns the pull into velocity (fired
-// opposite the pull), a frame loop flies the ball on the UI thread, it
-// ricochets off the walls with restitution + light drag, and settles to
-// rest where it stops. Grab it again from there — or catch it mid-flight.
+// One pooled ring: an expanding, fading sweep-gradient stroke. Driven by the
+// Skia clock so it keeps animating regardless of the physics loop.
+function Ring({
+  index,
+  waves,
+  clock,
+}: {
+  index: number;
+  waves: SharedValue<Wave[]>;
+  clock: SharedValue<number>;
+}) {
+  const age = useDerivedValue(() => {
+    const wv = waves.value[index];
+    if (wv.born < 0) return 2; // inactive (> 1)
+    return (clock.value - wv.born) / LIFE;
+  });
+  const center = useDerivedValue(() => {
+    const wv = waves.value[index];
+    return vec(wv.x, wv.y);
+  });
+  const radius = useDerivedValue(
+    () => BASE_R + clamp(age.value, 0, 1) * (MAX_R - BASE_R),
+  );
+  const strokeWidth = useDerivedValue(
+    () => 1 + (1 - clamp(age.value, 0, 1)) * BASE_SW,
+  );
+  const opacity = useDerivedValue(() =>
+    age.value >= 1 || age.value < 0 ? 0 : 1 - age.value,
+  );
+
+  return (
+    <Circle
+      c={center}
+      r={radius}
+      style="stroke"
+      strokeWidth={strokeWidth}
+      opacity={opacity}
+    >
+      <SweepGradient c={center} colors={RAINBOW} />
+    </Circle>
+  );
+}
+
+// Brick 3 — rainbow shockwaves. Each wall impact (above MIN_HIT) fires a
+// pooled sweep-gradient ring at the contact point that expands and fades.
 function SlingshotBloom() {
   const [box, setBox] = useState<LayoutRectangle | null>(null);
   const w = box?.width ?? 0;
@@ -38,7 +107,13 @@ function SlingshotBloom() {
   const vy = useSharedValue(0);
   const ax = useSharedValue(0); // anchor (grab point) while aiming
   const ay = useSharedValue(0);
-  const mode = useSharedValue(0);
+  const mode = useSharedValue(0); // 0 idle · 1 aiming · 2 flying
+
+  const clock = useClock();
+  const waves = useSharedValue<Wave[]>(
+    Array.from({ length: POOL }, () => ({ x: 0, y: 0, born: -1 })),
+  );
+  const nextWave = useSharedValue(0);
 
   // park the ball at center once we know the canvas size
   useEffect(() => {
@@ -54,6 +129,15 @@ function SlingshotBloom() {
     if (mode.value !== 2) return;
     const dt = clamp((frame.timeSincePreviousFrame ?? 16) / 1000, 0, 0.05);
 
+    const spawn = (x: number, y: number) => {
+      const i = nextWave.value % POOL;
+      nextWave.value = i + 1;
+      const wv = waves.value[i];
+      wv.x = x;
+      wv.y = y;
+      wv.born = clock.value;
+    };
+
     vx.value *= DRAG;
     vy.value *= DRAG;
     let nx = bx.value + vx.value * dt;
@@ -61,16 +145,20 @@ function SlingshotBloom() {
 
     if (nx < BALL) {
       nx = BALL;
+      if (Math.abs(vx.value) > MIN_HIT) spawn(0, ny);
       vx.value = -vx.value * RESTITUTION;
     } else if (nx > w - BALL) {
       nx = w - BALL;
+      if (Math.abs(vx.value) > MIN_HIT) spawn(w, ny);
       vx.value = -vx.value * RESTITUTION;
     }
     if (ny < BALL) {
       ny = BALL;
+      if (Math.abs(vy.value) > MIN_HIT) spawn(nx, 0);
       vy.value = -vy.value * RESTITUTION;
     } else if (ny > h - BALL) {
       ny = h - BALL;
+      if (Math.abs(vy.value) > MIN_HIT) spawn(nx, h);
       vy.value = -vy.value * RESTITUTION;
     }
 
@@ -86,7 +174,6 @@ function SlingshotBloom() {
 
   const pan = Gesture.Pan()
     .onBegin((e) => {
-      // grab (or catch) the ball if the touch lands on it
       if (Math.hypot(e.x - bx.value, e.y - by.value) <= GRAB) {
         mode.value = 1;
         vx.value = 0;
@@ -119,7 +206,6 @@ function SlingshotBloom() {
     });
 
   const ballPos = useDerivedValue(() => vec(bx.value, by.value));
-  // band + guide only while aiming; otherwise collapse onto the ball
   const anchorPos = useDerivedValue(() =>
     mode.value === 1 ? vec(ax.value, ay.value) : vec(bx.value, by.value),
   );
@@ -135,6 +221,9 @@ function SlingshotBloom() {
       <View style={styles.fill} onLayout={(e) => setBox(e.nativeEvent.layout)}>
         <Canvas style={StyleSheet.absoluteFill}>
           <Fill color="#0b0b0f" />
+          {Array.from({ length: POOL }, (_, i) => (
+            <Ring key={i} index={i} waves={waves} clock={clock} />
+          ))}
           <Line p1={anchorPos} p2={aimPos} color="#6c5ce755" strokeWidth={2} opacity={aimOpacity} />
           <Line p1={anchorPos} p2={ballPos} color="#8a8a99" strokeWidth={3} opacity={aimOpacity} />
           <Circle c={anchorPos} r={4} color="#3c3c52" opacity={aimOpacity} />

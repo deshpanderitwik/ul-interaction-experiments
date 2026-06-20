@@ -1,9 +1,36 @@
+import { Canvas, Circle, Path, Skia } from '@shopify/react-native-skia';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useMemo, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getSketch } from '../../sketches/registry';
+
+// A crisp monochrome eye, drawn with Skia so it needs no icon font and ships
+// over-the-air on the existing native build.
+function EyeIcon({ color = '#e8e8f0', size = 24 }: { color?: string; size?: number }) {
+  const outline = useMemo(() => {
+    const p = Skia.Path.Make();
+    p.moveTo(3, 12);
+    p.quadTo(12, 4, 21, 12);
+    p.quadTo(12, 20, 3, 12);
+    p.close();
+    return p;
+  }, []);
+  return (
+    <Canvas style={{ width: size, height: size }}>
+      <Path
+        path={outline}
+        color={color}
+        style="stroke"
+        strokeWidth={2}
+        strokeJoin="round"
+        strokeCap="round"
+      />
+      <Circle cx={12} cy={12} r={3.4} color={color} style="stroke" strokeWidth={2} />
+    </Canvas>
+  );
+}
 
 export default function SketchScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -11,6 +38,18 @@ export default function SketchScreen() {
   // "Immersive" = chrome hidden, ready for a clean iOS screen recording.
   const [immersive, setImmersive] = useState(false);
   const insets = useSafeAreaInsets();
+  // Require a double-tap (top-right) to bring the chrome back, so a stray tap
+  // mid-recording doesn't reveal the UI.
+  const lastTap = useRef(0);
+  const handleRestoreTap = () => {
+    const now = Date.now();
+    if (now - lastTap.current < 320) {
+      setImmersive(false);
+      lastTap.current = 0;
+    } else {
+      lastTap.current = now;
+    }
+  };
 
   if (!sketch) {
     return (
@@ -23,26 +62,32 @@ export default function SketchScreen() {
   const { Component, title } = sketch;
   return (
     <View style={styles.fill}>
-      {/* Hide the nav header and status bar in immersive mode. Pure JS — ships OTA. */}
-      <Stack.Screen options={{ title, headerShown: !immersive }} />
+      <Stack.Screen
+        options={{
+          title,
+          headerShown: !immersive,
+          // Just the back chevron, no "Sketches" label.
+          headerBackButtonDisplayMode: 'minimal',
+          // Eye toggle lives on the top bar; tap to hide all chrome.
+          headerRight: () => (
+            <Pressable onPress={() => setImmersive(true)} hitSlop={12} style={styles.eyeBtn}>
+              <EyeIcon />
+            </Pressable>
+          ),
+        }}
+      />
       <StatusBar style="light" hidden={immersive} animated />
 
       <Component />
 
-      {/* Chrome toggle. Visible pill when off; a transparent corner hotspot when
-          on, so it never shows up in the recording but a tap still brings UI back.
-          Lives in the top-right safe area, away from center-stage interactions. */}
-      <Pressable
-        onPress={() => setImmersive((v) => !v)}
-        hitSlop={12}
-        style={[
-          styles.toggle,
-          { top: insets.top + 8, right: insets.right + 12 },
-          immersive ? styles.toggleHidden : styles.toggleVisible,
-        ]}
-      >
-        {!immersive && <Text style={styles.toggleLabel}>Hide UI</Text>}
-      </Pressable>
+      {/* In immersive mode the eye is gone with the header; a transparent
+          top-right hotspot restores the chrome on a double-tap. */}
+      {immersive && (
+        <Pressable
+          onPress={handleRestoreTap}
+          style={[styles.restoreHotspot, { top: insets.top, right: insets.right }]}
+        />
+      )}
     </View>
   );
 }
@@ -56,17 +101,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#0b0b0f',
   },
   missingText: { color: '#8a8a99', fontSize: 16 },
-  toggle: {
-    position: 'absolute',
-    minWidth: 44,
-    minHeight: 32,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  toggleVisible: { backgroundColor: 'rgba(255,255,255,0.10)' },
-  // Transparent but still tappable: invisible in the recording, taps still land.
-  toggleHidden: { backgroundColor: 'transparent' },
-  toggleLabel: { color: '#cfcfe0', fontSize: 13, fontWeight: '600' },
+  eyeBtn: { paddingHorizontal: 4, paddingVertical: 4 },
+  restoreHotspot: { position: 'absolute', width: 72, height: 64 },
 });

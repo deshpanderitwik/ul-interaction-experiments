@@ -1,10 +1,56 @@
+import { Canvas, Circle, Path, Skia } from '@shopify/react-native-skia';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getSketch } from '../../sketches/registry';
+
+// A crisp monochrome eye, drawn with Skia so it needs no icon font and ships
+// over-the-air on the existing native build.
+function EyeIcon({ color = '#e8e8f0', size = 24 }: { color?: string; size?: number }) {
+  const outline = useMemo(() => {
+    const p = Skia.Path.Make();
+    p.moveTo(3, 12);
+    p.quadTo(12, 4, 21, 12);
+    p.quadTo(12, 20, 3, 12);
+    p.close();
+    return p;
+  }, []);
+  return (
+    <Canvas style={{ width: size, height: size }}>
+      <Path
+        path={outline}
+        color={color}
+        style="stroke"
+        strokeWidth={2}
+        strokeJoin="round"
+        strokeCap="round"
+      />
+      <Circle cx={12} cy={12} r={3.4} color={color} style="stroke" strokeWidth={2} />
+    </Canvas>
+  );
+}
 
 export default function SketchScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const sketch = getSketch(id);
+  // "Immersive" = chrome hidden, ready for a clean iOS screen recording.
+  const [immersive, setImmersive] = useState(false);
+  const insets = useSafeAreaInsets();
+  // Double-tap (top-right) to bring the chrome back, so a stray single tap
+  // mid-recording doesn't reveal the UI. Implemented with gesture-handler so it
+  // reliably wins over any touch handling inside the sketch underneath.
+  const restoreGesture = useMemo(
+    () =>
+      Gesture.Tap()
+        .numberOfTaps(2)
+        .maxDuration(600)
+        .runOnJS(true)
+        .onEnd(() => setImmersive(false)),
+    [],
+  );
 
   if (!sketch) {
     return (
@@ -17,8 +63,31 @@ export default function SketchScreen() {
   const { Component, title } = sketch;
   return (
     <View style={styles.fill}>
-      <Stack.Screen options={{ title }} />
+      <Stack.Screen
+        options={{
+          title,
+          headerShown: !immersive,
+          // Just the back chevron, no "Sketches" label.
+          headerBackButtonDisplayMode: 'minimal',
+          // Eye toggle lives on the top bar; tap to hide all chrome.
+          headerRight: () => (
+            <Pressable onPress={() => setImmersive(true)} hitSlop={12} style={styles.eyeBtn}>
+              <EyeIcon />
+            </Pressable>
+          ),
+        }}
+      />
+      <StatusBar style="light" hidden={immersive} animated />
+
       <Component />
+
+      {/* In immersive mode the eye is gone with the header; a transparent
+          top-right hotspot restores the chrome on a double-tap. */}
+      {immersive && (
+        <GestureDetector gesture={restoreGesture}>
+          <View style={[styles.restoreHotspot, { top: insets.top, right: insets.right }]} />
+        </GestureDetector>
+      )}
     </View>
   );
 }
@@ -32,4 +101,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#0b0b0f',
   },
   missingText: { color: '#8a8a99', fontSize: 16 },
+  eyeBtn: { paddingHorizontal: 4, paddingVertical: 4 },
+  restoreHotspot: { position: 'absolute', width: 140, height: 120 },
 });

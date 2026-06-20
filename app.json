@@ -9,7 +9,10 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ritdeshpande.ulsketches"
+      "bundleIdentifier": "com.ritdeshpande.ulsketches",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.ritdeshpande.ulsketches",

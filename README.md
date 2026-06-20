@@ -65,14 +65,25 @@ Then on your phone: open **TestFlight** → install. No cable, ever.
 
 ## The on-the-go loop (from Claude Code mobile)
 
+iOS-only for now. From a headless session (Claude Code mobile/web) `eas update`
+runs non-interactively, so it needs three extra flags: `--platform ios` (without
+it, export defaults to *all* platforms and fails on web — there's no
+`react-native-web` here), `--environment preview` (required in
+`--non-interactive` mode), and `--non-interactive` itself.
+
 ```bash
 # JS-only change (a new sketch, a tweak) — ships in seconds:
-eas update --channel preview -m "new sketch: <name>"
+eas update --channel preview --environment preview --platform ios \
+  --non-interactive -m "new sketch: <name>"
 #   → reopen the app on your phone; it pulls the update on launch.
 
 # New/changed Swift (a native capability) — rebuild + reinstall via TestFlight:
 eas build --platform ios --profile preview --auto-submit
 ```
+
+> Auth is non-interactive via the `EXPO_TOKEN` env var (no `eas login`/2FA in a
+> remote session). The EAS project is already linked (`extra.eas.projectId` +
+> `updates.url` in `app.json`), so this loop works without any one-time setup.
 
 ## Build profiles (`eas.json`)
 - **development** — dev client, internal distribution (live Metro reload; optional).
@@ -82,4 +93,5 @@ eas build --platform ios --profile preview --auto-submit
 ## Adding a sketch
 1. Create `sketches/MySketch.tsx`, default-export a `Sketch`.
 2. Add it to the array in `sketches/registry.ts`.
-3. `eas update --channel preview -m "..."` → it appears on your phone.
+3. `eas update --channel preview --environment preview --platform ios --non-interactive -m "..."`
+   → it appears on your phone.

@@ -65,6 +65,11 @@ Then on your phone: open **TestFlight** → install. No cable, ever.
 
 ## The on-the-go loop (from Claude Code mobile)
 
+> **Multiple threads?** The `preview` channel is shared by every install, and
+> the latest publish wins — so `eas update --channel preview` is **reserved for
+> `main`** (publish after merging). Don't publish to `preview` from a feature
+> branch; see `CLAUDE.md` for the parallel-work rules.
+
 iOS-only for now. From a headless session (Claude Code mobile/web) `eas update`
 runs non-interactively, so it needs three extra flags: `--platform ios` (without
 it, export defaults to *all* platforms and fails on web — there's no

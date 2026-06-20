@@ -109,6 +109,7 @@ const sketch: Sketch = {
   id: 'haptic-pad',
   title: 'Haptic XY pad',
   description: 'Native CoreHaptics: drag to dial in intensity × sharpness in real time.',
+  order: 50,
   Component: HapticPad,
 };
 

@@ -13,6 +13,12 @@ export type Sketch = {
   /** one-liner shown on the home list */
   description: string;
   /**
+   * sort weight for the home list — higher shows first (newest-first). Lives
+   * here (not as array position) so the registry can auto-discover sketches
+   * without a hand-maintained order. Ties break by title.
+   */
+  order?: number;
+  /**
    * if set, this sketch is a child of the sketch with this id — it renders
    * indented under its parent on the home list. One level deep.
    */

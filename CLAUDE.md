@@ -15,9 +15,11 @@ where parallel work collides:
    every install. If two threads both `eas update --channel preview`, the last
    one wins and silently replaces what everyone's phone pulls — including work
    from a branch that doesn't contain yours. This has already happened once.
-2. **Hand-edited shared files** — `sketches/registry.ts`, `sketches/types.ts`,
-   `app/index.tsx`. Everyone edits `registry.ts` to add a sketch, so these are
-   merge-conflict hotspots when branches land on `main`.
+2. **Hand-edited framework files** — `sketches/types.ts`, `app/index.tsx`.
+   Adding a sketch no longer touches a shared file: `sketches/registry.ts`
+   auto-discovers sketches via `require.context`, so you just drop a new
+   `*.tsx` in `sketches/`. These framework files still conflict if two threads
+   change them at once, but that's rare and usually intentional.
 
 ## Rules for parallel work
 
@@ -25,9 +27,10 @@ where parallel work collides:
 - **Branch from the latest `main`.** One branch per thread/workstream.
 - **Never push to another thread's branch**, and never force-push shared refs.
 - **Rebase/merge `main` into your branch often** so conflicts stay small.
-- Keep edits to the shared files (`registry.ts`, `types.ts`, `app/index.tsx`)
-  **small and additive** — append your entry, don't reorder or reformat the
-  whole file.
+- Adding a sketch = **drop a `*.tsx` in `sketches/`** (auto-registered); set
+  `order` (higher = newer) and optional `parentId` in that file. No shared-file
+  edit. Touch the framework files (`types.ts`, `app/index.tsx`) only when
+  deliberately evolving the system, and keep such edits small.
 
 ### OTA publishing — `preview` is for `main` only
 - **Do NOT run `eas update --channel preview` from a feature branch.** That
@@ -51,19 +54,18 @@ That requires isolation we haven't set up yet. Two future options (pick later):
   choose which to open from the dev launcher. True isolated parallel previews.
 - Until then, preview on device = merge to `main` and publish from `main`.
 
-## Known sharp edges / good next cleanups
-- `sketches/registry.ts` is still hand-maintained, so it stays a conflict
-  hotspot. A good future fix is auto-registering sketches via Metro's
-  `require.context` so adding a sketch never edits a shared file. (Not done
-  yet — discussed and deferred.)
+## Known sharp edges
+- Sketches **auto-register** via `require.context` in `sketches/registry.ts`
+  (ordering via `order`, nesting via `parentId`), so adding one never edits a
+  shared file. `require.context` is typed by `require-context.d.ts`.
 - All builds share `runtimeVersion 1.0.0`; only a native rebuild changes it.
   An OTA update only reaches installs on the matching runtime.
 
 ## Quick orientation
 - `app/` — expo-router screens. `index.tsx` lists sketches (supports one level
   of nesting via `Sketch.parentId`); `sketch/[id].tsx` renders one full-screen.
-- `sketches/` — one file per experiment, default-exporting a `Sketch`,
-  registered in `registry.ts`.
+- `sketches/` — one file per experiment, default-exporting a `Sketch`;
+  auto-registered (just drop the file in).
 - `studies/` — work-in-progress explorations (e.g. explosion treatments) that a
   harness sketch flips between; fold a winner back into its parent sketch.
 - `modules/fine-haptics/` — local Swift native module (changing it needs a

@@ -64,6 +64,7 @@ const sketch: Sketch = {
   id: 'draggable-spring',
   title: 'Draggable spring',
   description: 'Pan gesture + Reanimated spring physics, on the UI thread.',
+  order: 30,
   Component: DraggableSpring,
 };
 

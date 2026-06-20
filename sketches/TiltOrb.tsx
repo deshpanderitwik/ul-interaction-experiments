@@ -124,6 +124,7 @@ const sketch: Sketch = {
   id: 'tilt-orb',
   title: 'Tilt orb',
   description: 'Accelerometer physics: tilt to roll a ball; wall hits haptic-scale with speed.',
+  order: 60,
   Component: TiltOrb,
 };
 

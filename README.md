@@ -13,8 +13,9 @@ experiment ("sketch") is **pure JS** that ships **over-the-air** via `eas update
 - **`app/`** — [expo-router](https://docs.expo.dev/router/introduction/) screens.
   `index.tsx` lists sketches; `sketch/[id].tsx` renders one full-screen.
 - **`sketches/`** — one file per experiment. Each default-exports a `Sketch`
-  (`id`, `title`, `description`, `Component`). Register it in `registry.ts`.
-  Pure JS → ships over-the-air.
+  (`id`, `title`, `description`, `Component`; optional `order`, `parentId`).
+  Auto-registered via `require.context` — just drop the file in. Pure JS →
+  ships over-the-air.
 - **`modules/fine-haptics/`** — a **local Swift native module** (CoreHaptics,
   continuous intensity × sharpness). This is the native↔JS seam: write Swift
   once, drive it from any sketch. Adding/changing Swift needs a native rebuild;
@@ -96,7 +97,8 @@ eas build --platform ios --profile preview --auto-submit
 - **production** — Release build on the `production` channel.
 
 ## Adding a sketch
-1. Create `sketches/MySketch.tsx`, default-export a `Sketch`.
-2. Add it to the array in `sketches/registry.ts`.
-3. `eas update --channel preview --environment preview --platform ios --non-interactive -m "..."`
-   → it appears on your phone.
+1. Create `sketches/MySketch.tsx`, default-export a `Sketch` (set `order`;
+   optional `parentId` to nest it under another sketch).
+2. That's it — it auto-registers via `require.context`; no registry edit.
+3. Merge to `main`; publishing `main` to `preview` ships it to your phone
+   (see the loop above — `preview` is `main`-only).

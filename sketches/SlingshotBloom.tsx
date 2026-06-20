@@ -255,6 +255,7 @@ const sketch: Sketch = {
   id: 'slingshot-bloom',
   title: 'Slingshot bloom',
   description: 'Pull, release, ricochet — rainbow shockwaves burst where it hits the walls.',
+  order: 70,
   Component: SlingshotBloom,
 };
 

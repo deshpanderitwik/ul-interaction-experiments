@@ -240,6 +240,7 @@ const sketch: Sketch = {
   id: 'explosion-studies',
   title: 'Explosion studies',
   description: 'A/B four explosion treatments on the same slingshot — neon, bloom, fireworks, plasma.',
+  parentId: 'slingshot-bloom',
   Component: ExplosionStudies,
 };
 

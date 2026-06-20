@@ -11,8 +11,8 @@ import ExplosionStudies from './ExplosionStudies';
  * a route automatically. Keep newest-first so fresh experiments are on top.
  */
 export const sketches: Sketch[] = [
-  ExplosionStudies,
   SlingshotBloom,
+  ExplosionStudies, // child of slingshot-bloom (indented in the list)
   TiltOrb,
   HapticPad,
   HapticGrid,

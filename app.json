@@ -3,13 +3,16 @@
     "name": "ul-interaction-experiments",
     "slug": "ul-interaction-experiments",
     "version": "1.0.0",
+    "scheme": "ulsketches",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ritdeshpande.ulsketches"
     },
     "android": {
+      "package": "com.ritdeshpande.ulsketches",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -20,6 +23,10 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": ["expo-router", "expo-updates"],
+    "runtimeVersion": {
+      "policy": "appVersion"
     }
   }
 }

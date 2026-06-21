@@ -96,6 +96,64 @@ eas build --platform ios --profile preview --auto-submit
 - **preview** — Release build on the `preview` channel, distributed via TestFlight. **Your main install.**
 - **production** — Release build on the `production` channel.
 
+The `eas.json` profiles (and their `development`/`preview`/`production` channels)
+are shared, but channels are **scoped per EAS project** — so each app gets its
+own independent `preview`/`production` streams automatically.
+
+---
+
+## More than one app in this repo (`APP=...`)
+
+This repo can ship multiple **separate native apps** from one codebase. App
+identity (bundle id, EAS project, OTA stream, scheme, routes) is selected at
+build time by the `APP` env var, resolved in `app.config.js`:
+
+- **`APP` unset → `ulsketches`** — the sketchbook above. `app.config.js` returns
+  `app.json` verbatim, so nothing about it changes.
+- **`APP=hello` → `hello`** — a clean, empty hello-world starter. Its own bundle
+  id (`com.ritdeshpande.hello`), its own EAS project, and its own routes in
+  `app-hello/` (the sketchbook keeps `app/`).
+
+Each app is an independent binary + EAS project, so their builds, channels, and
+OTA updates never collide.
+
+### One-time setup for the `hello` app (run yourself — needs your Expo/Apple login)
+```bash
+# 1. Create the EAS project for hello (prints a projectId).
+APP=hello eas init
+#    Dynamic config can't be auto-written, so copy the printed id into
+#    HELLO_EAS_PROJECT_ID at the top of app.config.js, then commit.
+
+# 2. Build for TestFlight (auto-creates the bundle id + credentials).
+APP=hello eas build --platform ios --profile preview --auto-submit
+```
+
+### The on-the-go loop for `hello`
+Same flags as the sketchbook, just with `APP=hello` set (and only once
+`HELLO_EAS_PROJECT_ID` is filled in):
+```bash
+# JS-only change:
+APP=hello eas update --channel preview --environment preview --platform ios \
+  --non-interactive -m "hello: <what changed>"
+
+# Native change:
+APP=hello eas build --platform ios --profile preview --auto-submit
+```
+
+> The `preview` = `main`-only rule applies **per app**: `hello`'s `preview`
+> channel is shared by every `hello` install, so publish it from `main` too.
+
+### Local preview without a build
+```bash
+APP=hello npx expo start   # boots the hello app
+npx expo start             # boots the sketchbook (APP unset)
+```
+
+### Adding a third app
+Add another branch in `app.config.js` (new `bundleIdentifier`, `slug`, `scheme`,
+its own routes dir via `['expo-router', { root: '<dir>' }]`), create that routes
+dir, then `APP=<name> eas init`.
+
 ## Adding a sketch
 1. Create `sketches/MySketch.tsx`, default-export a `Sketch` (set `order`;
    optional `parentId` to nest it under another sketch).

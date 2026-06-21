@@ -47,6 +47,15 @@ where parallel work collides:
 - Auth is non-interactive via `EXPO_TOKEN`. Project is already linked
   (`extra.eas.projectId` + `updates.url` in `app.json`).
 
+### Multiple apps in this repo (`APP=...`)
+This repo can ship more than one native app; `app.config.js` selects which via
+the `APP` env var (unset = the `ulsketches` sketchbook, which is `app.json`
+unchanged; `APP=hello` = the empty hello-world starter in `app-hello/`). Each
+app is its own EAS project with its own channels, so the rule above applies
+**per app**: `preview` is `main`-only for *every* app. Always carry the right
+`APP=` on `eas`/`expo` commands — a bare `eas update --channel preview`
+publishes the sketchbook. See README for the per-app setup/loop.
+
 ### Need to preview your own branch on a device before merging?
 That requires isolation we haven't set up yet. Two future options (pick later):
 - **Dev client + per-branch updates:** one `eas build --profile development`,

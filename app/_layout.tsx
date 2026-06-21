@@ -5,19 +5,21 @@ import { StatusBar } from 'expo-status-bar';
 export default function RootLayout() {
   return (
     // Dark root so the window background never shows through white for a frame
-    // during push transitions (which is what makes header buttons flash white
-    // on arrival). Paired with contentStyle below for the screen surface.
+    // during push transitions. The native stack header is disabled app-wide: on
+    // iOS 26 its buttons get wrapped in Liquid Glass whose bright entrance
+    // "bloom" flashes in on every arrival, and there's no per-button opt-out.
+    // Each screen renders its own header with JS-drawn glass buttons (see
+    // components/GlassButton.tsx, app/index.tsx, app/sketch/[id].tsx).
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#0b0b0f' }}>
       <StatusBar style="light" />
       <Stack
         screenOptions={{
-          headerStyle: { backgroundColor: '#0b0b0f' },
-          headerTintColor: '#fff',
+          headerShown: false,
           contentStyle: { backgroundColor: '#0b0b0f' },
         }}
       >
-        <Stack.Screen name="index" options={{ title: 'Sketches' }} />
-        <Stack.Screen name="sketch/[id]" options={{ title: '' }} />
+        <Stack.Screen name="index" />
+        <Stack.Screen name="sketch/[id]" />
       </Stack>
     </GestureHandlerRootView>
   );

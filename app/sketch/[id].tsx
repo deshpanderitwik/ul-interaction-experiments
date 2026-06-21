@@ -1,8 +1,8 @@
 import { Canvas, Circle, Path, Skia } from '@shopify/react-native-skia';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -10,15 +10,17 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
+import GlassButton from '../../components/GlassButton';
 import { getSketch } from '../../sketches/registry';
 
 // A crisp monochrome eye, drawn with Skia so it needs no icon font and ships
 // over-the-air on the existing native build.
 //
 // Skia's <Canvas> is a native Metal view whose first frame is opaque — against
-// the dark header that reads as a white flash on every mount. We render it
+// the glass bubble that reads as a white flash on mount. We render it
 // transparent (opaque={false}) and fade it in once it has painted, so the
-// opaque first frame happens while invisible.
+// opaque first frame happens while invisible. The fade lives here, on a child
+// of the bubble — never on the GlassView, whose effect would vanish at opacity 0.
 function EyeIcon({ color = '#e8e8f0', size = 24 }: { color?: string; size?: number }) {
   const outline = useMemo(() => {
     const p = Skia.Path.Make();
@@ -52,8 +54,42 @@ function EyeIcon({ color = '#e8e8f0', size = 24 }: { color?: string; size?: numb
   );
 }
 
+// Back chevron, same font-free Skia treatment as the eye. Replaces the native
+// back button, which on iOS 26 carries the flashing Liquid Glass background.
+function ChevronIcon({ color = '#e8e8f0', size = 24 }: { color?: string; size?: number }) {
+  const path = useMemo(() => {
+    const p = Skia.Path.Make();
+    p.moveTo(15, 5);
+    p.lineTo(8, 12);
+    p.lineTo(15, 19);
+    return p;
+  }, []);
+
+  const opacity = useSharedValue(0);
+  useEffect(() => {
+    opacity.value = withTiming(1, { duration: 120 });
+  }, [opacity]);
+  const fade = useAnimatedStyle(() => ({ opacity: opacity.value }));
+
+  return (
+    <Animated.View style={[{ width: size, height: size }, fade]}>
+      <Canvas style={{ flex: 1 }} opaque={false}>
+        <Path
+          path={path}
+          color={color}
+          style="stroke"
+          strokeWidth={2}
+          strokeJoin="round"
+          strokeCap="round"
+        />
+      </Canvas>
+    </Animated.View>
+  );
+}
+
 export default function SketchScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const sketch = getSketch(id);
   // "Immersive" = chrome hidden, ready for a clean iOS screen recording.
   const [immersive, setImmersive] = useState(false);
@@ -82,23 +118,33 @@ export default function SketchScreen() {
   const { Component, title } = sketch;
   return (
     <View style={styles.fill}>
-      <Stack.Screen
-        options={{
-          title,
-          headerShown: !immersive,
-          // Just the back chevron, no "Sketches" label.
-          headerBackButtonDisplayMode: 'minimal',
-          // Eye toggle lives on the top bar; tap to hide all chrome.
-          headerRight: () => (
-            <Pressable onPress={() => setImmersive(true)} hitSlop={12} style={styles.eyeBtn}>
-              <EyeIcon />
-            </Pressable>
-          ),
-        }}
-      />
       <StatusBar style="light" hidden={immersive} animated />
 
-      <Component />
+      {/* Own header chrome instead of the native stack bar — see
+          components/GlassButton.tsx. The back and eye buttons keep their glass
+          bubble, drawn in JS so they appear settled with no entrance bloom. The
+          native edge-swipe back gesture still works with the header hidden. */}
+      {!immersive && (
+        <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+          <GlassButton onPress={() => router.back()} style={styles.iconBtn} accessibilityLabel="Back">
+            <ChevronIcon />
+          </GlassButton>
+          <Text numberOfLines={1} style={styles.headerTitle}>
+            {title}
+          </Text>
+          <GlassButton
+            onPress={() => setImmersive(true)}
+            style={styles.iconBtn}
+            accessibilityLabel="Hide controls"
+          >
+            <EyeIcon />
+          </GlassButton>
+        </View>
+      )}
+
+      <View style={styles.fill}>
+        <Component />
+      </View>
 
       {/* In immersive mode the eye is gone with the header; a transparent
           top-right hotspot restores the chrome on a double-tap. */}
@@ -120,6 +166,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#0b0b0f',
   },
   missingText: { color: '#8a8a99', fontSize: 16 },
-  eyeBtn: { paddingHorizontal: 4, paddingVertical: 4 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+  },
+  // perfect circle for the icon buttons (overrides the pill padding)
+  iconBtn: { width: 36, paddingHorizontal: 0 },
+  headerTitle: {
+    flex: 1,
+    textAlign: 'center',
+    color: '#e8e8f0',
+    fontSize: 17,
+    fontWeight: '600',
+    marginHorizontal: 8,
+  },
   restoreHotspot: { position: 'absolute', width: 140, height: 120 },
 });

@@ -1,5 +1,6 @@
-import { Link, Stack } from 'expo-router';
+import { Link } from 'expo-router';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import UpdateButton from '../components/UpdateButton';
 import { sketches } from '../sketches/registry';
 import type { Sketch } from '../sketches/types';
@@ -18,9 +19,17 @@ const rows: Row[] = sketches
   ]);
 
 export default function Home() {
+  const insets = useSafeAreaInsets();
   return (
-    <>
-      <Stack.Screen options={{ headerRight: () => <UpdateButton /> }} />
+    <View style={styles.fill}>
+      {/* Own header chrome instead of the native stack bar — see
+          components/GlassButton.tsx for why (the native glass header blooms
+          bright on every arrival). The Refresh button keeps its glass bubble,
+          just drawn in JS so it appears already settled. */}
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <Text style={styles.headerTitle}>Sketches</Text>
+        <UpdateButton />
+      </View>
       <FlatList
         style={styles.list}
         contentContainerStyle={styles.content}
@@ -45,11 +54,20 @@ export default function Home() {
           </View>
         )}
       />
-    </>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  fill: { flex: 1, backgroundColor: '#0b0b0f' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
   list: { flex: 1, backgroundColor: '#0b0b0f' },
   content: { padding: 16 },
   lead: { color: '#5a5a6b', fontSize: 13, marginBottom: 12, marginLeft: 4 },

@@ -1,6 +1,7 @@
 import * as Updates from 'expo-updates';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text } from 'react-native';
+import GlassButton from './GlassButton';
 
 type Status = 'idle' | 'checking' | 'downloading' | 'current' | 'error';
 
@@ -42,13 +43,13 @@ export default function UpdateButton() {
   const busy = status === 'checking' || status === 'downloading';
 
   return (
-    <Pressable onPress={onPress} disabled={busy} hitSlop={12} style={styles.btn}>
+    <GlassButton onPress={onPress} disabled={busy} accessibilityLabel="Check for updates">
       {busy ? (
         <ActivityIndicator size="small" color="#00d2a8" />
       ) : (
         <Text style={styles.label}>{labelFor(status)}</Text>
       )}
-    </Pressable>
+    </GlassButton>
   );
 }
 
@@ -64,6 +65,5 @@ function labelFor(status: Status): string {
 }
 
 const styles = StyleSheet.create({
-  btn: { paddingHorizontal: 8, paddingVertical: 4 },
   label: { color: '#00d2a8', fontSize: 15, fontWeight: '600' },
 });

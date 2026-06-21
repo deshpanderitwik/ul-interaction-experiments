@@ -1,9 +1,15 @@
 import { StyleSheet, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
+  useSharedValue,
   type SharedValue,
 } from 'react-native-reanimated';
-import type { Frame } from 'react-native-vision-camera';
+import {
+  Camera,
+  useFrameOutput,
+  type CameraDevice,
+  type Frame,
+} from 'react-native-vision-camera';
 
 // Dominant-colors study: a frame processor that buckets the frame's pixels
 // into a coarse 4×4×4 RGB histogram, then surfaces the three fullest buckets
@@ -111,8 +117,36 @@ export function makeColorProcessor(
   };
 }
 
+/**
+ * The Colors study: live preview with a frame processor attached, swatches on
+ * top. Self-contained so the harness only mounts it while the study is active —
+ * which keeps `useFrameOutput` (and its worklet runtime) off the bare-preview
+ * path entirely.
+ */
+export function ColorsStudy({ device }: { device: CameraDevice }) {
+  const colorsSV = useSharedValue<string[]>([]);
+  const tickSV = useSharedValue(0);
+  const frameOutput = useFrameOutput({
+    pixelFormat: 'rgb',
+    targetResolution: { width: 320, height: 240 },
+    onFrame: makeColorProcessor(colorsSV, tickSV),
+  });
+
+  return (
+    <>
+      <Camera
+        style={StyleSheet.absoluteFill}
+        device={device}
+        isActive
+        outputs={[frameOutput]}
+      />
+      <ColorSwatches colorsSV={colorsSV} />
+    </>
+  );
+}
+
 /** The three dominant-color swatches, bottom-center over the preview. */
-export function ColorSwatches({ colorsSV }: { colorsSV: SharedValue<string[]> }) {
+function ColorSwatches({ colorsSV }: { colorsSV: SharedValue<string[]> }) {
   return (
     <View style={styles.row} pointerEvents="none">
       <Swatch colorsSV={colorsSV} index={0} />

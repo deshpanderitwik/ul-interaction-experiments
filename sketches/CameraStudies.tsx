@@ -1,13 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useSharedValue } from 'react-native-reanimated';
 import {
   Camera,
   useCameraDevice,
   useCameraPermission,
-  useFrameOutput,
 } from 'react-native-vision-camera';
-import { ColorSwatches, makeColorProcessor } from '../studies/cameraColors';
+import { ColorsStudy } from '../studies/cameraColors';
 import type { Sketch } from './types';
 
 // Camera studies — a harness over the live preview, like Explosion studies but
@@ -15,6 +13,10 @@ import type { Sketch } from './types';
 // active chip to turn it off and see the bare preview. First study: "Colors",
 // which reads each frame and paints its three dominant colors as swatches at
 // the bottom-center. Fold a keeper back into the Camera view sketch.
+//
+// Each study owns its own camera + frame processor and is mounted only while
+// active — so the expensive `useFrameOutput` worklet runtime never spins up on
+// the bare-preview path.
 const STUDIES = [{ key: 'colors', label: 'Colors' }] as const;
 type StudyKey = (typeof STUDIES)[number]['key'];
 
@@ -22,15 +24,6 @@ function CameraStudies() {
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('back');
   const [active, setActive] = useState<StudyKey | null>(null);
-
-  // Frame-output → UI bridge for the Colors study.
-  const colorsSV = useSharedValue<string[]>([]);
-  const tickSV = useSharedValue(0);
-  const frameOutput = useFrameOutput({
-    pixelFormat: 'rgb',
-    targetResolution: { width: 320, height: 240 },
-    onFrame: makeColorProcessor(colorsSV, tickSV),
-  });
 
   useEffect(() => {
     if (!hasPermission) requestPermission();
@@ -55,19 +48,13 @@ function CameraStudies() {
     );
   }
 
-  const colorsOn = active === 'colors';
-
   return (
     <View style={styles.fill}>
-      <Camera
-        style={StyleSheet.absoluteFill}
-        device={device}
-        isActive
-        // Only attach the frame output while its study is on, so we don't pay
-        // for frame processing when showing the bare preview.
-        outputs={colorsOn ? [frameOutput] : []}
-      />
-      {colorsOn && <ColorSwatches colorsSV={colorsSV} />}
+      {active === 'colors' ? (
+        <ColorsStudy device={device} />
+      ) : (
+        <Camera style={StyleSheet.absoluteFill} device={device} isActive />
+      )}
 
       <View style={styles.bar}>
         {STUDIES.map((s) => {

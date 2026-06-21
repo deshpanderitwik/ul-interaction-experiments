@@ -17,7 +17,6 @@ import {
 import { FireBurst } from '../studies/Fireworks';
 import { NeonBurst } from '../studies/NeonLaser';
 import { PlasmaBurst } from '../studies/Plasma';
-import { BloomBurst } from '../studies/SoftBloom';
 import { POOL, makeWaves, type Wave } from '../studies/shared';
 import type { Sketch } from './types';
 
@@ -30,10 +29,9 @@ const DRAG = 0.994;
 const STOP = 26;
 const MIN_HIT = 120;
 
-// the four explosion treatments, swapped live via the chips up top
+// the three explosion treatments, swapped live via the chips up top
 const TREATMENTS = [
   { key: 'neon', label: 'Neon', Burst: NeonBurst },
-  { key: 'bloom', label: 'Bloom', Burst: BloomBurst },
   { key: 'fireworks', label: 'Fireworks', Burst: FireBurst },
   { key: 'plasma', label: 'Plasma', Burst: PlasmaBurst },
 ] as const;
@@ -45,7 +43,7 @@ function clamp(v: number, lo: number, hi: number) {
 
 // Explosion studies — a harness, not a final sketch. Same slingshot physics
 // as Slingshot bloom, but the wall-impact burst is rendered by whichever
-// study you pick, so you can A/B all four on the exact same hit. Lock a
+// study you pick, so you can A/B all three on the exact same hit. Lock a
 // winner, then fold it back into SlingshotBloom.
 function ExplosionStudies() {
   const [box, setBox] = useState<LayoutRectangle | null>(null);
@@ -239,7 +237,7 @@ const styles = StyleSheet.create({
 const sketch: Sketch = {
   id: 'explosion-studies',
   title: 'Explosion studies',
-  description: 'A/B four explosion treatments on the same slingshot — neon, bloom, fireworks, plasma.',
+  description: 'A/B three explosion treatments on the same slingshot — neon, fireworks, plasma.',
   order: 65,
   parentId: 'slingshot-bloom',
   Component: ExplosionStudies,

@@ -17,6 +17,7 @@ import {
   useSharedValue,
 } from 'react-native-reanimated';
 import type { Sketch } from './types';
+import { JetTrail } from './effects/JetTrail';
 
 const BALL = 26; // ball radius
 const GRAB = BALL + 44; // how close a touch must land to grab the ball
@@ -230,6 +231,7 @@ function SlingshotBloom() {
           <Line p1={anchorPos} p2={aimPos} color="#6c5ce755" strokeWidth={2} opacity={aimOpacity} />
           <Line p1={anchorPos} p2={ballPos} color="#8a8a99" strokeWidth={3} opacity={aimOpacity} />
           <Circle c={anchorPos} r={4} color="#3c3c52" opacity={aimOpacity} />
+          <JetTrail bx={bx} by={by} vx={vx} vy={vy} mode={mode} clock={clock} />
           <Circle c={ballPos} r={BALL} color="#e8e8f0" />
         </Canvas>
         <Text style={styles.hint}>Pull back and release to fire</Text>

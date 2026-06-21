@@ -32,6 +32,17 @@ const TEAL = '#00e6b8'; // the live, centered operand
 const AMBER = '#ffb454'; // the held operand
 const DIM = '#5a5a6b';
 
+type Op = { sym: string; fn: (a: number, b: number) => number | null };
+const OPS: Op[] = [
+  { sym: '+', fn: (a, b) => a + b },
+  { sym: '−', fn: (a, b) => a - b },
+  { sym: '×', fn: (a, b) => a * b },
+  { sym: '÷', fn: (a, b) => (b === 0 ? null : a / b) },
+];
+
+const fmt = (n: number | null) =>
+  n === null ? '—' : n.toLocaleString(undefined, { maximumFractionDigits: 3 });
+
 function NumberItem({
   index,
   offset,
@@ -81,7 +92,8 @@ function NumberItem({
 function InfiniteNumbers() {
   const offset = useSharedValue(0);
   const [centerIndex, setCenterIndex] = useState(0);
-  const [heldIndex, setHeldIndex] = useState<number | null>(null);
+  const [held, setHeld] = useState<number | null>(null);
+  const [focus, setFocus] = useState(0); // index into OPS for the inline readout
   const [height, setHeight] = useState(0);
   const insets = useSafeAreaInsets();
 
@@ -91,13 +103,27 @@ function InfiniteNumbers() {
   };
 
   const grab = (i: number) => {
-    setHeldIndex(i);
+    setHeld(i);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
   };
 
   const release = () => {
-    setHeldIndex(null);
+    setHeld(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  };
+
+  // Tap a result to chain: its value becomes the new held operand.
+  const chain = (opIndex: number) => {
+    if (held === null) return;
+    const r = OPS[opIndex].fn(held, centerIndex);
+    if (r === null) return; // e.g. divide-by-zero
+    setHeld(r);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+  };
+
+  const cycleFocus = () => {
+    setFocus((f) => (f + 1) % OPS.length);
+    Haptics.selectionAsync().catch(() => {});
   };
 
   // Slide the rendered window (and tick a haptic) only when a *new* number
@@ -155,6 +181,8 @@ function InfiniteNumbers() {
     return out;
   }, [centerIndex]);
 
+  const inlineResult = held === null ? null : OPS[focus].fn(held, centerIndex);
+
   return (
     <View style={styles.fill} onLayout={(e) => setHeight(e.nativeEvent.layout.height)}>
       <GestureDetector gesture={gesture}>
@@ -166,30 +194,61 @@ function InfiniteNumbers() {
                 index={i}
                 offset={offset}
                 centerY={height / 2}
-                held={i === heldIndex}
+                held={held !== null && i === held}
               />
             ))}
         </View>
       </GestureDetector>
 
       {/* Held operand — pinned top shelf. Tap to release. */}
-      {heldIndex !== null && (
+      {held !== null && (
         <Pressable
           onPress={release}
           style={[styles.heldChip, { top: insets.top + 12 }]}
           hitSlop={10}
         >
           <Text style={styles.heldLabel}>HELD</Text>
-          <Text style={styles.heldValue}>{heldIndex.toLocaleString()}</Text>
+          <Text style={styles.heldValue}>{fmt(held)}</Text>
           <Text style={styles.heldClear}>✕</Text>
         </Pressable>
       )}
 
-      {/* Results — pinned bottom. Reads top(held) → middle(live) → bottom(result). */}
-      {heldIndex !== null ? (
-        <View style={[styles.results, { bottom: insets.bottom + 20 }]} pointerEvents="none">
-          <Equation a={heldIndex} op="+" b={centerIndex} />
-          <Equation a={heldIndex} op="−" b={centerIndex} />
+      {/* Inline readout — at the center line, right side. Tap to cycle which
+          operation it shows (kept in sync with the highlighted row below). */}
+      {held !== null && height > 0 && (
+        <Pressable
+          onPress={cycleFocus}
+          hitSlop={12}
+          style={[styles.inline, { top: height / 2 - 16 }]}
+        >
+          <Text style={styles.inlineOp}>{OPS[focus].sym}</Text>
+          <Text style={styles.inlineResult}>{fmt(inlineResult)}</Text>
+        </Pressable>
+      )}
+
+      {/* Results — pinned bottom. Reads top(held) → middle(live) → bottom(result).
+          Tap a row to chain that result into the held value. */}
+      {held !== null ? (
+        <View style={[styles.results, { bottom: insets.bottom + 18 }]}>
+          {OPS.map((op, idx) => {
+            const r = op.fn(held, centerIndex);
+            return (
+              <Pressable
+                key={op.sym}
+                onPress={() => chain(idx)}
+                style={[styles.row, idx === focus && styles.rowFocused]}
+                hitSlop={6}
+              >
+                <Text style={styles.eqn}>
+                  <Text style={{ color: AMBER }}>{fmt(held)}</Text>
+                  <Text style={styles.eqnOp}> {op.sym} </Text>
+                  <Text style={{ color: TEAL }}>{centerIndex.toLocaleString()}</Text>
+                  <Text style={styles.eqnOp}> = </Text>
+                  <Text style={styles.eqnResult}>{fmt(r)}</Text>
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
       ) : (
         <Text style={[styles.hint, { bottom: insets.bottom + 24 }]} pointerEvents="none">
@@ -197,19 +256,6 @@ function InfiniteNumbers() {
         </Text>
       )}
     </View>
-  );
-}
-
-function Equation({ a, op, b }: { a: number; op: '+' | '−'; b: number }) {
-  const result = op === '+' ? a + b : a - b;
-  return (
-    <Text style={styles.eqn}>
-      <Text style={{ color: AMBER }}>{a.toLocaleString()}</Text>
-      <Text style={styles.eqnOp}> {op} </Text>
-      <Text style={{ color: TEAL }}>{b.toLocaleString()}</Text>
-      <Text style={styles.eqnOp}> = </Text>
-      <Text style={styles.eqnResult}>{result.toLocaleString()}</Text>
-    </Text>
   );
 }
 
@@ -242,8 +288,19 @@ const styles = StyleSheet.create({
   heldLabel: { color: '#8a7a4a', fontSize: 11, fontWeight: '700', letterSpacing: 1.5 },
   heldValue: { color: AMBER, fontSize: 20, fontWeight: '700', fontVariant: ['tabular-nums'] },
   heldClear: { color: '#8a7a4a', fontSize: 14, fontWeight: '700' },
-  results: { position: 'absolute', left: 0, right: 0, alignItems: 'center', gap: 6 },
-  eqn: { fontSize: 22, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  inline: {
+    position: 'absolute',
+    right: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  inlineOp: { color: DIM, fontSize: 18, fontWeight: '700' },
+  inlineResult: { color: '#ffffff', fontSize: 22, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  results: { position: 'absolute', left: 0, right: 0, alignItems: 'center', gap: 2 },
+  row: { paddingVertical: 5, paddingHorizontal: 14, borderRadius: 10 },
+  rowFocused: { backgroundColor: '#15151d' },
+  eqn: { fontSize: 19, fontWeight: '700', fontVariant: ['tabular-nums'] },
   eqnOp: { color: DIM },
   eqnResult: { color: '#ffffff' },
   hint: { position: 'absolute', left: 0, right: 0, textAlign: 'center', color: '#3c3c52', fontSize: 14 },
@@ -252,7 +309,7 @@ const styles = StyleSheet.create({
 const sketch: Sketch = {
   id: 'infinite-numbers',
   title: 'Infinite numbers',
-  description: 'Scroll a bottomless number line; long-press to hold a value and watch it add and subtract live.',
+  description: 'A bottomless number line that doubles as a calculator: hold a value, then add, subtract, multiply, divide and chain.',
   order: 80,
   Component: InfiniteNumbers,
 };

@@ -29,12 +29,17 @@ const G0 = 140;
 const G1 = 200;
 const G2 = 96;
 const BLUR = 0.26; // BlurMask radius as a fraction of the current glow radius
+// The harness spawns the wave on the wall line, so a soft radial glow centered
+// there is half-clipped off-screen. Pull the bloom inward along the stored wall
+// normal so its bright core sits at the actual point of collision (~the ball's
+// contact center) and the whole glow stays on-screen.
+const INSET = 30;
 
 export function BloomBurst({ index, waves, clock }: BurstProps) {
   const center = useDerivedValue(() => {
     clock.value;
     const wv = waves.value[index];
-    return vec(wv.x, wv.y);
+    return vec(wv.x + wv.nx * INSET, wv.y + wv.ny * INSET);
   });
 
   const ageAt = (delay: number) => {

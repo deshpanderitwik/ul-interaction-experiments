@@ -6,17 +6,9 @@ import {
   RadialGradient,
   vec,
 } from '@shopify/react-native-skia';
-import * as Contacts from 'expo-contacts';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  LayoutRectangle,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { LayoutRectangle, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
@@ -28,46 +20,49 @@ import Animated, {
 } from 'react-native-reanimated';
 import type { Sketch } from './types';
 
-// ── Premise ────────────────────────────────────────────────────────────────
-// "Cluster people by how many texts I've sent them" is impossible on iOS — no
-// public API exposes iMessage/SMS history to a third-party app. So *you* place
-// people instead: tap a node to pull it inward (closer = you interact more),
-// or drag it anywhere and release to set its distance by hand. Closeness ↔
-// distance from the center "you" node. Contacts are read live on-device, held
-// only in memory, and never written to disk or sent anywhere.
+// ── Thought experiment ───────────────────────────────────────────────────────
+// The real version of this idea — "cluster my contacts by how many texts I've
+// sent them" — can't read iMessage/SMS on iOS (no public API). So this is the
+// concept on *fake* data: a generated roster, each person with a SIMULATED text
+// count. People you "text" most sit closest to the center "you" node; the rest
+// drift outward. No contacts permission, no real data, pure JS → ships OTA.
+//
+// Flick a node to feel it spring back to its count-determined orbit; tap one to
+// read it out; Shuffle to roll a fresh roster.
 
-const NODE_CAP = 80; // keep the force sim smooth; bigger phones can take more
-const GOLDEN = Math.PI * (3 - Math.sqrt(5)); // ~2.39996 rad — even radial spread
-const DOT_R = 19; // node circle radius
-const NODE_W = 86; // node hit/label box
+const COUNT = 60; // fake contacts on screen
+const GOLDEN = Math.PI * (3 - Math.sqrt(5)); // even radial spread
+const DOT_MIN = 11;
+const DOT_MAX = 26; // node radius scales with text volume
+const NODE_W = 86;
 const NODE_H = 60;
-const STIFF = 130; // radial spring stiffness
-const DAMP = 13; // spring damping
-const SEP = 64; // min center-to-center spacing before nodes push apart
-const REPULSE = 900; // declutter strength
+const STIFF = 130;
+const DAMP = 13;
+const SEP = 62; // declutter spacing
+const REPULSE = 900;
 
+const FIRST = [
+  'Maya', 'Leo', 'Aria', 'Noah', 'Zoe', 'Kai', 'Emma', 'Liam', 'Ivy', 'Omar',
+  'Nina', 'Jonas', 'Priya', 'Mateo', 'Lena', 'Theo', 'Sana', 'Felix', 'Ada',
+  'Ravi', 'Mira', 'Hugo', 'Yara', 'Dane', 'Cleo', 'Ezra', 'Nora', 'Iris',
+  'Sam', 'Tess', 'Beau', 'Juno', 'Remy', 'Vera', 'Otis', 'Wren', 'Cass',
+  'Dion', 'Esme', 'Finn', 'Gemma', 'Hana', 'Ines', 'Jude', 'Kira', 'Luca',
+  'Mona', 'Niko', 'Opal', 'Pax', 'Rhea', 'Soren', 'Tara', 'Uma', 'Vince',
+  'Wade', 'Xena', 'Yves', 'Zane', 'Bea',
+];
+const LASTI = 'ABCDEFGHJKLMNPRSTVW';
 const PALETTE = [
-  '#6c5ce7',
-  '#00d2a8',
-  '#3b5bff',
-  '#ff7a00',
-  '#ff2d6b',
-  '#b14bff',
-  '#21d4fd',
-  '#ffd23f',
+  '#6c5ce7', '#00d2a8', '#3b5bff', '#ff7a00',
+  '#ff2d6b', '#b14bff', '#21d4fd', '#ffd23f',
 ];
 
-type Person = { id: string; name: string };
-type GNode = {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  angle: number; // slot on the ring
-  closeness: number; // 0 (far) … 1 (center)
-  dragging: boolean;
+type Person = {
+  id: string;
+  name: string;
+  count: number; // simulated texts sent
+  closeness: number; // 0 (far) … 1 (center), normalized across the roster
 };
-type Phase = 'idle' | 'loading' | 'denied' | 'unavailable' | 'ready';
+type GNode = { x: number; y: number; vx: number; vy: number; angle: number; dragging: boolean };
 
 function clamp(v: number, lo: number, hi: number) {
   'worklet';
@@ -75,52 +70,82 @@ function clamp(v: number, lo: number, hi: number) {
 }
 
 function initials(name: string) {
-  const parts = name.trim().split(/\s+/);
-  return (parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] : '');
+  const p = name.trim().split(/\s+/);
+  return ((p[0]?.[0] ?? '') + (p[1]?.[0] ?? '')).toUpperCase();
 }
 
-function tap(light: boolean) {
+function buzz(light: boolean) {
   try {
     if (light) Haptics.selectionAsync();
     else Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   } catch {
-    // haptics are best-effort
+    // best-effort
   }
 }
 
-// ── A single contact: tap to pull closer, drag to place by hand ──────────────
+// A skewed roster: a few people you text constantly, a long tail you barely do.
+function makeRoster(): Person[] {
+  const used = new Set<string>();
+  const raw = Array.from({ length: COUNT }, () => {
+    let name = '';
+    do {
+      const f = FIRST[Math.floor(Math.random() * FIRST.length)];
+      const l = LASTI[Math.floor(Math.random() * LASTI.length)];
+      name = `${f} ${l}.`;
+    } while (used.has(name));
+    used.add(name);
+    // power-law-ish: random^2.4 → many small counts, a handful of big ones
+    const count = Math.round(2 + Math.pow(Math.random(), 2.4) * 480);
+    return { name, count };
+  });
+  const max = Math.max(...raw.map((r) => r.count));
+  const min = Math.min(...raw.map((r) => r.count));
+  const span = Math.max(1, max - min);
+  return raw.map((r, i) => ({
+    id: `${i}-${r.name}`,
+    name: r.name,
+    count: r.count,
+    closeness: (r.count - min) / span,
+  }));
+}
+
+// One contact: size & line brightness scale with simulated volume. Flick it and
+// it springs back to its orbit; tap it to read it out.
 function NodeView({
   i,
   person,
   color,
+  selected,
   nodes,
   tick,
-  geom,
+  onTap,
 }: {
   i: number;
   person: Person;
   color: string;
+  selected: boolean;
   nodes: SharedValue<GNode[]>;
   tick: SharedValue<number>;
-  geom: SharedValue<{ cx: number; cy: number; rMin: number; rMax: number }>;
+  onTap: (i: number) => void;
 }) {
+  const r = DOT_MIN + person.closeness * (DOT_MAX - DOT_MIN);
   const style = useAnimatedStyle(() => {
-    tick.value; // recompute every sim frame
+    tick.value;
     const n = nodes.value[i];
     return {
       transform: [
         { translateX: n.x - NODE_W / 2 },
         { translateY: n.y - NODE_H / 2 },
-        { scale: n.dragging ? 1.18 : 1 },
+        { scale: n.dragging ? 1.16 : 1 },
       ],
-      zIndex: n.dragging ? 10 : 1,
+      zIndex: n.dragging || selected ? 10 : 1,
     };
   });
 
   const pan = Gesture.Pan()
     .onBegin(() => {
       nodes.value[i].dragging = true;
-      runOnJS(tap)(false);
+      runOnJS(buzz)(false);
     })
     .onChange((e) => {
       const n = nodes.value[i];
@@ -130,28 +155,34 @@ function NodeView({
       n.vy = 0;
     })
     .onFinalize(() => {
-      const n = nodes.value[i];
-      const { cx, cy, rMin, rMax } = geom.value;
-      const dist = Math.hypot(n.x - cx, n.y - cy);
-      // where you dropped it becomes its closeness + its ring slot
-      n.closeness = clamp(1 - (dist - rMin) / (rMax - rMin), 0, 1);
-      n.angle = Math.atan2(n.y - cy, n.x - cx);
-      n.dragging = false;
+      // closeness is fixed by text count, so just let it spring home
+      nodes.value[i].dragging = false;
     });
 
   const press = Gesture.Tap()
     .maxDistance(10)
     .onStart(() => {
-      const n = nodes.value[i];
-      n.closeness = clamp(n.closeness + 0.18, 0, 1);
-      runOnJS(tap)(true);
+      runOnJS(onTap)(i);
+      runOnJS(buzz)(true);
     });
 
   return (
     <GestureDetector gesture={Gesture.Race(press, pan)}>
       <Animated.View style={[styles.node, style]}>
-        <View style={[styles.dot, { backgroundColor: color, shadowColor: color }]}>
-          <Text style={styles.initials}>{initials(person.name).toUpperCase()}</Text>
+        <View
+          style={[
+            styles.dot,
+            {
+              width: r * 2,
+              height: r * 2,
+              borderRadius: r,
+              backgroundColor: color,
+              shadowColor: color,
+              borderWidth: selected ? 2 : 0,
+            },
+          ]}
+        >
+          <Text style={styles.initials}>{initials(person.name)}</Text>
         </View>
         <Text numberOfLines={1} style={styles.label}>
           {person.name}
@@ -161,14 +192,16 @@ function NodeView({
   );
 }
 
-// One spoke from the center to a node — brighter the closer the person sits.
+// A spoke from "you" to a contact — brighter the more you text them.
 function NodeLine({
   i,
+  closeness,
   nodes,
   tick,
   geom,
 }: {
   i: number;
+  closeness: number;
   nodes: SharedValue<GNode[]>;
   tick: SharedValue<number>;
   geom: SharedValue<{ cx: number; cy: number; rMin: number; rMax: number }>;
@@ -179,78 +212,55 @@ function NodeLine({
     const n = nodes.value[i];
     return vec(n.x, n.y);
   });
-  const opacity = useDerivedValue(() => {
-    tick.value;
-    return 0.06 + nodes.value[i].closeness * 0.5;
-  });
-  return <Line p1={p1} p2={p2} color="#8a7dff" strokeWidth={1.25} opacity={opacity} />;
+  return (
+    <Line
+      p1={p1}
+      p2={p2}
+      color="#8a7dff"
+      strokeWidth={1.25}
+      opacity={0.05 + closeness * 0.55}
+    />
+  );
 }
 
 function ContactGraph() {
-  const [phase, setPhase] = useState<Phase>('idle');
-  const [people, setPeople] = useState<Person[]>([]);
-  const [total, setTotal] = useState(0);
+  const [people, setPeople] = useState<Person[]>(makeRoster);
   const [box, setBox] = useState<LayoutRectangle | null>(null);
   const [built, setBuilt] = useState(false);
+  const [selected, setSelected] = useState<number | null>(null);
   const builtRef = useRef(false);
 
   const nodes = useSharedValue<GNode[]>([]);
   const tick = useSharedValue(0);
   const geom = useSharedValue({ cx: 0, cy: 0, rMin: 0, rMax: 0 });
-
   const center = useDerivedValue(() => vec(geom.value.cx, geom.value.cy));
 
-  async function load() {
-    setPhase('loading');
-    builtRef.current = false;
-    setBuilt(false);
-    try {
-      const { status } = await Contacts.requestPermissionsAsync();
-      if (status !== 'granted') {
-        setPhase('denied');
-        return;
-      }
-      const { data } = await Contacts.getContactsAsync({ fields: [Contacts.Fields.Name] });
-      const named: Person[] = data
-        .map((c, idx) => ({ id: c.id ?? String(idx), name: (c.name ?? '').trim() }))
-        .filter((p) => p.name.length > 0);
-      setTotal(named.length);
-      setPeople(named.slice(0, NODE_CAP));
-      setPhase('ready');
-    } catch {
-      // expo-contacts native module isn't in this build (OTA-only install)
-      setPhase('unavailable');
-    }
-  }
-
-  // Build the node layout once we know both the canvas size and the people.
+  // (re)build the layout when the roster changes or the canvas is first sized
   useEffect(() => {
-    if (phase !== 'ready' || !box || people.length === 0 || builtRef.current) return;
+    if (!box || people.length === 0 || builtRef.current) return;
     const cx = box.width / 2;
     const cy = box.height / 2;
-    const rMin = DOT_R + 34;
+    const rMin = DOT_MAX + 28;
     const rMax = Math.max(rMin + 40, Math.min(box.width, box.height) / 2 - 46);
     geom.value = { cx, cy, rMin, rMax };
 
-    nodes.value = people.map((_, i) => {
+    nodes.value = people.map((p, i) => {
       const angle = i * GOLDEN;
-      const r = rMin + (rMax - rMin) * 0.5; // everyone starts neutral (mid-ring)
+      const rad = rMin + (1 - p.closeness) * (rMax - rMin);
       return {
-        x: cx + Math.cos(angle) * r,
-        y: cy + Math.sin(angle) * r,
+        x: cx + Math.cos(angle) * rad,
+        y: cy + Math.sin(angle) * rad,
         vx: 0,
         vy: 0,
         angle,
-        closeness: 0.5,
         dragging: false,
       };
     });
     builtRef.current = true;
     setBuilt(true);
-  }, [phase, box, people, geom, nodes]);
+  }, [box, people, geom, nodes]);
 
-  // Force loop: radial spring toward each node's closeness ring + light mutual
-  // repulsion so labels don't stack. Dragged nodes follow the finger untouched.
+  // force loop: spring each node to its count-determined orbit + declutter
   useFrameCallback((frame) => {
     'worklet';
     const list = nodes.value;
@@ -259,7 +269,6 @@ function ContactGraph() {
     const dt = clamp((frame.timeSincePreviousFrame ?? 16) / 1000, 0, 0.05);
     const { cx, cy, rMin, rMax } = geom.value;
 
-    // declutter: push apart any two nodes sitting too close
     for (let i = 0; i < n; i++) {
       const a = list[i];
       for (let j = i + 1; j < n; j++) {
@@ -271,14 +280,8 @@ function ContactGraph() {
           const f = (REPULSE * (SEP - d)) / (d * SEP);
           const fx = dx * f * dt;
           const fy = dy * f * dt;
-          if (!a.dragging) {
-            a.vx += fx;
-            a.vy += fy;
-          }
-          if (!b.dragging) {
-            b.vx -= fx;
-            b.vy -= fy;
-          }
+          if (!a.dragging) { a.vx += fx; a.vy += fy; }
+          if (!b.dragging) { b.vx -= fx; b.vy -= fy; }
         }
       }
     }
@@ -286,9 +289,9 @@ function ContactGraph() {
     for (let i = 0; i < n; i++) {
       const node = list[i];
       if (node.dragging) continue;
-      const r = rMin + (1 - node.closeness) * (rMax - rMin);
-      const tx = cx + Math.cos(node.angle) * r;
-      const ty = cy + Math.sin(node.angle) * r;
+      const rad = rMin + (1 - people[i].closeness) * (rMax - rMin);
+      const tx = cx + Math.cos(node.angle) * rad;
+      const ty = cy + Math.sin(node.angle) * rad;
       node.vx += ((tx - node.x) * STIFF - node.vx * DAMP) * dt;
       node.vy += ((ty - node.y) * STIFF - node.vy * DAMP) * dt;
       node.x += node.vx * dt;
@@ -297,59 +300,26 @@ function ContactGraph() {
     tick.value = tick.value + 1;
   });
 
-  function reset() {
-    const list = nodes.value;
-    for (let i = 0; i < list.length; i++) list[i].closeness = 0.5;
-    tap(true);
+  function shuffle() {
+    builtRef.current = false;
+    setBuilt(false);
+    setSelected(null);
+    setPeople(makeRoster());
+    buzz(false);
   }
 
-  // ── non-graph states ───────────────────────────────────────────────────────
-  if (phase === 'idle' || phase === 'denied' || phase === 'unavailable') {
-    const denied = phase === 'denied';
-    const unavailable = phase === 'unavailable';
-    return (
-      <View style={styles.center}>
-        <Text style={styles.h1}>Contact graph</Text>
-        <Text style={styles.body}>
-          {unavailable
-            ? 'This sketch needs the contacts native module, which isn’t in the installed build yet. It ships only with a native rebuild (eas build), not an over-the-air update.'
-            : denied
-              ? 'Contacts permission was declined. Grant it in Settings → Privacy → Contacts, then try again. Names are read on-device only and never leave your phone.'
-              : 'Map your contacts as a graph. Tap a person to pull them closer to you; drag anyone out to push them away. Nothing is uploaded or saved — names live only in memory while this screen is open.'}
-        </Text>
-        {!unavailable && (
-          <Pressable style={styles.cta} onPress={load}>
-            <Text style={styles.ctaText}>{denied ? 'Try again' : 'Map my contacts'}</Text>
-          </Pressable>
-        )}
-      </View>
-    );
-  }
+  const sel = selected != null ? people[selected] : null;
 
-  if (phase === 'loading') {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#8a7dff" />
-        <Text style={[styles.body, { marginTop: 16 }]}>Reading contacts…</Text>
-      </View>
-    );
-  }
-
-  // ── the graph ────────────────────────────────────────────────────────────
   return (
     <View style={styles.fill} onLayout={(e) => setBox(e.nativeEvent.layout)}>
       <Canvas style={StyleSheet.absoluteFill}>
         <Fill color="#050509" />
         <Circle c={center} r={120} opacity={0.5}>
-          <RadialGradient
-            c={center}
-            r={120}
-            colors={['#6c5ce755', '#6c5ce700']}
-          />
+          <RadialGradient c={center} r={120} colors={['#6c5ce755', '#6c5ce700']} />
         </Circle>
         {built &&
-          people.map((_, i) => (
-            <NodeLine key={i} i={i} nodes={nodes} tick={tick} geom={geom} />
+          people.map((p, i) => (
+            <NodeLine key={p.id} i={i} closeness={p.closeness} nodes={nodes} tick={tick} geom={geom} />
           ))}
       </Canvas>
 
@@ -361,24 +331,31 @@ function ContactGraph() {
               i={i}
               person={p}
               color={PALETTE[i % PALETTE.length]}
+              selected={selected === i}
               nodes={nodes}
               tick={tick}
-              geom={geom}
+              onTap={setSelected}
             />
           ))}
-        {/* the fixed "you" anchor at the center */}
-        <View pointerEvents="none" style={[styles.you, { left: (box?.width ?? 0) / 2 - 30, top: (box?.height ?? 0) / 2 - 30 }]}>
+        <View
+          pointerEvents="none"
+          style={[
+            styles.you,
+            { left: (box?.width ?? 0) / 2 - 30, top: (box?.height ?? 0) / 2 - 30 },
+          ]}
+        >
           <Text style={styles.youText}>You</Text>
         </View>
       </View>
 
       <View style={styles.bar} pointerEvents="box-none">
-        <Text style={styles.barText}>
-          {total > NODE_CAP ? `${NODE_CAP} of ${total}` : `${people.length}`} contacts · tap to pull
-          closer, drag to place
+        <Text style={styles.barText} numberOfLines={1}>
+          {sel
+            ? `${sel.name} · ${sel.count} texts (simulated)`
+            : `${people.length} fake contacts · clustered by simulated texts`}
         </Text>
-        <Pressable style={styles.reset} onPress={reset}>
-          <Text style={styles.resetText}>Reset</Text>
+        <Pressable style={styles.btn} onPress={shuffle}>
+          <Text style={styles.btnText}>Shuffle</Text>
         </Pressable>
       </View>
     </View>
@@ -387,45 +364,16 @@ function ContactGraph() {
 
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#050509' },
-  center: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 32,
-    backgroundColor: '#050509',
-  },
-  h1: { color: '#fff', fontSize: 24, fontWeight: '700', marginBottom: 14 },
-  body: {
-    color: 'rgba(255,255,255,0.62)',
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: 'center',
-  },
-  cta: {
-    marginTop: 28,
-    backgroundColor: '#6c5ce7',
-    paddingHorizontal: 26,
-    paddingVertical: 14,
-    borderRadius: 16,
-  },
-  ctaText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  node: {
-    position: 'absolute',
-    width: NODE_W,
-    height: NODE_H,
-    alignItems: 'center',
-  },
+  node: { position: 'absolute', width: NODE_W, height: NODE_H, alignItems: 'center' },
   dot: {
-    width: DOT_R * 2,
-    height: DOT_R * 2,
-    borderRadius: DOT_R,
     alignItems: 'center',
     justifyContent: 'center',
+    borderColor: '#fff',
     shadowOpacity: 0.7,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 0 },
   },
-  initials: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  initials: { color: '#fff', fontSize: 12, fontWeight: '700' },
   label: {
     color: 'rgba(255,255,255,0.82)',
     fontSize: 11,
@@ -456,22 +404,22 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 16,
   },
-  barText: { color: '#6a6a7e', fontSize: 12, flexShrink: 1 },
-  reset: {
+  barText: { color: '#8a8a9e', fontSize: 12, flexShrink: 1 },
+  btn: {
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.25)',
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 7,
   },
-  resetText: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '600' },
+  btnText: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '600' },
 });
 
 const sketch: Sketch = {
   id: 'contact-graph',
   title: 'Contact graph',
   description:
-    'Your contacts as a force graph — tap to pull people closer, drag to place. Read on-device only, never uploaded.',
+    'Thought experiment: fake contacts clustered by simulated texts sent — closer = more. No real data, pure JS.',
   order: 80,
   Component: ContactGraph,
 };

@@ -7,6 +7,7 @@ import {
 } from 'react-native-vision-camera';
 import { ColorsStudy } from '../studies/cameraColors';
 import { LightSpaceStudy } from '../studies/cameraLightSpace';
+import { SceneReadStudy } from '../studies/cameraSceneRead';
 import type { Sketch } from './types';
 
 // Camera studies — a harness over the live preview, like Explosion studies but
@@ -21,6 +22,7 @@ import type { Sketch } from './types';
 const STUDIES = [
   { key: 'colors', label: 'Colors' },
   { key: 'light', label: 'Light & space' },
+  { key: 'scene', label: 'Scene read' },
 ] as const;
 type StudyKey = (typeof STUDIES)[number]['key'];
 
@@ -58,6 +60,8 @@ function CameraStudies() {
         <ColorsStudy device={device} />
       ) : active === 'light' ? (
         <LightSpaceStudy device={device} />
+      ) : active === 'scene' ? (
+        <SceneReadStudy device={device} />
       ) : (
         <Camera style={StyleSheet.absoluteFill} device={device} isActive />
       )}

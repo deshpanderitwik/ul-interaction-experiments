@@ -25,7 +25,7 @@ const APP = process.env.APP ?? 'ulsketches';
 // then paste that id below. Until it's set, `expo start` works for local
 // preview, but `eas build` / `eas update` need it (they associate the build
 // with an EAS project and an OTA update stream).
-const HELLO_EAS_PROJECT_ID = '';
+const HELLO_EAS_PROJECT_ID = 'e5405cda-2bb9-49cb-8cff-b9d9c4ef97c7';
 
 function helloConfig() {
   const hasProject = HELLO_EAS_PROJECT_ID.length > 0;

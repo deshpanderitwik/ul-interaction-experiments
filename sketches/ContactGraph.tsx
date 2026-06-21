@@ -16,6 +16,7 @@ import Animated, {
   useDerivedValue,
   useFrameCallback,
   useSharedValue,
+  withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 import type { Sketch } from './types';
@@ -118,6 +119,7 @@ function NodeView({
   selected,
   nodes,
   tick,
+  scale,
   onTap,
 }: {
   i: number;
@@ -126,6 +128,7 @@ function NodeView({
   selected: boolean;
   nodes: SharedValue<GNode[]>;
   tick: SharedValue<number>;
+  scale: SharedValue<number>;
   onTap: (i: number) => void;
 }) {
   const r = DOT_MIN + person.closeness * (DOT_MAX - DOT_MIN);
@@ -149,8 +152,10 @@ function NodeView({
     })
     .onChange((e) => {
       const n = nodes.value[i];
-      n.x += e.changeX;
-      n.y += e.changeY;
+      // the layer is scaled, so a screen delta is 1/scale in world units
+      const s = scale.value;
+      n.x += e.changeX / s;
+      n.y += e.changeY / s;
       n.vx = 0;
       n.vy = 0;
     })
@@ -199,18 +204,29 @@ function NodeLine({
   nodes,
   tick,
   geom,
+  scale,
+  tx,
+  ty,
 }: {
   i: number;
   closeness: number;
   nodes: SharedValue<GNode[]>;
   tick: SharedValue<number>;
   geom: SharedValue<{ cx: number; cy: number; rMin: number; rMax: number }>;
+  scale: SharedValue<number>;
+  tx: SharedValue<number>;
+  ty: SharedValue<number>;
 }) {
-  const p1 = useDerivedValue(() => vec(geom.value.cx, geom.value.cy));
+  // screen = center + scale*(world - center) + pan — must match the RN layer
+  const p1 = useDerivedValue(() =>
+    vec(geom.value.cx + tx.value, geom.value.cy + ty.value),
+  );
   const p2 = useDerivedValue(() => {
     tick.value;
     const n = nodes.value[i];
-    return vec(n.x, n.y);
+    const { cx, cy } = geom.value;
+    const s = scale.value;
+    return vec(cx + s * (n.x - cx) + tx.value, cy + s * (n.y - cy) + ty.value);
   });
   return (
     <Line
@@ -233,7 +249,61 @@ function ContactGraph() {
   const nodes = useSharedValue<GNode[]>([]);
   const tick = useSharedValue(0);
   const geom = useSharedValue({ cx: 0, cy: 0, rMin: 0, rMax: 0 });
-  const center = useDerivedValue(() => vec(geom.value.cx, geom.value.cy));
+
+  // view transform: scale about the center "you" node, pan by (tx, ty)
+  const scale = useSharedValue(1);
+  const tx = useSharedValue(0);
+  const ty = useSharedValue(0);
+  const baseScale = useSharedValue(1);
+  const baseTx = useSharedValue(0);
+  const baseTy = useSharedValue(0);
+
+  const centerScreen = useDerivedValue(() =>
+    vec(geom.value.cx + tx.value, geom.value.cy + ty.value),
+  );
+  const glowR = useDerivedValue(() => 120 * scale.value);
+
+  const layerStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: tx.value },
+      { translateY: ty.value },
+      { scale: scale.value },
+    ],
+  }));
+
+  // pinch to zoom + two-finger drag to pan + double-tap to reset
+  const pinch = Gesture.Pinch()
+    .onUpdate((e) => {
+      scale.value = clamp(baseScale.value * e.scale, 0.6, 4);
+    })
+    .onEnd(() => {
+      baseScale.value = scale.value;
+    });
+
+  const panView = Gesture.Pan()
+    .minPointers(2)
+    .onUpdate((e) => {
+      tx.value = baseTx.value + e.translationX;
+      ty.value = baseTy.value + e.translationY;
+    })
+    .onEnd(() => {
+      baseTx.value = tx.value;
+      baseTy.value = ty.value;
+    });
+
+  const reset = Gesture.Tap()
+    .numberOfTaps(2)
+    .onStart(() => {
+      scale.value = withTiming(1);
+      tx.value = withTiming(0);
+      ty.value = withTiming(0);
+      baseScale.value = 1;
+      baseTx.value = 0;
+      baseTy.value = 0;
+      runOnJS(buzz)(true);
+    });
+
+  const viewGesture = Gesture.Simultaneous(pinch, panView, reset);
 
   // (re)build the layout when the roster changes or the canvas is first sized
   useEffect(() => {
@@ -312,47 +382,62 @@ function ContactGraph() {
 
   return (
     <View style={styles.fill} onLayout={(e) => setBox(e.nativeEvent.layout)}>
-      <Canvas style={StyleSheet.absoluteFill}>
-        <Fill color="#050509" />
-        <Circle c={center} r={120} opacity={0.5}>
-          <RadialGradient c={center} r={120} colors={['#6c5ce755', '#6c5ce700']} />
-        </Circle>
-        {built &&
-          people.map((p, i) => (
-            <NodeLine key={p.id} i={i} closeness={p.closeness} nodes={nodes} tick={tick} geom={geom} />
-          ))}
-      </Canvas>
+      <GestureDetector gesture={viewGesture}>
+        <View style={StyleSheet.absoluteFill}>
+          <Canvas style={StyleSheet.absoluteFill}>
+            <Fill color="#050509" />
+            <Circle c={centerScreen} r={glowR} opacity={0.5}>
+              <RadialGradient c={centerScreen} r={glowR} colors={['#6c5ce755', '#6c5ce700']} />
+            </Circle>
+            {built &&
+              people.map((p, i) => (
+                <NodeLine
+                  key={p.id}
+                  i={i}
+                  closeness={p.closeness}
+                  nodes={nodes}
+                  tick={tick}
+                  geom={geom}
+                  scale={scale}
+                  tx={tx}
+                  ty={ty}
+                />
+              ))}
+          </Canvas>
 
-      <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-        {built &&
-          people.map((p, i) => (
-            <NodeView
-              key={p.id}
-              i={i}
-              person={p}
-              color={PALETTE[i % PALETTE.length]}
-              selected={selected === i}
-              nodes={nodes}
-              tick={tick}
-              onTap={setSelected}
-            />
-          ))}
-        <View
-          pointerEvents="none"
-          style={[
-            styles.you,
-            { left: (box?.width ?? 0) / 2 - 30, top: (box?.height ?? 0) / 2 - 30 },
-          ]}
-        >
-          <Text style={styles.youText}>You</Text>
+          <Animated.View style={[StyleSheet.absoluteFill, layerStyle]} pointerEvents="box-none">
+            {built &&
+              people.map((p, i) => (
+                <NodeView
+                  key={p.id}
+                  i={i}
+                  person={p}
+                  color={PALETTE[i % PALETTE.length]}
+                  selected={selected === i}
+                  nodes={nodes}
+                  tick={tick}
+                  scale={scale}
+                  onTap={setSelected}
+                />
+              ))}
+            <View
+              pointerEvents="none"
+              style={[
+                styles.you,
+                { left: (box?.width ?? 0) / 2 - 30, top: (box?.height ?? 0) / 2 - 30 },
+              ]}
+            >
+              <Text style={styles.youText}>You</Text>
+            </View>
+          </Animated.View>
         </View>
-      </View>
+      </GestureDetector>
 
       <View style={styles.bar} pointerEvents="box-none">
         <Text style={styles.barText} numberOfLines={1}>
           {sel
             ? `${sel.name} · ${sel.count} texts (simulated)`
-            : `${people.length} fake contacts · clustered by simulated texts`}
+            : `${people.length} fake contacts · pinch to zoom · two-finger pan · double-tap to reset`}
         </Text>
         <Pressable style={styles.btn} onPress={shuffle}>
           <Text style={styles.btnText}>Shuffle</Text>

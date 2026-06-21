@@ -20,14 +20,32 @@ import UpdateButton from '../components/UpdateButton';
 import { sketches } from '../sketches/registry';
 import type { Sketch } from '../sketches/types';
 
-// A slow, shifting aurora gradient drawn in Skia (already in the native build,
-// so this ships over-the-air). A handful of large, soft radial blobs drift on
-// the dark base; the smoothness is what lets the translucent cards above read
-// as glass without a native blur module.
+// per-card accent palette — each sketch gets its own colour so the cards read
+// as distinct
+const ACCENTS = [
+  '#6c5ce7',
+  '#00d2a8',
+  '#3b5bff',
+  '#ff7a00',
+  '#ff2d6b',
+  '#b14bff',
+  '#21d4fd',
+  '#ffd23f',
+];
+
+// '#rrggbb' + alpha → rgba() string
+function tint(hex: string, a: number) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+// A slow, shifting aurora gradient drawn in Skia — kept very dark/subtle here,
+// just faint hints of colour drifting on near-black. Skia is already in the
+// native build, so this ships over-the-air.
 function ShiftingBackdrop() {
   const { width: W, height: H } = useWindowDimensions();
   const clock = useClock();
-  const R = Math.max(W, H) * 0.9;
+  const R = Math.max(W, H) * 0.85;
 
   const cA = useDerivedValue(() =>
     vec(
@@ -56,17 +74,17 @@ function ShiftingBackdrop() {
 
   return (
     <Canvas style={StyleSheet.absoluteFill}>
-      <Fill color="#07070b" />
-      <Circle c={cA} r={R} opacity={0.5} blendMode="screen">
+      <Fill color="#040405" />
+      <Circle c={cA} r={R} opacity={0.16} blendMode="screen">
         <RadialGradient c={cA} r={R} colors={['#6c5ce7', '#6c5ce700']} />
       </Circle>
-      <Circle c={cB} r={R} opacity={0.42} blendMode="screen">
+      <Circle c={cB} r={R} opacity={0.13} blendMode="screen">
         <RadialGradient c={cB} r={R} colors={['#00d2a8', '#00d2a800']} />
       </Circle>
-      <Circle c={cC} r={R} opacity={0.45} blendMode="screen">
+      <Circle c={cC} r={R} opacity={0.14} blendMode="screen">
         <RadialGradient c={cC} r={R} colors={['#3b5bff', '#3b5bff00']} />
       </Circle>
-      <Circle c={cD} r={R} opacity={0.32} blendMode="screen">
+      <Circle c={cD} r={R} opacity={0.09} blendMode="screen">
         <RadialGradient c={cD} r={R} colors={['#b14bff', '#b14bff00']} />
       </Circle>
     </Canvas>
@@ -105,24 +123,45 @@ export default function Home() {
               {sketches.length === 1 ? '' : 's'}
             </Text>
           }
-          renderItem={({ item }) => (
-            <View style={item.child ? styles.childWrap : undefined}>
-              <Link href={`/sketch/${item.sketch.id}`} asChild>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.card,
-                    item.child && styles.cardChild,
-                    pressed && styles.cardPressed,
-                  ]}
-                >
-                  <Text style={[styles.title, item.child && styles.titleChild]}>
-                    {item.sketch.title}
-                  </Text>
-                  <Text style={styles.desc}>{item.sketch.description}</Text>
-                </Pressable>
-              </Link>
-            </View>
-          )}
+          renderItem={({ item, index }) => {
+            const accent = ACCENTS[index % ACCENTS.length];
+            return (
+              <View
+                style={
+                  item.child
+                    ? [styles.childWrap, { borderLeftColor: tint(accent, 0.55) }]
+                    : undefined
+                }
+              >
+                <Link href={`/sketch/${item.sketch.id}`} asChild>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.card,
+                      item.child && styles.cardChild,
+                      {
+                        backgroundColor: tint(accent, item.child ? 0.06 : 0.09),
+                        borderColor: tint(accent, 0.4),
+                      },
+                      pressed && [
+                        styles.cardPressed,
+                        { backgroundColor: tint(accent, 0.16) },
+                      ],
+                    ]}
+                  >
+                    <View style={styles.titleRow}>
+                      <View style={[styles.dot, { backgroundColor: accent }]} />
+                      <Text
+                        style={[styles.title, item.child && styles.titleChild]}
+                      >
+                        {item.sketch.title}
+                      </Text>
+                    </View>
+                    <Text style={styles.desc}>{item.sketch.description}</Text>
+                  </Pressable>
+                </Link>
+              </View>
+            );
+          }}
         />
       </View>
     </>
@@ -130,7 +169,7 @@ export default function Home() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#07070b' },
+  root: { flex: 1, backgroundColor: '#040405' },
   list: { flex: 1, backgroundColor: 'transparent' },
   content: { padding: 16, paddingTop: 8 },
   lead: {
@@ -139,31 +178,27 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     marginLeft: 4,
   },
-  // glass card: translucent fill + hairline border + soft shadow over the gradient
+  // glass card: accent-tinted translucent fill + accent border + soft shadow
   card: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
     padding: 18,
     marginBottom: 14,
     shadowColor: '#000',
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.4,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
   },
-  cardChild: { backgroundColor: 'rgba(255,255,255,0.04)', padding: 14 },
-  cardPressed: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    transform: [{ scale: 0.985 }],
-  },
+  cardChild: { padding: 14 },
+  cardPressed: { transform: [{ scale: 0.985 }] },
   childWrap: {
     marginLeft: 20,
     borderLeftWidth: 2,
-    borderLeftColor: 'rgba(108,92,231,0.45)',
     paddingLeft: 12,
   },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  dot: { width: 9, height: 9, borderRadius: 5 },
   title: { color: '#fff', fontSize: 18, fontWeight: '600' },
   titleChild: { fontSize: 16 },
-  desc: { color: 'rgba(255,255,255,0.62)', fontSize: 14, marginTop: 4 },
+  desc: { color: 'rgba(255,255,255,0.62)', fontSize: 14, marginTop: 5 },
 });

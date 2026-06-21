@@ -81,6 +81,7 @@ const sketch: Sketch = {
   id: 'haptic-grid',
   title: 'Haptic grid',
   description: 'Drag-to-feel: fires a haptic tick each time you cross a cell.',
+  order: 40,
   Component: HapticGrid,
 };
 

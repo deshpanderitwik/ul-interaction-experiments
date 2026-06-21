@@ -29,7 +29,13 @@
     },
     "plugins": [
       "expo-router",
-      "expo-updates"
+      "expo-updates",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Allow $(PRODUCT_NAME) to read your contacts so it can lay them out as an interaction graph. Names stay on your device — they're never uploaded or saved."
+        }
+      ]
     ],
     "runtimeVersion": {
       "policy": "appVersion"

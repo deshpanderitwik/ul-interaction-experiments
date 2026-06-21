@@ -6,6 +6,7 @@ import {
   useCameraPermission,
 } from 'react-native-vision-camera';
 import { ColorsStudy } from '../studies/cameraColors';
+import { LightSpaceStudy } from '../studies/cameraLightSpace';
 import type { Sketch } from './types';
 
 // Camera studies — a harness over the live preview, like Explosion studies but
@@ -17,7 +18,10 @@ import type { Sketch } from './types';
 // Each study owns its own camera + frame processor and is mounted only while
 // active — so the expensive `useFrameOutput` worklet runtime never spins up on
 // the bare-preview path.
-const STUDIES = [{ key: 'colors', label: 'Colors' }] as const;
+const STUDIES = [
+  { key: 'colors', label: 'Colors' },
+  { key: 'light', label: 'Light & space' },
+] as const;
 type StudyKey = (typeof STUDIES)[number]['key'];
 
 function CameraStudies() {
@@ -52,6 +56,8 @@ function CameraStudies() {
     <View style={styles.fill}>
       {active === 'colors' ? (
         <ColorsStudy device={device} />
+      ) : active === 'light' ? (
+        <LightSpaceStudy device={device} />
       ) : (
         <Camera style={StyleSheet.absoluteFill} device={device} isActive />
       )}

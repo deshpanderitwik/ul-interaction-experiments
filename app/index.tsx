@@ -6,7 +6,7 @@ import {
   useClock,
   vec,
 } from '@shopify/react-native-skia';
-import { Link } from 'expo-router';
+import { Link, Stack } from 'expo-router';
 import {
   FlatList,
   Pressable,
@@ -16,6 +16,7 @@ import {
   View,
 } from 'react-native';
 import { useDerivedValue } from 'react-native-reanimated';
+import UpdateButton from '../components/UpdateButton';
 import { sketches } from '../sketches/registry';
 import type { Sketch } from '../sketches/types';
 
@@ -86,42 +87,45 @@ const rows: Row[] = sketches
 
 export default function Home() {
   return (
-    <View style={styles.root}>
-      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-        <ShiftingBackdrop />
+    <>
+      <Stack.Screen options={{ headerRight: () => <UpdateButton /> }} />
+      <View style={styles.root}>
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <ShiftingBackdrop />
+        </View>
+        <FlatList
+          style={styles.list}
+          contentContainerStyle={styles.content}
+          data={rows}
+          keyExtractor={(r) => r.sketch.id}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            <Text style={styles.lead}>
+              {sketches.length} interaction experiment
+              {sketches.length === 1 ? '' : 's'}
+            </Text>
+          }
+          renderItem={({ item }) => (
+            <View style={item.child ? styles.childWrap : undefined}>
+              <Link href={`/sketch/${item.sketch.id}`} asChild>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.card,
+                    item.child && styles.cardChild,
+                    pressed && styles.cardPressed,
+                  ]}
+                >
+                  <Text style={[styles.title, item.child && styles.titleChild]}>
+                    {item.sketch.title}
+                  </Text>
+                  <Text style={styles.desc}>{item.sketch.description}</Text>
+                </Pressable>
+              </Link>
+            </View>
+          )}
+        />
       </View>
-      <FlatList
-        style={styles.list}
-        contentContainerStyle={styles.content}
-        data={rows}
-        keyExtractor={(r) => r.sketch.id}
-        showsVerticalScrollIndicator={false}
-        ListHeaderComponent={
-          <Text style={styles.lead}>
-            {sketches.length} interaction experiment
-            {sketches.length === 1 ? '' : 's'}
-          </Text>
-        }
-        renderItem={({ item }) => (
-          <View style={item.child ? styles.childWrap : undefined}>
-            <Link href={`/sketch/${item.sketch.id}`} asChild>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.card,
-                  item.child && styles.cardChild,
-                  pressed && styles.cardPressed,
-                ]}
-              >
-                <Text style={[styles.title, item.child && styles.titleChild]}>
-                  {item.sketch.title}
-                </Text>
-                <Text style={styles.desc}>{item.sketch.description}</Text>
-              </Pressable>
-            </Link>
-          </View>
-        )}
-      />
-    </View>
+    </>
   );
 }
 

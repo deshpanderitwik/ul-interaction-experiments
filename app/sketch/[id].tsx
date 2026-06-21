@@ -1,10 +1,78 @@
+import { Canvas, Circle, Path, Skia } from '@shopify/react-native-skia';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { useEffect, useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { getSketch } from '../../sketches/registry';
+
+// A crisp monochrome eye, drawn with Skia so it needs no icon font and ships
+// over-the-air on the existing native build.
+//
+// Skia's <Canvas> is a native Metal view whose first frame is opaque — against
+// the dark header that reads as a white flash on every mount. We render it
+// transparent (opaque={false}) and fade it in once it has painted, so the
+// opaque first frame happens while invisible.
+function EyeIcon({ color = '#e8e8f0', size = 24 }: { color?: string; size?: number }) {
+  const outline = useMemo(() => {
+    const p = Skia.Path.Make();
+    p.moveTo(3, 12);
+    p.quadTo(12, 4, 21, 12);
+    p.quadTo(12, 20, 3, 12);
+    p.close();
+    return p;
+  }, []);
+
+  const opacity = useSharedValue(0);
+  useEffect(() => {
+    opacity.value = withTiming(1, { duration: 120 });
+  }, [opacity]);
+  const fade = useAnimatedStyle(() => ({ opacity: opacity.value }));
+
+  return (
+    <Animated.View style={[{ width: size, height: size }, fade]}>
+      <Canvas style={{ flex: 1 }} opaque={false}>
+        <Path
+          path={outline}
+          color={color}
+          style="stroke"
+          strokeWidth={2}
+          strokeJoin="round"
+          strokeCap="round"
+        />
+        <Circle cx={12} cy={12} r={3.4} color={color} style="stroke" strokeWidth={2} />
+      </Canvas>
+    </Animated.View>
+  );
+}
 
 export default function SketchScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const sketch = getSketch(id);
+  // "Immersive" = chrome hidden, ready for a clean iOS screen recording.
+  const [immersive, setImmersive] = useState(false);
+  const insets = useSafeAreaInsets();
+  // Press-and-hold the top-right corner to bring the chrome back. A long-press
+  // (not a tap) on purpose: the sketches underneath claim the whole screen with
+  // their own single-tap / pan handlers, and a tap-based restore loses that
+  // race. A stationary ~500ms hold doesn't trigger a pan (no movement) and
+  // outlasts a tap, so it reliably wins — and a stray quick tap mid-recording
+  // never reveals the UI.
+  const restoreGesture = useMemo(
+    () =>
+      Gesture.LongPress()
+        .minDuration(500)
+        .maxDistance(20)
+        .runOnJS(true)
+        .onStart(() => setImmersive(false)),
+    [],
+  );
 
   if (!sketch) {
     return (
@@ -17,8 +85,35 @@ export default function SketchScreen() {
   const { Component, title } = sketch;
   return (
     <View style={styles.fill}>
-      <Stack.Screen options={{ title }} />
+      <Stack.Screen
+        options={{
+          title,
+          headerShown: !immersive,
+          // Just the back chevron, no "Sketches" label.
+          headerBackButtonDisplayMode: 'minimal',
+          // Eye toggle lives on the top bar; tap to hide all chrome.
+          headerRight: () => (
+            <Pressable onPress={() => setImmersive(true)} hitSlop={12} style={styles.eyeBtn}>
+              <EyeIcon />
+            </Pressable>
+          ),
+        }}
+      />
+      <StatusBar style="light" hidden={immersive} animated />
+
       <Component />
+
+      {/* In immersive mode the eye is gone with the header; a transparent
+          top-right hotspot restores the chrome on a long-press. collapsable
+          keeps the empty view in the native tree so it stays hittable. */}
+      {immersive && (
+        <GestureDetector gesture={restoreGesture}>
+          <View
+            collapsable={false}
+            style={[styles.restoreHotspot, { top: insets.top, right: insets.right }]}
+          />
+        </GestureDetector>
+      )}
     </View>
   );
 }
@@ -32,4 +127,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#0b0b0f',
   },
   missingText: { color: '#8a8a99', fontSize: 16 },
+  eyeBtn: { paddingHorizontal: 4, paddingVertical: 4 },
+  restoreHotspot: { position: 'absolute', width: 160, height: 140, zIndex: 50 },
 });

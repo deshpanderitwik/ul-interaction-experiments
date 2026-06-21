@@ -1,0 +1,450 @@
+<!doctype html>
+<!--
+  Strategy microsite. Static, dependency-free, mobile-first.
+  Source of truth for the words lives in /MARKETING.md at the repo root;
+  this is the nicely-designed reading surface. Served via GitHub Pages (/docs).
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Strategy — Interfaces that don't exist yet</title>
+  <meta name="description" content="Marketing & positioning strategy: touch-native experimental interfaces as art." />
+  <meta name="theme-color" content="#0E0E0C" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <style>
+    :root {
+      --bg: #0E0E0C;
+      --bg-elev: #17160F;
+      --text: #ECE7DC;
+      --muted: #9C9588;
+      --faint: #6E685D;
+      --accent: #F0B66A;
+      --accent-soft: rgba(240, 182, 106, 0.12);
+      --line: rgba(255, 255, 255, 0.08);
+      --line-strong: rgba(255, 255, 255, 0.14);
+      --max: 720px;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 17px;
+      line-height: 1.65;
+      letter-spacing: 0.002em;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+
+    /* Signature film-grain overlay — the brand's recurring texture. */
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: 9998;
+      pointer-events: none;
+      opacity: 0.04;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+
+    /* Reading progress bar */
+    #progress {
+      position: fixed;
+      top: 0; left: 0;
+      height: 2px;
+      width: 0%;
+      background: var(--accent);
+      z-index: 9999;
+      transition: width 0.08s linear;
+    }
+
+    .wrap {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 0 22px 96px;
+    }
+
+    /* Hero */
+    header.hero {
+      padding: 64px 0 40px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 8px;
+    }
+    .eyebrow {
+      font-size: 12.5px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin: 0 0 18px;
+      font-weight: 600;
+    }
+    h1 {
+      font-size: clamp(34px, 9vw, 52px);
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+      margin: 0 0 14px;
+      font-weight: 700;
+    }
+    .thesis {
+      font-size: clamp(18px, 4.5vw, 21px);
+      color: var(--muted);
+      margin: 0 0 24px;
+      font-style: italic;
+    }
+    .meta {
+      font-size: 13.5px;
+      color: var(--faint);
+      line-height: 1.7;
+    }
+
+    /* Quick nav */
+    nav.toc {
+      margin: 28px 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--bg-elev);
+      overflow: hidden;
+    }
+    nav.toc summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 14px 18px;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    nav.toc summary::-webkit-details-marker { display: none; }
+    nav.toc[open] summary { border-bottom: 1px solid var(--line); }
+    nav.toc ol {
+      margin: 0;
+      padding: 8px 18px 16px;
+      list-style: none;
+      counter-reset: toc;
+    }
+    nav.toc li { counter-increment: toc; }
+    nav.toc a {
+      display: block;
+      padding: 7px 0;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 15.5px;
+      border-bottom: 1px solid transparent;
+    }
+    nav.toc a::before {
+      content: counter(toc, decimal-leading-zero);
+      color: var(--accent);
+      font-family: var(--mono);
+      font-size: 12px;
+      margin-right: 12px;
+    }
+    nav.toc a:active { color: var(--accent); }
+
+    /* Sections */
+    section {
+      padding: 40px 0 8px;
+      scroll-margin-top: 24px;
+      border-top: 1px solid var(--line);
+    }
+    section:first-of-type { border-top: none; }
+    .num {
+      font-family: var(--mono);
+      font-size: 12.5px;
+      color: var(--accent);
+      letter-spacing: 0.1em;
+      display: block;
+      margin-bottom: 10px;
+    }
+    h2 {
+      font-size: clamp(23px, 6vw, 29px);
+      line-height: 1.18;
+      letter-spacing: -0.015em;
+      margin: 0 0 18px;
+      font-weight: 700;
+    }
+    h3 {
+      font-size: 16.5px;
+      margin: 26px 0 8px;
+      font-weight: 650;
+      color: var(--text);
+    }
+    p { margin: 0 0 16px; }
+    a { color: var(--accent); }
+    strong { color: #fff; font-weight: 650; }
+    em { color: var(--text); }
+
+    ul, ol.body { margin: 0 0 18px; padding-left: 22px; }
+    li { margin: 0 0 9px; }
+    li::marker { color: var(--accent); }
+
+    .quote {
+      margin: 22px 0;
+      padding: 4px 0 4px 20px;
+      border-left: 3px solid var(--accent);
+      font-size: clamp(18px, 4.6vw, 21px);
+      line-height: 1.45;
+      color: #fff;
+      font-weight: 500;
+    }
+
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 700;
+      padding: 3px 9px;
+      border-radius: 999px;
+      vertical-align: middle;
+      margin-left: 8px;
+    }
+    .badge.locked { background: var(--accent-soft); color: var(--accent); }
+    .badge.working { background: rgba(255,255,255,0.06); color: var(--muted); }
+
+    .card {
+      background: var(--bg-elev);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px 18px 6px;
+      margin: 18px 0;
+    }
+    .card h3 { margin-top: 6px; }
+
+    code, .spec {
+      font-family: var(--mono);
+      font-size: 14px;
+      background: rgba(255,255,255,0.06);
+      padding: 1px 6px;
+      border-radius: 5px;
+    }
+
+    .kicker { color: var(--accent); font-weight: 650; }
+
+    footer {
+      margin-top: 56px;
+      padding-top: 24px;
+      border-top: 1px solid var(--line);
+      color: var(--faint);
+      font-size: 13.5px;
+      line-height: 1.7;
+    }
+    .toplink {
+      display: inline-block;
+      margin-top: 14px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div id="progress"></div>
+  <div class="wrap">
+
+    <header class="hero">
+      <p class="eyebrow">Marketing &amp; Positioning Strategy</p>
+      <h1>Interfaces that don't exist yet.</h1>
+      <p class="thesis">A future you can feel.</p>
+      <p class="meta">
+        A living strategy for building this project distribution-first on X.<br />
+        Niche: <strong>touch-native experimental interfaces as art.</strong><br />
+        Engine: a mobile (iOS / Expo + Skia) interaction sketchbook.
+      </p>
+
+      <nav class="toc">
+        <details>
+          <summary>Contents</summary>
+          <ol>
+            <li><a href="#reframe">The core reframe</a></li>
+            <li><a href="#niche">The niche</a></li>
+            <li><a href="#platform">Platform decision</a></li>
+            <li><a href="#competition">Competitive analysis</a></li>
+            <li><a href="#selling">What you're really selling</a></li>
+            <li><a href="#flag">The flag + thesis</a></li>
+            <li><a href="#truth">What you actually obsess over</a></li>
+            <li><a href="#vocabulary">Visual vocabulary</a></li>
+            <li><a href="#pillars">Content pillars</a></li>
+            <li><a href="#flagship">First flagship piece</a></li>
+            <li><a href="#cadence">Cadence &amp; format</a></li>
+            <li><a href="#capture">Capture pipeline</a></li>
+          </ol>
+        </details>
+      </nav>
+    </header>
+
+    <section id="reframe">
+      <span class="num">01</span>
+      <h2>Distribution-first changes the definition of done</h2>
+      <p>The problem to solve: a maker-first habit of building things to a point where they're <em>"not that shareable."</em></p>
+      <p>The fix: a sketch isn't done when it works — it's done when <strong>there's a clip posted to X.</strong> The build is the input; <strong>the post is the deliverable.</strong> "Not shareable" stops being a valid terminal state.</p>
+      <div class="quote">Sharing your work increases your opportunity surface area. — Emil Kowalski</div>
+    </section>
+
+    <section id="niche">
+      <span class="num">02</span>
+      <h2>The niche <span class="badge locked">Locked</span></h2>
+      <p>It evolved across the conversation: haptics → experimental/spectacle → finally:</p>
+      <div class="quote">Touch-native experimental interfaces as art — genuinely beautiful, novel interactions that show what a phone can do when pushed, at the intersection of interaction design and art direction.</div>
+      <ul>
+        <li><strong>Not</strong> about haptics or a TestFlight funnel.</li>
+        <li><strong>Not</strong> the crowded craft/polish lane (Puckett, Kowalski, Freiberg, Coursey).</li>
+        <li><strong>Not</strong> the cold dev-first WebGL lane (DesLauriers, Awwwards/Codrops crowd).</li>
+      </ul>
+      <h3>The wedge</h3>
+      <p>The spectacle world is mostly <em>developer-first</em> (great tech, weak art direction, demos not interfaces) and <em>web/desktop</em>. Almost nobody does <strong>technically ambitious spectacle that's genuinely interaction-designed AND art-directed, on mobile, driven by touch.</strong> That intersection is open.</p>
+    </section>
+
+    <section id="platform">
+      <span class="num">03</span>
+      <h2>Platform decision: mobile-native <span class="badge locked">Locked</span></h2>
+      <p>Chosen deliberately over web/WebGL. Constraints turned into edges:</p>
+      <ul>
+        <li><span class="kicker">Video-only</span> → vertical video <strong>is</strong> the native X format; cross-posts free to Reels / TikTok / Shorts.</li>
+        <li><span class="kicker">The phone is the subject, not the constraint</span> → the viewer watches on the exact device the work is for. "My thumb could be doing that."</li>
+        <li><span class="kicker">Touch is the moat</span> → multitouch, pressure, momentum — what a mouse (the whole WebGL crowd) structurally can't show.</li>
+      </ul>
+      <h3>Honest costs</h3>
+      <p>No live "playable link" (the video does 100% of the work → production value is mandatory); lower top-end vs desktop GPU; you must become excellent at capture. Note: Skia's SkSL shaders + Reanimated mean the mobile ceiling is higher than people assume.</p>
+    </section>
+
+    <section id="competition">
+      <span class="num">04</span>
+      <h2>Competitive analysis</h2>
+      <p>Case study: Josh Puckett's launch post for "Means &amp; Methods" (Interface Craft).</p>
+      <ul>
+        <li>A successful launch post is a <strong>harvest, not a seed</strong> — it converts years of compounded attention. No trick in the tweet.</li>
+        <li><strong>Ferocious positioning wins.</strong> Everything rolls up to one ownable flag: <em>"uncommon care."</em></li>
+        <li><strong>The medium is the portfolio</strong> — the product demonstrates the skill it sells; no gap between claim and proof.</li>
+        <li><strong>The peer graph is the real "surface area"</strong> — a cluster of high-craft people amplifying each other.</li>
+      </ul>
+      <p><strong>What you can't copy:</strong> his two decades + pedigree + compounded audience + paid product. Don't fight head-on — take the adjacent, uncrowded mobile/touch lane.</p>
+    </section>
+
+    <section id="selling">
+      <span class="num">05</span>
+      <h2>What you're really selling</h2>
+      <p>A personal brand is a company of one. Apple→taste, Stripe→care, Disney→nostalgia. The rules:</p>
+      <ul>
+        <li><strong>Sell the feeling, not the thing.</strong> The "thing" is Skia interactions; the brand is the feeling they leave.</li>
+        <li><strong>Skip your own marketing words.</strong> "Experimental / novel / stunning" are self-narration — the surface. Drop them.</li>
+        <li><strong>Plain words can be deepest</strong> (Stripe sells <em>care</em>, not "craft").</li>
+        <li><strong>Having a trait isn't selling it.</strong> Technical skill is a trait, not the brand.</li>
+        <li><strong>The truth test = where your effort actually goes.</strong> The brand is only true if revealed behavior matches it.</li>
+        <li><strong>A too-hard decision is a clue</strong> you haven't resolved what you sell.</li>
+      </ul>
+      <div class="card">
+        <h3>Name the payer's feeling — there are two buyers</h3>
+        <p><strong>The scroller</strong> (free, drives reach) feels <em>wonder + desire</em> — "why isn't my phone like this?" This is Disney's <em>magic</em>: manufacturable, makes the clip travel.</p>
+        <p><strong>The opportunity-giver</strong> (founder / studio / recruiter — the real payer) feels <em>trust in rare taste at the frontier</em> — "this person can see our product's future and make it feel inevitable." This is Disney's <em>nostalgia</em>: the moat, can't be faked, compounds.</p>
+        <p>→ Build the brand around the payer's feeling; use wonder as the distribution engine.</p>
+      </div>
+    </section>
+
+    <section id="flag">
+      <span class="num">06</span>
+      <h2>The flag + thesis <span class="badge working">Working</span></h2>
+      <p><strong>Flag:</strong> "Interfaces that don't exist yet." Plain, not a self-marketing adjective, makes you lean in — the feeling lives underneath.</p>
+      <p><strong>Thesis line:</strong> "a future you can feel."</p>
+      <div class="quote">Disney sells nostalgia — longing backward. This sells the forward version: longing for an interface that should exist but doesn't. Same moat shape; the ache is the product.</div>
+      <p>Alternatives considered: "Futures you can feel," "Make-believe interfaces."</p>
+    </section>
+
+    <section id="truth">
+      <span class="num">07</span>
+      <h2>What you actually obsess over</h2>
+      <p>Self-reported truth test: a mix of <strong>how it feels to use</strong> and <strong>whether the idea is new.</strong></p>
+      <p>→ You sell the <strong>intersection: feel × novelty.</strong> Neither alone works (feel-only = polish; novelty-only = cold demo).</p>
+      <div class="card">
+        <h3>The leak, named</h3>
+        <p>You did <em>not</em> pick <strong>care/finishing</strong> or <strong>virtuosity</strong>. The unloved finishing 10% — sound, the perfect loop, the grade, the cut — is exactly what converts a felt new idea into a <em>stunning, shareable</em> artifact, and exactly what the maker-first self skips. <strong>Importing finishing-discipline is the key habit to build.</strong></p>
+      </div>
+    </section>
+
+    <section id="vocabulary">
+      <span class="num">08</span>
+      <h2>Visual vocabulary — "film stock" <span class="badge working">To refine</span></h2>
+      <p>Direction: <strong>"Warm computational"</strong> — the future as warm / physical / alive, cutting against both cold sci-fi neon and grey corporate SaaS. Rules that make the feed recognizable with the handle covered:</p>
+      <ul>
+        <li><strong>One stage:</strong> warm near-black (<code>#0E0E0C</code>); a paper-white variant for "daylight" pieces.</li>
+        <li><strong>One accent per piece</strong>, from a tight curated palette — restraint = recognizability.</li>
+        <li><strong>A signature texture:</strong> subtle film grain / noise on every piece (the texture you're reading on right now).</li>
+        <li><strong>One physics personality:</strong> everything spring-based, nothing linear; touch tracks sub-frame.</li>
+        <li><strong>One idea per frame:</strong> full-bleed, vertical, generous negative space, wow inside 1s.</li>
+        <li><strong>Sound as a first-class layer</strong> — soft, organic, musical, never "UI beep." (This is the care leg you skip → it's a rule, not a preference.)</li>
+      </ul>
+    </section>
+
+    <section id="pillars">
+      <span class="num">09</span>
+      <h2>Content pillars</h2>
+      <ol class="body">
+        <li><strong>Impossible primitives</strong> — a familiar control (slider, toggle, keyboard) behaving like nothing you've seen but feeling inevitable. <em>Best reach-to-effort ratio → open here.</em></li>
+        <li><strong>Living matter</strong> — interfaces made of simulated material (fluid, light, cloth, magnetism) shaped by touch.</li>
+        <li><strong>Gestural grammar</strong> — genuinely new interaction models that only exist because of multitouch. Most defensible.</li>
+      </ol>
+    </section>
+
+    <section id="flagship">
+      <span class="num">10</span>
+      <h2>First flagship piece <span class="badge working">Planned</span></h2>
+      <p><strong>A slider that isn't a slider — value as a living substance.</strong> You push/pull a volume of luminous elastic matter; it tracks finger velocity, overshoots, sloshes, and settles with a wobble and a single satisfying tone.</p>
+      <p>Familiar (legible in 1s) × new (it's matter, not a handle) × feel-forward (velocity / overshoot / sound) × touch-native (the moat) × scoped (actually finishable). Doubles as a stress test of the whole visual vocabulary.</p>
+    </section>
+
+    <section id="cadence">
+      <span class="num">11</span>
+      <h2>Cadence &amp; format</h2>
+      <p><strong>Flagship-driven, not daily.</strong> Spectacle is higher ceiling / higher variance / higher effort. Reputation compounds on the best 3–4 pieces, not on consistency. One jaw-dropper &gt; thirty tidy ones.</p>
+      <h3>Format spec for X</h3>
+      <ul>
+        <li>Vertical <span class="spec">9:16</span>, <span class="spec">1080×1920</span>, <span class="spec">H.264/AAC</span>, up to <span class="spec">60fps</span> (motion is the point — never 30). ≤512MB / ≤140s.</li>
+        <li><strong>Never crop to horizontal:</strong> vertical gets the Immersive Media Viewer (full-screen, sound-on) — the best stage for wonder. Horizontal letterboxes on mobile and kills it.</li>
+        <li><strong>Safe zone:</strong> keep key action centered; keep essentials out of the top/bottom ~12%.</li>
+      </ul>
+      <p>Positioning-as-art disarms the "you could never ship that" critique — claim the art frame explicitly; have a thesis, not just eye candy.</p>
+    </section>
+
+    <section id="capture">
+      <span class="num">12</span>
+      <h2>Capture / distribution pipeline</h2>
+      <ul>
+        <li>An in-app recorder was deemed overkill. Chosen: a <strong>"hide chrome" affordance + the iOS Control Center recorder</strong> (vertical video → Photos → post to X).</li>
+        <li><strong>Shipped (OTA):</strong> an eye toggle in the sketch top bar — tap to hide header + status bar; double-tap top-right to restore; back button is just the chevron. Reusable across every sketch.</li>
+        <li><strong>Start today, zero build:</strong> iOS Control Center recording captures full-res with in-app audio + grain, straight to Photos.</li>
+        <li><strong>Capture quality is part of the product</strong> (no playable link to fall back on): 60fps, sound design, color/grade, perfect loops.</li>
+      </ul>
+    </section>
+
+    <footer>
+      <p><strong>Open next:</strong> lock the flag &amp; thesis · lock the visual vocabulary + accent palette · build the living-slider flagship · bio / handle / pinned post · build finishing-discipline (the named leak).</p>
+      <p>Source of truth for the text: <code>/MARKETING.md</code>. This page is the reading surface.</p>
+      <a class="toplink" href="#top">↑ Back to top</a>
+    </footer>
+
+  </div>
+
+  <script>
+    // Reading progress bar — the only JS, ~10 lines.
+    var bar = document.getElementById('progress');
+    function update() {
+      var h = document.documentElement;
+      var scrolled = h.scrollTop || document.body.scrollTop;
+      var height = h.scrollHeight - h.clientHeight;
+      bar.style.width = (height > 0 ? (scrolled / height) * 100 : 0) + '%';
+    }
+    document.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    update();
+  </script>
+</body>
+</html>

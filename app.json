@@ -12,6 +12,9 @@
       "bundleIdentifier": "com.ritdeshpande.ulsketches",
       "config": {
         "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app needs camera access for camera-based sketches."
       }
     },
     "android": {

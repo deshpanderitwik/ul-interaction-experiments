@@ -8,7 +8,7 @@ import {
   vec,
 } from '@shopify/react-native-skia';
 import { useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
@@ -76,10 +76,13 @@ function SwipeTrail() {
     lastRef.current = null;
     setCoord(null);
   };
+  const clear = () => {
+    setStrokes([]);
+    setCoord(null);
+  };
 
   const pan = Gesture.Pan()
-    .minDistance(0)
-    .onBegin((e) => {
+    .onStart((e) => {
       fx.value = e.x;
       fy.value = e.y;
       active.value = 1;
@@ -95,6 +98,15 @@ function SwipeTrail() {
       runOnJS(end)();
     });
 
+  // double-tap anywhere clears the trail; raced with the pan so a quick
+  // double-tap wins while any drag draws
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .maxDuration(260)
+    .onEnd(() => runOnJS(clear)());
+
+  const gesture = Gesture.Race(pan, doubleTap);
+
   // rebuild Skia paths only when the trail changes (not on every coord tick)
   const paths = useMemo(() => strokes.map(buildPath), [strokes]);
 
@@ -109,7 +121,7 @@ function SwipeTrail() {
   }));
 
   return (
-    <GestureDetector gesture={pan}>
+    <GestureDetector gesture={gesture}>
       <View style={styles.fill}>
         <Canvas style={StyleSheet.absoluteFill}>
           <Fill color="#06070a" />
@@ -149,16 +161,9 @@ function SwipeTrail() {
           </Text>
         </Animated.View>
 
-        <Pressable
-          style={styles.clear}
-          onPress={() => {
-            setStrokes([]);
-            setCoord(null);
-          }}
-        >
-          <Text style={styles.clearText}>Clear</Text>
-        </Pressable>
-        <Text style={styles.hint}>Swipe to draw — the label tracks your x, y</Text>
+        <Text style={styles.hint}>
+          Swipe to draw — double-tap to clear
+        </Text>
       </View>
     </GestureDetector>
   );
@@ -183,18 +188,6 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     fontWeight: '600',
   },
-  clear: {
-    position: 'absolute',
-    top: 14,
-    right: 16,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderColor: 'rgba(255,255,255,0.14)',
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  clearText: { color: '#b6f7ff', fontSize: 13, fontWeight: '600' },
   hint: {
     position: 'absolute',
     bottom: 32,

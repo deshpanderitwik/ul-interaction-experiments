@@ -58,16 +58,19 @@ export default function SketchScreen() {
   // "Immersive" = chrome hidden, ready for a clean iOS screen recording.
   const [immersive, setImmersive] = useState(false);
   const insets = useSafeAreaInsets();
-  // Double-tap (top-right) to bring the chrome back, so a stray single tap
-  // mid-recording doesn't reveal the UI. Implemented with gesture-handler so it
-  // reliably wins over any touch handling inside the sketch underneath.
+  // Press-and-hold the top-right corner to bring the chrome back. A long-press
+  // (not a tap) on purpose: the sketches underneath claim the whole screen with
+  // their own single-tap / pan handlers, and a tap-based restore loses that
+  // race. A stationary ~500ms hold doesn't trigger a pan (no movement) and
+  // outlasts a tap, so it reliably wins — and a stray quick tap mid-recording
+  // never reveals the UI.
   const restoreGesture = useMemo(
     () =>
-      Gesture.Tap()
-        .numberOfTaps(2)
-        .maxDuration(600)
+      Gesture.LongPress()
+        .minDuration(500)
+        .maxDistance(20)
         .runOnJS(true)
-        .onEnd(() => setImmersive(false)),
+        .onStart(() => setImmersive(false)),
     [],
   );
 
@@ -101,10 +104,14 @@ export default function SketchScreen() {
       <Component />
 
       {/* In immersive mode the eye is gone with the header; a transparent
-          top-right hotspot restores the chrome on a double-tap. */}
+          top-right hotspot restores the chrome on a long-press. collapsable
+          keeps the empty view in the native tree so it stays hittable. */}
       {immersive && (
         <GestureDetector gesture={restoreGesture}>
-          <View style={[styles.restoreHotspot, { top: insets.top, right: insets.right }]} />
+          <View
+            collapsable={false}
+            style={[styles.restoreHotspot, { top: insets.top, right: insets.right }]}
+          />
         </GestureDetector>
       )}
     </View>
@@ -121,5 +128,5 @@ const styles = StyleSheet.create({
   },
   missingText: { color: '#8a8a99', fontSize: 16 },
   eyeBtn: { paddingHorizontal: 4, paddingVertical: 4 },
-  restoreHotspot: { position: 'absolute', width: 140, height: 120 },
+  restoreHotspot: { position: 'absolute', width: 160, height: 140, zIndex: 50 },
 });

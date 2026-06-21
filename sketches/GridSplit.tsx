@@ -15,15 +15,20 @@ import type { Sketch } from './types';
 // One STEP of travel along an axis changes that axis's count by one.
 const STEP = 55; // px of drag per column/row change
 const MIN = 1;
-const MAX = 10;
+// No upper bound: drag keeps chopping the grid finer on both axes, arbitrarily.
+const clamp = (n: number) => Math.max(MIN, n);
 
-const clamp = (n: number) => Math.max(MIN, Math.min(MAX, n));
+// Above this many cells we drop the per-cell mount/layout animations so very
+// dense grids stay responsive instead of trying to animate thousands of views.
+const ANIMATE_LIMIT = 256;
 
-// vivid diagonal rainbow so the grid reads as distinct cells on the dark shell
+// Monochromatic: a single hue, with lightness varying along the diagonal so the
+// cells still read as distinct tiles on the dark shell.
+const HUE = 210;
 function cellColor(r: number, c: number, rows: number, cols: number) {
   const t = ((c + 0.5) / cols + (r + 0.5) / rows) / 2; // 0..1 across the diagonal
-  const hue = (200 + t * 320) % 360;
-  return `hsl(${hue}, 72%, 56%)`;
+  const light = 32 + t * 44; // 32%..76% lightness, same hue throughout
+  return `hsl(${HUE}, 60%, ${light}%)`;
 }
 
 function GridSplit() {
@@ -74,6 +79,11 @@ function GridSplit() {
     return out;
   }, [rows, cols]);
 
+  // dense grids: skip animations (perf) and tighten the gap so tiles still read
+  const animate = cells.length <= ANIMATE_LIMIT;
+  const gap = cells.length > 400 ? 1 : cells.length > 64 ? 2 : 3;
+  const radius = cells.length > 64 ? 4 : 10;
+
   return (
     <View style={styles.fill}>
       <GestureDetector gesture={pan}>
@@ -81,12 +91,17 @@ function GridSplit() {
           {cells.map(({ r, c }) => (
             <Animated.View
               key={`${r}-${c}`}
-              entering={FadeIn.duration(180)}
-              exiting={FadeOut.duration(140)}
-              layout={LinearTransition.springify().damping(20).stiffness(170)}
-              style={{ width: `${100 / cols}%`, height: `${100 / rows}%`, padding: 3 }}
+              entering={animate ? FadeIn.duration(180) : undefined}
+              exiting={animate ? FadeOut.duration(140) : undefined}
+              layout={animate ? LinearTransition.springify().damping(20).stiffness(170) : undefined}
+              style={{ width: `${100 / cols}%`, height: `${100 / rows}%`, padding: gap }}
             >
-              <View style={[styles.cellFill, { backgroundColor: cellColor(r, c, rows, cols) }]} />
+              <View
+                style={[
+                  styles.cellFill,
+                  { backgroundColor: cellColor(r, c, rows, cols), borderRadius: radius },
+                ]}
+              />
             </Animated.View>
           ))}
         </View>

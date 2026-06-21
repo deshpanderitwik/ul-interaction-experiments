@@ -1,5 +1,6 @@
-import { Link } from 'expo-router';
+import { Link, Stack } from 'expo-router';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import UpdateButton from '../components/UpdateButton';
 import { sketches } from '../sketches/registry';
 import type { Sketch } from '../sketches/types';
 
@@ -18,30 +19,33 @@ const rows: Row[] = sketches
 
 export default function Home() {
   return (
-    <FlatList
-      style={styles.list}
-      contentContainerStyle={styles.content}
-      data={rows}
-      keyExtractor={(r) => r.sketch.id}
-      ListHeaderComponent={
-        <Text style={styles.lead}>
-          {sketches.length} interaction experiment
-          {sketches.length === 1 ? '' : 's'}
-        </Text>
-      }
-      renderItem={({ item }) => (
-        <View style={item.child ? styles.childWrap : undefined}>
-          <Link href={`/sketch/${item.sketch.id}`} asChild>
-            <Pressable style={[styles.row, item.child && styles.rowChild]}>
-              <Text style={[styles.rowTitle, item.child && styles.rowTitleChild]}>
-                {item.sketch.title}
-              </Text>
-              <Text style={styles.rowDesc}>{item.sketch.description}</Text>
-            </Pressable>
-          </Link>
-        </View>
-      )}
-    />
+    <>
+      <Stack.Screen options={{ headerRight: () => <UpdateButton /> }} />
+      <FlatList
+        style={styles.list}
+        contentContainerStyle={styles.content}
+        data={rows}
+        keyExtractor={(r) => r.sketch.id}
+        ListHeaderComponent={
+          <Text style={styles.lead}>
+            {sketches.length} interaction experiment
+            {sketches.length === 1 ? '' : 's'}
+          </Text>
+        }
+        renderItem={({ item }) => (
+          <View style={item.child ? styles.childWrap : undefined}>
+            <Link href={`/sketch/${item.sketch.id}`} asChild>
+              <Pressable style={[styles.row, item.child && styles.rowChild]}>
+                <Text style={[styles.rowTitle, item.child && styles.rowTitleChild]}>
+                  {item.sketch.title}
+                </Text>
+                <Text style={styles.rowDesc}>{item.sketch.description}</Text>
+              </Pressable>
+            </Link>
+          </View>
+        )}
+      />
+    </>
   );
 }
 

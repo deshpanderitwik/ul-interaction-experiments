@@ -34,15 +34,15 @@
     "runtimeVersion": {
       "policy": "appVersion"
     },
+    "owner": "ritwikdesh",
+    "updates": {
+      "url": "https://u.expo.dev/7a3a2223-cf4a-4587-9c60-86dcd41fce9b"
+    },
     "extra": {
       "router": {},
       "eas": {
         "projectId": "7a3a2223-cf4a-4587-9c60-86dcd41fce9b"
       }
-    },
-    "owner": "ritwikdesh",
-    "updates": {
-      "url": "https://u.expo.dev/7a3a2223-cf4a-4587-9c60-86dcd41fce9b"
     }
   }
 }

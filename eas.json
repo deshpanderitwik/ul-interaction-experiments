@@ -38,6 +38,9 @@
         "ascAppId": "6782267882"
       }
     },
+    "preview-hello": {
+      "ios": {}
+    },
     "production": {
       "ios": {}
     }

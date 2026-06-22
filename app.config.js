@@ -42,6 +42,17 @@ function helloConfig() {
       supportsTablet: true,
       bundleIdentifier: 'com.ritdeshpande.hello',
       config: { usesNonExemptEncryption: false },
+      // Autolinking pulls every native module in package.json into the binary
+      // (e.g. react-native-vision-camera), so Apple requires purpose strings
+      // even though hello's JS never touches the camera/mic. Mirrors the
+      // sketchbook's app.json infoPlist; without these, App Store Connect
+      // rejects the upload with ITMS-90683.
+      infoPlist: {
+        NSCameraUsageDescription:
+          'This app needs camera access for camera-based sketches.',
+        NSMicrophoneUsageDescription:
+          'This app needs microphone access for camera-based sketches.',
+      },
     },
     android: {
       package: 'com.ritdeshpande.hello',

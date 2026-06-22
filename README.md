@@ -1,216 +1,118 @@
-# ul-interaction-experiments
+# ul-interaction-experiments-v2
 
-A native iOS/Android sketchbook for mobile interaction-design experiments. The
-**native shell is built once** with a generous set of capabilities; each
-experiment ("sketch") is **pure JS** that ships **over-the-air** via `eas update`
-— so most iteration needs no rebuild and no cable.
+A native iOS/Android app for mobile interaction-design experiments, built on a
+**build-once native shell** plus **pure-JS screens that ship over-the-air** via
+`eas update`. Most iteration needs no rebuild and no cable — you edit JS, publish,
+and reopen the app.
+
+This is a **clean starting point**. The original sketchbook (App 1) was archived;
+see [Archived: the original sketchbook](#archived-the-original-sketchbook).
 
 ## Architecture
 
-- **Bare RN via Expo (CNG).** No `ios/`/`android/` folders committed — the native
-  projects are generated in the cloud at build time. Keeps the repo clean while
-  staying fully native.
+- **Bare RN via Expo (CNG).** No `ios/`/`android/` folders in git — the native
+  projects are generated in the cloud at build time.
 - **`app/`** — [expo-router](https://docs.expo.dev/router/introduction/) screens.
-  `index.tsx` lists sketches; `sketch/[id].tsx` renders one full-screen.
-- **`sketches/`** — one file per experiment. Each default-exports a `Sketch`
-  (`id`, `title`, `description`, `Component`; optional `order`, `parentId`).
-  Auto-registered via `require.context` — just drop the file in. Pure JS →
-  ships over-the-air.
-- **`modules/fine-haptics/`** — a **local Swift native module** (CoreHaptics,
-  continuous intensity × sharpness). This is the native↔JS seam: write Swift
-  once, drive it from any sketch. Adding/changing Swift needs a native rebuild;
-  using it from JS does not.
+  `index.tsx` is the (currently blank) home screen; add routes as files here.
+- **`modules/fine-haptics/`** — a local Swift native module (CoreHaptics) kept as
+  the native↔JS seam example: write Swift once, drive it from JS. Changing Swift
+  needs a native rebuild; using it from JS does not.
+- **The native/JS line is the OTA line.** Touch **JS** → `eas update`, live in
+  seconds. Touch **native** (Swift, a new native dep, Info.plist, the app
+  version) → `eas build` + reinstall via TestFlight.
 
-### The native/JS line *is* the OTA line
-- **Touch JS** (new sketch, tweak, compose existing native primitives) → `eas update`, instant, no rebuild.
-- **Touch Swift** (new native capability) → `eas build` + reinstall via TestFlight, then it's available to JS forever.
+## App identity (don't change these — installs + OTA are pinned to them)
 
-The strategy: front-load native capabilities, then live in the JS layer.
+| | |
+|---|---|
+| EAS project | `@ritwikdesh/hello` · projectId `e5405cda-2bb9-49cb-8cff-b9d9c4ef97c7` |
+| iOS bundle id | `com.ritdeshpande.hello` |
+| App Store Connect app | `6782713709` |
+| OTA channel | `preview` |
+| runtimeVersion | `1.0.0` (policy `appVersion`) |
 
-## What's pre-bundled (use freely from JS, no rebuild)
-react-native-reanimated · react-native-gesture-handler · @shopify/react-native-skia ·
-expo-haptics · expo-sensors · expo-router · plus the local `fine-haptics` Swift module.
+The home-screen **display name** is `ul-interaction-experiments-v2`; the `hello`
+slug/bundle are internal plumbing kept for continuity (renaming them would orphan
+the installed app + its OTA stream).
 
----
+## The iteration loop (headless, from Claude Code mobile/web)
 
-## First-time setup (the interactive bits — run these yourself)
-
-These need logins / 2FA that only you can enter. EAS automates all the
-certificate & provisioning-profile work behind them.
-
-```bash
-# 0. Commit the scaffold (EAS builds from git)
-git add -A && git commit -m "Scaffold sketchbook"
-
-# 1. Log into your Expo account
-eas login
-
-# 2. Create the EAS project (writes projectId into app.json)
-eas init
-
-# 3. Wire over-the-air updates (adds updates.url + runtimeVersion)
-eas update:configure
-
-# 4. Build for TestFlight in the cloud. EAS will prompt to log into your
-#    Apple Developer account (Apple ID + 2FA) and auto-create the bundle id,
-#    distribution cert, and provisioning profile. --auto-submit uploads it
-#    straight to App Store Connect / TestFlight when the build finishes.
-eas build --platform ios --profile preview --auto-submit
-```
-
-Then on your phone: open **TestFlight** → install. No cable, ever.
-
-> First submit also creates the App Store Connect app record (eas submit will
-> offer to do this). You may get a one-time export-compliance question — answer
-> "no encryption" for a sketchbook.
-
-## The on-the-go loop (from Claude Code mobile)
-
-> **Multiple threads?** The `preview` channel is shared by every install, and
-> the latest publish wins — so `eas update --channel preview` is **reserved for
-> `main`** (publish after merging). Don't publish to `preview` from a feature
-> branch; see `CLAUDE.md` for the parallel-work rules.
-
-iOS-only for now. From a headless session (Claude Code mobile/web) `eas update`
-runs non-interactively, so it needs three extra flags: `--platform ios` (without
-it, export defaults to *all* platforms and fails on web — there's no
-`react-native-web` here), `--environment preview` (required in
-`--non-interactive` mode), and `--non-interactive` itself.
+Auth is non-interactive via the `EXPO_TOKEN` env var. iOS-only for now.
 
 ```bash
-# JS-only change (a new sketch, a tweak) — ships in seconds:
+# JS-only change — ships in seconds:
 eas update --channel preview --environment preview --platform ios \
-  --non-interactive -m "new sketch: <name>"
-#   → reopen the app on your phone; it pulls the update on launch.
+  --non-interactive -m "what changed"
+#   → reopen the app on your phone; expo-updates downloads on one launch and
+#     applies on the next, so quit/reopen twice to see it.
 
-# New/changed Swift (a native capability) — rebuild + reinstall via TestFlight:
-eas build --platform ios --profile preview --auto-submit
+# Native change (Swift, new native dep, Info.plist, version bump) — rebuild:
+eas build --platform ios --profile preview
 ```
 
-> Auth is non-interactive via the `EXPO_TOKEN` env var (no `eas login`/2FA in a
-> remote session). The EAS project is already linked (`extra.eas.projectId` +
-> `updates.url` in `app.json`), so this loop works without any one-time setup.
+> The `preview` channel is shared by every install and the latest publish wins,
+> so it's **published from `main`** — merge, then publish. See `CLAUDE.md`.
+
+> `--platform ios` is required (no `react-native-web` here); `--environment
+> preview` + `--non-interactive` are required in headless mode.
 
 ## Build profiles (`eas.json`)
 - **development** — dev client, internal distribution (live Metro reload; optional).
 - **preview** — Release build on the `preview` channel, distributed via TestFlight. **Your main install.**
 - **production** — Release build on the `production` channel.
 
-The `eas.json` profiles (and their `development`/`preview`/`production` channels)
-are shared, but channels are **scoped per EAS project** — so each app gets its
-own independent `preview`/`production` streams automatically.
+## Headless builds/submits with an App Store Connect API key (no Apple login)
 
----
-
-## More than one app in this repo (`APP=...`)
-
-This repo can ship multiple **separate native apps** from one codebase. App
-identity (bundle id, EAS project, OTA stream, scheme, routes) is selected at
-build time by the `APP` env var, resolved in `app.config.js`:
-
-- **`APP` unset → `ulsketches`** — the sketchbook above. `app.config.js` returns
-  `app.json` verbatim, so nothing about it changes.
-- **`APP=hello` → `hello`** — a clean, empty hello-world starter. Its own bundle
-  id (`com.ritdeshpande.hello`), its own EAS project, and its own routes in
-  `app-hello/` (the sketchbook keeps `app/`).
-
-Each app is an independent binary + EAS project, so their builds, channels, and
-OTA updates never collide.
-
-### One-time setup for the `hello` app (run yourself — needs your Expo/Apple login)
-```bash
-# 1. Create the EAS project for hello (prints a projectId).
-APP=hello eas init
-#    Dynamic config can't be auto-written, so copy the printed id into
-#    HELLO_EAS_PROJECT_ID at the top of app.config.js, then commit.
-
-# 2. Build for TestFlight (auto-creates the bundle id + credentials).
-#    Use the hello-specific profile (see note below) so APP=hello reaches
-#    the EAS Build worker, not just your local shell.
-APP=hello eas build --platform ios --profile preview-hello --auto-submit
-```
-
-> **Why a `preview-hello` profile?** The EAS Build worker re-evaluates
-> `app.config.js` on the server, so `APP=hello` must be set *there* too — a
-> local `APP=hello` alone makes the worker fall back to `ulsketches` and the
-> build fails with `EAS_BUILD_PROJECT_ID_MISMATCH`. The `preview-hello` profile
-> in `eas.json` `extends` `preview` and adds `"env": { "APP": "hello" }`, which
-> EAS applies on the worker. The shared `preview` profile (ulsketches) is left
-> untouched. Add an analogous `<profile>-<app>` for any future app.
-
-### Headless builds with an App Store Connect API key (no Apple login prompt)
 For CI / agent sessions where you can't do an interactive Apple ID + 2FA login,
-authenticate to Apple with an **App Store Connect API key** instead. Provide it
-via env vars (the `.p8` as a file on disk):
+authenticate to Apple with an **App Store Connect API key** (`.p8` on disk):
+
 ```bash
-export EXPO_TOKEN=...                 # Expo auth (already non-interactive)
+export EXPO_TOKEN=...                 # Expo auth
 export EXPO_ASC_KEY_ID=...            # ASC API key id
 export EXPO_ASC_ISSUER_ID=...         # ASC issuer id
 export EXPO_ASC_API_KEY_PATH=/path/to/AuthKey_XXXX.p8
-export EXPO_APPLE_TEAM_ID=443MNYHZG2  # skips the "Apple Team" prompt
+export EXPO_APPLE_TEAM_ID=443MNYHZG2
 export EXPO_APPLE_TEAM_TYPE=COMPANY_OR_ORGANIZATION
 ```
-When `EXPO_ASC_*` is set, eas-cli authenticates to Apple via the key
-automatically (no Apple ID / 2FA prompt).
 
-> **First build for a new app needs a TTY (once).** `eas build --non-interactive`
-> can *use* iOS credentials but cannot **create or reuse** a distribution
-> certificate / provisioning profile for a brand-new bundle id — it only returns
-> ones already attached to the app, and otherwise fails with "Credentials are
-> not set up." So the **first** `hello` build must run **interactively** (with a
-> real TTY) so it can reuse the existing distribution cert and generate the
-> provisioning profile. With the env vars above, the only prompts are
-> `Reuse this distribution certificate?` and `Generate a new Apple Provisioning
-> Profile?` — both default to yes. In a headless shell, allocate a pseudo-TTY
-> (e.g. a small Python `pty` wrapper, or `script`) and answer those confirms.
-> After that one-time setup, later builds can run `--non-interactive` normally.
+With `EXPO_ASC_*` set, `eas build` authenticates to Apple via the key (no 2FA
+prompt). iOS credentials (distribution cert + provisioning profile) are already
+set up for this app, so builds run `--non-interactive`.
 
-> **Headless TestFlight submit.** Apple's ASC API key can *upload* a build but
-> **cannot create the App Store Connect app record** (`apps` is GET/UPDATE only)
-> — create it once in the ASC web UI (Apps → ✛ → New App, pick the
-> `com.ritdeshpande.hello` bundle id). Then submit non-interactively with the
-> app's ASC id and the key. Unlike `eas build`, `eas submit` does **not** read
-> the `EXPO_ASC_*` env vars — pass the key through the submit profile instead:
-> ```bash
-> APP=hello eas submit --platform ios --profile preview-hello \
->   --id <buildId> --non-interactive
-> ```
-> The `preview-hello` submit profile carries `ascAppId` (hello = `6782713709`);
-> add `ascApiKeyPath` / `ascApiKeyId` / `ascApiKeyIssuerId` to it at submit time
-> (a local `.p8` path — keep it out of git). After processing, the build appears
-> under TestFlight for the account holder to install.
+> **First build for a *brand-new* app needs a TTY (once).** `eas build
+> --non-interactive` can *use* credentials but can't bootstrap a new bundle id's
+> distribution cert / provisioning profile — run the first build interactively
+> (in a pseudo-TTY) and accept the `Reuse this distribution certificate?` /
+> `Generate a new Apple Provisioning Profile?` confirms. This app is already past
+> that step.
 
-### The on-the-go loop for `hello`
-Same flags as the sketchbook, just with `APP=hello` set (and only once
-`HELLO_EAS_PROJECT_ID` is filled in):
+### TestFlight submit (headless)
+Apple's ASC API key can *upload* a build but **cannot create the App Store
+Connect app record** — create it once in the ASC web UI (Apps → ✛ → New App,
+pick the `com.ritdeshpande.hello` bundle). Then, unlike `eas build`, `eas submit`
+does **not** read `EXPO_ASC_*` env vars — pass the key through the submit profile:
+
 ```bash
-# JS-only change:
-APP=hello eas update --channel preview --environment preview --platform ios \
-  --non-interactive -m "hello: <what changed>"
-
-# Native change:
-APP=hello eas build --platform ios --profile preview-hello --auto-submit
+# Temporarily add to submit.preview.ios in eas.json (keep the .p8 path out of git):
+#   "ascApiKeyPath": "/path/to/AuthKey_XXXX.p8",
+#   "ascApiKeyId": "...", "ascApiKeyIssuerId": "..."
+eas submit --platform ios --profile preview --id <buildId> --non-interactive
 ```
 
-> The `preview` = `main`-only rule applies **per app**: `hello`'s `preview`
-> channel is shared by every `hello` install, so publish it from `main` too.
+`submit.preview.ios.ascAppId` is `6782713709` (this app). After processing, the
+build appears under TestFlight for the account holder to install.
 
-### Local preview without a build
+## Archived: the original sketchbook
+
+The original app — **ulsketches** (`ul-interaction-experiments`, bundle
+`com.ritdeshpande.ulsketches`, projectId `7a3a2223…`) and its full sketchbook
+engine (`app/` routes, `sketches/`, `studies/`, `components/`, the multi-app
+`app.config.js`) — was archived when this repo was re-centered on App 2. It's
+fully preserved on the **`archive/ulsketches`** branch:
+
 ```bash
-APP=hello npx expo start   # boots the hello app
-npx expo start             # boots the sketchbook (APP unset)
+git checkout archive/ulsketches   # browse / restore the original sketchbook
 ```
 
-### Adding a third app
-Add another branch in `app.config.js` (new `bundleIdentifier`, `slug`, `scheme`,
-its own routes dir via `['expo-router', { root: '<dir>' }]`), create that routes
-dir, then `APP=<name> eas init`. Also add a `<profile>-<name>` build profile in
-`eas.json` (`extends` the base profile + `"env": { "APP": "<name>" }`) so the
-build worker resolves the right app — see the `preview-hello` note above.
-
-## Adding a sketch
-1. Create `sketches/MySketch.tsx`, default-export a `Sketch` (set `order`;
-   optional `parentId` to nest it under another sketch).
-2. That's it — it auto-registers via `require.context`; no registry edit.
-3. Merge to `main`; publishing `main` to `preview` ships it to your phone
-   (see the loop above — `preview` is `main`-only).
+That app's EAS project, channels, and TestFlight remain on Expo's side untouched;
+this repo simply no longer builds or publishes to it.

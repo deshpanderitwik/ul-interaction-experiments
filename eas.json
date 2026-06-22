@@ -20,12 +20,6 @@
         "buildConfiguration": "Release"
       }
     },
-    "preview-hello": {
-      "extends": "preview",
-      "env": {
-        "APP": "hello"
-      }
-    },
     "production": {
       "distribution": "store",
       "channel": "production",
@@ -34,11 +28,6 @@
   },
   "submit": {
     "preview": {
-      "ios": {
-        "ascAppId": "6782267882"
-      }
-    },
-    "preview-hello": {
       "ios": {
         "ascAppId": "6782713709"
       }

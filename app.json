@@ -1,34 +1,25 @@
 {
   "expo": {
-    "name": "ul-interaction-experiments",
-    "slug": "ul-interaction-experiments",
+    "name": "ul-interaction-experiments-v2",
+    "slug": "hello",
     "version": "1.0.0",
-    "scheme": "ulsketches",
+    "scheme": "hello",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ritdeshpande.ulsketches",
+      "bundleIdentifier": "com.ritdeshpande.hello",
       "config": {
         "usesNonExemptEncryption": false
       },
       "infoPlist": {
-        "NSCameraUsageDescription": "This app needs camera access for camera-based sketches."
+        "NSCameraUsageDescription": "This app can use the camera.",
+        "NSMicrophoneUsageDescription": "This app can use the microphone."
       }
     },
     "android": {
-      "package": "com.ritdeshpande.ulsketches",
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
-      "predictiveBackGestureEnabled": false
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
+      "package": "com.ritdeshpande.hello"
     },
     "plugins": [
       "expo-router",
@@ -39,12 +30,12 @@
     },
     "owner": "ritwikdesh",
     "updates": {
-      "url": "https://u.expo.dev/7a3a2223-cf4a-4587-9c60-86dcd41fce9b"
+      "url": "https://u.expo.dev/e5405cda-2bb9-49cb-8cff-b9d9c4ef97c7"
     },
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "7a3a2223-cf4a-4587-9c60-86dcd41fce9b"
+        "projectId": "e5405cda-2bb9-49cb-8cff-b9d9c4ef97c7"
       }
     }
   }

@@ -165,6 +165,21 @@ automatically (no Apple ID / 2FA prompt).
 > (e.g. a small Python `pty` wrapper, or `script`) and answer those confirms.
 > After that one-time setup, later builds can run `--non-interactive` normally.
 
+> **Headless TestFlight submit.** Apple's ASC API key can *upload* a build but
+> **cannot create the App Store Connect app record** (`apps` is GET/UPDATE only)
+> — create it once in the ASC web UI (Apps → ✛ → New App, pick the
+> `com.ritdeshpande.hello` bundle id). Then submit non-interactively with the
+> app's ASC id and the key. Unlike `eas build`, `eas submit` does **not** read
+> the `EXPO_ASC_*` env vars — pass the key through the submit profile instead:
+> ```bash
+> APP=hello eas submit --platform ios --profile preview-hello \
+>   --id <buildId> --non-interactive
+> ```
+> The `preview-hello` submit profile carries `ascAppId` (hello = `6782713709`);
+> add `ascApiKeyPath` / `ascApiKeyId` / `ascApiKeyIssuerId` to it at submit time
+> (a local `.p8` path — keep it out of git). After processing, the build appears
+> under TestFlight for the account holder to install.
+
 ### The on-the-go loop for `hello`
 Same flags as the sketchbook, just with `APP=hello` set (and only once
 `HELLO_EAS_PROJECT_ID` is filled in):

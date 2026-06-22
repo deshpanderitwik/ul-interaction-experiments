@@ -31,7 +31,7 @@ function helloConfig() {
   const hasProject = HELLO_EAS_PROJECT_ID.length > 0;
 
   return {
-    name: 'hello',
+    name: 'ul-interaction-experiments-v2',
     slug: 'hello',
     version: '1.0.0',
     scheme: 'hello',

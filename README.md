@@ -128,6 +128,33 @@ APP=hello eas init
 APP=hello eas build --platform ios --profile preview --auto-submit
 ```
 
+### Headless builds with an App Store Connect API key (no Apple login prompt)
+For CI / agent sessions where you can't do an interactive Apple ID + 2FA login,
+authenticate to Apple with an **App Store Connect API key** instead. Provide it
+via env vars (the `.p8` as a file on disk):
+```bash
+export EXPO_TOKEN=...                 # Expo auth (already non-interactive)
+export EXPO_ASC_KEY_ID=...            # ASC API key id
+export EXPO_ASC_ISSUER_ID=...         # ASC issuer id
+export EXPO_ASC_API_KEY_PATH=/path/to/AuthKey_XXXX.p8
+export EXPO_APPLE_TEAM_ID=443MNYHZG2  # skips the "Apple Team" prompt
+export EXPO_APPLE_TEAM_TYPE=COMPANY_OR_ORGANIZATION
+```
+When `EXPO_ASC_*` is set, eas-cli authenticates to Apple via the key
+automatically (no Apple ID / 2FA prompt).
+
+> **First build for a new app needs a TTY (once).** `eas build --non-interactive`
+> can *use* iOS credentials but cannot **create or reuse** a distribution
+> certificate / provisioning profile for a brand-new bundle id — it only returns
+> ones already attached to the app, and otherwise fails with "Credentials are
+> not set up." So the **first** `hello` build must run **interactively** (with a
+> real TTY) so it can reuse the existing distribution cert and generate the
+> provisioning profile. With the env vars above, the only prompts are
+> `Reuse this distribution certificate?` and `Generate a new Apple Provisioning
+> Profile?` — both default to yes. In a headless shell, allocate a pseudo-TTY
+> (e.g. a small Python `pty` wrapper, or `script`) and answer those confirms.
+> After that one-time setup, later builds can run `--non-interactive` normally.
+
 ### The on-the-go loop for `hello`
 Same flags as the sketchbook, just with `APP=hello` set (and only once
 `HELLO_EAS_PROJECT_ID` is filled in):

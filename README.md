@@ -125,8 +125,18 @@ APP=hello eas init
 #    HELLO_EAS_PROJECT_ID at the top of app.config.js, then commit.
 
 # 2. Build for TestFlight (auto-creates the bundle id + credentials).
-APP=hello eas build --platform ios --profile preview --auto-submit
+#    Use the hello-specific profile (see note below) so APP=hello reaches
+#    the EAS Build worker, not just your local shell.
+APP=hello eas build --platform ios --profile preview-hello --auto-submit
 ```
+
+> **Why a `preview-hello` profile?** The EAS Build worker re-evaluates
+> `app.config.js` on the server, so `APP=hello` must be set *there* too — a
+> local `APP=hello` alone makes the worker fall back to `ulsketches` and the
+> build fails with `EAS_BUILD_PROJECT_ID_MISMATCH`. The `preview-hello` profile
+> in `eas.json` `extends` `preview` and adds `"env": { "APP": "hello" }`, which
+> EAS applies on the worker. The shared `preview` profile (ulsketches) is left
+> untouched. Add an analogous `<profile>-<app>` for any future app.
 
 ### Headless builds with an App Store Connect API key (no Apple login prompt)
 For CI / agent sessions where you can't do an interactive Apple ID + 2FA login,
@@ -164,7 +174,7 @@ APP=hello eas update --channel preview --environment preview --platform ios \
   --non-interactive -m "hello: <what changed>"
 
 # Native change:
-APP=hello eas build --platform ios --profile preview --auto-submit
+APP=hello eas build --platform ios --profile preview-hello --auto-submit
 ```
 
 > The `preview` = `main`-only rule applies **per app**: `hello`'s `preview`
@@ -179,7 +189,9 @@ npx expo start             # boots the sketchbook (APP unset)
 ### Adding a third app
 Add another branch in `app.config.js` (new `bundleIdentifier`, `slug`, `scheme`,
 its own routes dir via `['expo-router', { root: '<dir>' }]`), create that routes
-dir, then `APP=<name> eas init`.
+dir, then `APP=<name> eas init`. Also add a `<profile>-<name>` build profile in
+`eas.json` (`extends` the base profile + `"env": { "APP": "<name>" }`) so the
+build worker resolves the right app — see the `preview-hello` note above.
 
 ## Adding a sketch
 1. Create `sketches/MySketch.tsx`, default-export a `Sketch` (set `order`;

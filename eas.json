@@ -20,6 +20,12 @@
         "buildConfiguration": "Release"
       }
     },
+    "preview-hello": {
+      "extends": "preview",
+      "env": {
+        "APP": "hello"
+      }
+    },
     "production": {
       "distribution": "store",
       "channel": "production",

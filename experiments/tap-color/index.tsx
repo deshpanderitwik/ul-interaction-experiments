@@ -1,14 +1,12 @@
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
-import { useExperimentActive } from './_host';
+import { useExperimentActive } from '../_host';
+import { PALETTE, next } from './shared';
 
-// Sample experiment: tap anywhere to step the canvas through a palette.
-// Demonstrates the experiment contract — a self-contained, full-screen,
-// default-exported component that reads useExperimentActive() (here it simply
-// ignores taps while inactive; a camera/sensor experiment would start/stop).
-const PALETTE = ['#000000', '#11162e', '#2a1140', '#451126', '#0f4030', '#5b8cff'];
-
+// Base experiment: tap anywhere to step the canvas through a palette.
+// Reads useExperimentActive() so it ignores taps while off-screen/backgrounded
+// (the pattern a camera/sensor experiment would use to start/stop hardware).
 export default function TapColor() {
   const active = useExperimentActive();
   const [i, setI] = useState(0);
@@ -19,7 +17,7 @@ export default function TapColor() {
       onPress={() => {
         if (!active) return;
         Haptics.selectionAsync();
-        setI((prev) => (prev + 1) % PALETTE.length);
+        setI(next);
       }}
     >
       <Text style={styles.hint}>tap anywhere</Text>

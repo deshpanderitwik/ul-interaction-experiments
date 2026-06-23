@@ -47,6 +47,18 @@ export const experiments: Experiment[] = [
         blurb: 'Gradient instead of solid; each tap flips its direction.',
         load: () => import('./tap-color/gradient'),
       },
+      {
+        id: 'gradient-drift',
+        title: 'Gradient drift',
+        blurb: 'Gradient that slowly drifts; tap changes color.',
+        load: () => import('./tap-color/gradient-drift'),
+      },
+      {
+        id: 'strobe',
+        title: 'Strobe',
+        blurb: 'Solid color flashing on and off; tap changes color.',
+        load: () => import('./tap-color/strobe'),
+      },
     ],
   },
 ];

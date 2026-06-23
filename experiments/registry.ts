@@ -5,17 +5,22 @@ import type { ComponentType } from 'react';
 // Both the Home menu and the dynamic routes read from this list, so they
 // can never drift out of sync.
 
-type Load = () => Promise<{ default: ComponentType }>;
+type Load = () => Promise<{ default: ComponentType<any> }>;
 
-// A variation ("draft") builds off its parent experiment's body and tweaks
-// one or two things. It lives at /experiments/<experimentId>/<variationId>
-// and appears indented under the parent in the menu. When a variation feels
-// dialed, fold it into the parent and delete the entry.
+// A variation ("draft") builds off its parent experiment. Two flavors:
+//   - preset: props passed to the parent's component (composable; combinations
+//     are free — just set more fields). Preferred for a coherent family.
+//   - load:   a fully custom component (escape hatch for a variation that's a
+//     genuinely different idea, not just the parent with knobs).
+// It lives at /experiments/<experimentId>/<variationId> and appears indented
+// under the parent in the menu. When a variation feels dialed, fold it into
+// the parent: make it the base default, delete the entry, note the why.
 export type Variation = {
   id: string;
   title: string;
   blurb?: string;
-  load: Load;
+  preset?: Record<string, unknown>;
+  load?: Load;
 };
 
 export type Experiment = {
@@ -45,19 +50,25 @@ export const experiments: Experiment[] = [
         id: 'gradient',
         title: 'Gradient flip',
         blurb: 'Gradient instead of solid; each tap flips its direction.',
-        load: () => import('./tap-color/gradient'),
+        preset: { fill: 'gradient', motion: 'flip' },
       },
       {
         id: 'gradient-drift',
         title: 'Gradient drift',
         blurb: 'Gradient that slowly drifts; tap changes color.',
-        load: () => import('./tap-color/gradient-drift'),
+        preset: { fill: 'gradient', motion: 'drift' },
       },
       {
         id: 'strobe',
         title: 'Strobe',
         blurb: 'Solid color flashing on and off; tap changes color.',
-        load: () => import('./tap-color/strobe'),
+        preset: { strobe: true },
+      },
+      {
+        id: 'drift-strobe',
+        title: 'Drift + Strobe',
+        blurb: 'Combination: a drifting gradient that also strobes.',
+        preset: { fill: 'gradient', motion: 'drift', strobe: true },
       },
     ],
   },

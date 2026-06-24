@@ -46,6 +46,17 @@ export function buildNotes(width: number, height: number): Note[] {
   }));
 }
 
+// Active-note color by trigger order. t in [0,1] is the note's position in the
+// trigger sequence (0 = first/oldest, 1 = most recent). Ramps a blue from a
+// dim-but-clearly-active shade up to a bright near-white, so the draw order
+// reads as increasing intensity. Even t=0 stays distinct from the inactive
+// outline.
+export function intensityColor(t: number): string {
+  const c = Math.max(0, Math.min(1, t));
+  const lerp = (a: number, b: number) => Math.round(a + (b - a) * c);
+  return `rgb(${lerp(58, 223)}, ${lerp(74, 230)}, ${lerp(122, 255)})`;
+}
+
 // Shortest distance from point P to segment AB. A stroke segment "passes
 // through" a note when this distance is within the note's radius.
 export function distToSegment(

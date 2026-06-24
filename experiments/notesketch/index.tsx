@@ -4,12 +4,13 @@ import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
-import { buildNotes, distToSegment } from './shared';
+import { buildNotes, distToSegment, intensityColor } from './shared';
 
 // NoteSketch — draw freehand white strokes on a field of "note" circles laid
 // out as a vertical pitch ladder (F3 bottom → F4 top). When the stroke you're
-// drawing passes through a note it latches active; double-tap clears strokes
-// and resets every note. (Activation is the signal we'll wire to sound next.)
+// drawing passes through a note it latches active, and its color intensity
+// ramps with trigger order (oldest dim → newest brightest). Double-tap clears
+// strokes and resets every note. (Order is the signal we'll wire to sound.)
 export default function NoteSketch() {
   const live = useExperimentActive();
   const { width, height } = useWindowDimensions();
@@ -20,24 +21,33 @@ export default function NoteSketch() {
 
   const [paths, setPaths] = useState<string[]>([]);
   const [current, setCurrent] = useState<string | null>(null);
-  const [activeIds, setActiveIds] = useState<Set<string>>(() => new Set());
+  // Ids in the order they were first triggered (newest last). A note's color
+  // intensity ramps with its position in this list.
+  const [order, setOrder] = useState<string[]>([]);
 
   const currentRef = useRef<string | null>(null);
   const lastPt = useRef<{ x: number; y: number } | null>(null);
 
-  // Latch any note whose circle the segment A→B passes through.
+  // Latch any note whose circle the segment A→B passes through, appending newly
+  // hit notes in trigger order (sorted by where they fall along the segment, so
+  // a single fast swipe through several notes still records left-to-right).
   const hitTest = (ax: number, ay: number, bx: number, by: number) => {
-    let hits: string[] | null = null;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    const fresh: { id: string; at: number }[] = [];
     for (const note of notesRef.current) {
-      if (distToSegment(note.cx, note.cy, ax, ay, bx, by) <= note.r) {
-        (hits ??= []).push(note.id);
-      }
+      if (distToSegment(note.cx, note.cy, ax, ay, bx, by) > note.r) continue;
+      const at = len2
+        ? Math.max(0, Math.min(1, ((note.cx - ax) * dx + (note.cy - ay) * dy) / len2))
+        : 0;
+      fresh.push({ id: note.id, at });
     }
-    if (!hits) return;
-    setActiveIds((prev) => {
-      let next: Set<string> | null = null;
-      for (const id of hits!) if (!prev.has(id)) (next ??= new Set(prev)).add(id);
-      return next ?? prev;
+    if (!fresh.length) return;
+    fresh.sort((p, q) => p.at - q.at);
+    setOrder((prev) => {
+      const add = fresh.map((f) => f.id).filter((id) => !prev.includes(id));
+      return add.length ? [...prev, ...add] : prev;
     });
   };
 
@@ -67,7 +77,7 @@ export default function NoteSketch() {
     lastPt.current = null;
     setCurrent(null);
     setPaths([]);
-    setActiveIds(new Set());
+    setOrder([]);
   };
 
   const draw = Gesture.Pan()
@@ -122,7 +132,10 @@ export default function NoteSketch() {
 
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
           {notes.map((n) => {
-            const on = activeIds.has(n.id);
+            const rank = order.indexOf(n.id);
+            const on = rank >= 0;
+            // Intensity by trigger order: oldest → 0 (dim), newest → 1 (bright).
+            const t = on ? (order.length > 1 ? rank / (order.length - 1) : 1) : 0;
             return (
               <View
                 key={n.id}
@@ -135,10 +148,24 @@ export default function NoteSketch() {
                     height: n.r * 2,
                     borderRadius: n.r,
                   },
-                  on ? styles.noteOn : styles.noteOff,
+                  on
+                    ? {
+                        backgroundColor: intensityColor(t),
+                        borderColor: `rgba(255,255,255,${(0.45 + 0.55 * t).toFixed(3)})`,
+                      }
+                    : styles.noteOff,
                 ]}
               >
-                <Text style={[styles.label, on ? styles.labelOn : styles.labelOff]}>
+                <Text
+                  style={[
+                    styles.label,
+                    on
+                      ? t > 0.55
+                        ? styles.labelDark
+                        : styles.labelLight
+                      : styles.labelOff,
+                  ]}
+                >
                   {n.label}
                 </Text>
               </View>
@@ -162,11 +189,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.35)',
     backgroundColor: 'rgba(255,255,255,0.03)',
   },
-  noteOn: {
-    borderColor: '#ffffff',
-    backgroundColor: '#cfd8ff',
-  },
   label: { fontSize: 15, fontWeight: '600', letterSpacing: 0.5 },
   labelOff: { color: 'rgba(255,255,255,0.55)' },
-  labelOn: { color: '#0a0a0a' },
+  labelLight: { color: 'rgba(255,255,255,0.9)' },
+  labelDark: { color: '#0a0a0a' },
 });

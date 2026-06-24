@@ -17,6 +17,7 @@ import {
   buildNotes,
   distToSegment,
   intensityColor,
+  noteFrequency,
   type Note,
 } from './shared';
 import { playPluck } from './voice';
@@ -132,7 +133,7 @@ export default function NoteSketch() {
         NOTE_LABELS.length > 1
           ? (NOTE_LABELS as readonly string[]).indexOf(id) / (NOTE_LABELS.length - 1)
           : 0;
-      playPluck(pitchT);
+      playPluck(noteFrequency(id), pitchT);
       step += 1;
     };
     tick(); // sound the first note immediately on (re)start

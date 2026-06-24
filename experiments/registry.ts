@@ -40,6 +40,13 @@ export type Experiment = {
 
 export const experiments: Experiment[] = [
   {
+    id: 'tempo-slide',
+    title: 'Tempo Slide',
+    blurb: 'Touch to arpeggiate F3–F4; slide up/down to speed it up or slow it down.',
+    accent: '#c64fff',
+    load: () => import('./tempo-slide'),
+  },
+  {
     id: 'notesketch',
     title: 'NoteSketch',
     blurb: 'Draw through notes (F3–F4) to arpeggiate them at 120 BPM; double-tap clears.',

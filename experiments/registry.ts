@@ -40,6 +40,13 @@ export type Experiment = {
 
 export const experiments: Experiment[] = [
   {
+    id: 'notesketch',
+    title: 'NoteSketch',
+    blurb: 'Draw freehand white strokes; double-tap to clear.',
+    accent: '#cfd8ff',
+    load: () => import('./notesketch'),
+  },
+  {
     id: 'tap-color',
     title: 'Tap Color',
     blurb: 'Tap anywhere to shift the canvas through a palette.',

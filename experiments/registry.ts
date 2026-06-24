@@ -42,7 +42,7 @@ export const experiments: Experiment[] = [
   {
     id: 'notesketch',
     title: 'NoteSketch',
-    blurb: 'Draw through the note circles (F3–F4) to light them; double-tap clears.',
+    blurb: 'Draw through notes (F3–F4) to arpeggiate them at 120 BPM; double-tap clears.',
     accent: '#cfd8ff',
     load: () => import('./notesketch'),
   },

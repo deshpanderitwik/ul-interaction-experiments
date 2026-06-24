@@ -1,16 +1,37 @@
 import { Canvas, Path } from '@shopify/react-native-skia';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withTiming,
+  type SharedValue,
+} from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
-import { buildNotes, distToSegment, intensityColor } from './shared';
+import {
+  NOTE_LABELS,
+  buildNotes,
+  distToSegment,
+  intensityColor,
+  type Note,
+} from './shared';
+import { playPluck } from './voice';
 
 // NoteSketch — draw freehand white strokes on a field of "note" circles laid
-// out as a vertical pitch ladder (F3 bottom → F4 top). When the stroke you're
-// drawing passes through a note it latches active, and its color intensity
-// ramps with trigger order (oldest dim → newest brightest). Double-tap clears
-// strokes and resets every note. (Order is the signal we'll wire to sound.)
+// out as a vertical pitch ladder (F3 bottom → F4 top). A stroke passing through
+// a note latches it active; intensity ramps with trigger order (oldest dim →
+// newest bright). Active notes form an arpeggio that loops at 120 BPM in eighth
+// notes: each step the current note pulses and a pluck fires. Double-tap clears.
+//
+// 120 BPM, eighth notes → quarter = 500ms, eighth = 250ms per step.
+const STEP_MS = 250;
+// Fraction of the step the pulse spends rising before it decays.
+const PULSE_RISE_MS = 55;
+
 export default function NoteSketch() {
   const live = useExperimentActive();
   const { width, height } = useWindowDimensions();
@@ -21,16 +42,21 @@ export default function NoteSketch() {
 
   const [paths, setPaths] = useState<string[]>([]);
   const [current, setCurrent] = useState<string | null>(null);
-  // Ids in the order they were first triggered (newest last). A note's color
-  // intensity ramps with its position in this list.
+  // Ids in the order they were first triggered (newest last).
   const [order, setOrder] = useState<string[]>([]);
 
   const currentRef = useRef<string | null>(null);
   const lastPt = useRef<{ x: number; y: number } | null>(null);
+  const orderRef = useRef(order);
+  orderRef.current = order;
+
+  // Arp playback (UI thread): which order-rank is sounding right now, and a
+  // per-step envelope (0→1→0) the playing note animates its pulse on.
+  const playingRank = useSharedValue(-1);
+  const pulse = useSharedValue(0);
 
   // Latch any note whose circle the segment A→B passes through, appending newly
-  // hit notes in trigger order (sorted by where they fall along the segment, so
-  // a single fast swipe through several notes still records left-to-right).
+  // hit notes in trigger order (sorted by where they fall along the segment).
   const hitTest = (ax: number, ay: number, bx: number, by: number) => {
     const dx = bx - ax;
     const dy = by - ay;
@@ -79,6 +105,43 @@ export default function NoteSketch() {
     setPaths([]);
     setOrder([]);
   };
+
+  // Arp sequencer: while live with ≥1 active note, step through the active notes
+  // in trigger order on the 1/8-note clock. Reads orderRef so adding notes
+  // mid-play extends the cycle without restarting the clock.
+  const hasActive = order.length > 0;
+  useEffect(() => {
+    if (!live || !hasActive) {
+      playingRank.value = -1;
+      return;
+    }
+    let step = 0;
+    const tick = () => {
+      const seq = orderRef.current;
+      const len = seq.length;
+      if (len === 0) return;
+      const rank = step % len;
+      playingRank.value = rank;
+      pulse.value = 0;
+      pulse.value = withSequence(
+        withTiming(1, { duration: PULSE_RISE_MS, easing: Easing.out(Easing.quad) }),
+        withTiming(0, { duration: STEP_MS - PULSE_RISE_MS, easing: Easing.out(Easing.quad) })
+      );
+      const id = seq[rank];
+      const pitchT =
+        NOTE_LABELS.length > 1
+          ? (NOTE_LABELS as readonly string[]).indexOf(id) / (NOTE_LABELS.length - 1)
+          : 0;
+      playPluck(pitchT);
+      step += 1;
+    };
+    tick(); // sound the first note immediately on (re)start
+    const handle = setInterval(tick, STEP_MS);
+    return () => {
+      clearInterval(handle);
+      playingRank.value = -1;
+    };
+  }, [live, hasActive, playingRank, pulse]);
 
   const draw = Gesture.Pan()
     .minDistance(2)
@@ -131,49 +194,88 @@ export default function NoteSketch() {
         </Canvas>
 
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          {notes.map((n) => {
-            const rank = order.indexOf(n.id);
-            const on = rank >= 0;
-            // Intensity by trigger order: oldest → 0 (dim), newest → 1 (bright).
-            const t = on ? (order.length > 1 ? rank / (order.length - 1) : 1) : 0;
-            return (
-              <View
-                key={n.id}
-                style={[
-                  styles.note,
-                  {
-                    left: n.cx - n.r,
-                    top: n.cy - n.r,
-                    width: n.r * 2,
-                    height: n.r * 2,
-                    borderRadius: n.r,
-                  },
-                  on
-                    ? {
-                        backgroundColor: intensityColor(t),
-                        borderColor: `rgba(255,255,255,${(0.45 + 0.55 * t).toFixed(3)})`,
-                      }
-                    : styles.noteOff,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.label,
-                    on
-                      ? t > 0.55
-                        ? styles.labelDark
-                        : styles.labelLight
-                      : styles.labelOff,
-                  ]}
-                >
-                  {n.label}
-                </Text>
-              </View>
-            );
-          })}
+          {notes.map((n) => (
+            <NoteCircle
+              key={n.id}
+              note={n}
+              rank={order.indexOf(n.id)}
+              total={order.length}
+              playingRank={playingRank}
+              pulse={pulse}
+            />
+          ))}
         </View>
       </View>
     </GestureDetector>
+  );
+}
+
+// One note circle. Static look (outline when inactive; intensity fill by trigger
+// rank when active); the pulse — scale + white flash on its turn in the arp — is
+// driven on the UI thread off the shared playingRank/pulse values.
+function NoteCircle({
+  note,
+  rank,
+  total,
+  playingRank,
+  pulse,
+}: {
+  note: Note;
+  rank: number;
+  total: number;
+  playingRank: SharedValue<number>;
+  pulse: SharedValue<number>;
+}) {
+  const on = rank >= 0;
+  // Intensity by trigger order: oldest → 0 (dim), newest → 1 (bright).
+  const t = on ? (total > 1 ? rank / (total - 1) : 1) : 0;
+
+  const scaleStyle = useAnimatedStyle(() => {
+    const p = playingRank.value === rank ? pulse.value : 0;
+    return { transform: [{ scale: 1 + p * 0.35 }] };
+  });
+  const flashStyle = useAnimatedStyle(() => {
+    const p = playingRank.value === rank ? pulse.value : 0;
+    return { opacity: p * 0.7 };
+  });
+
+  return (
+    <Animated.View
+      style={[
+        styles.note,
+        {
+          left: note.cx - note.r,
+          top: note.cy - note.r,
+          width: note.r * 2,
+          height: note.r * 2,
+          borderRadius: note.r,
+        },
+        on
+          ? {
+              backgroundColor: intensityColor(t),
+              borderColor: `rgba(255,255,255,${(0.45 + 0.55 * t).toFixed(3)})`,
+            }
+          : styles.noteOff,
+        scaleStyle,
+      ]}
+    >
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFill,
+          { borderRadius: note.r, backgroundColor: '#fff' },
+          flashStyle,
+        ]}
+      />
+      <Text
+        style={[
+          styles.label,
+          on ? (t > 0.55 ? styles.labelDark : styles.labelLight) : styles.labelOff,
+        ]}
+      >
+        {note.label}
+      </Text>
+    </Animated.View>
   );
 }
 
@@ -184,6 +286,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
+    overflow: 'hidden',
   },
   noteOff: {
     borderColor: 'rgba(255,255,255,0.35)',

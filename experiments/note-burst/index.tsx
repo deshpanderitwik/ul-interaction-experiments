@@ -17,6 +17,7 @@ import { DOT_COLORS, F_MINOR, pluck, randItem } from './shared';
 // when dots spawn or expire (not every frame).
 
 const MAX_DOTS = 500; // safety cap across overlapping bursts
+const NOTE_GAP_MS = 80; // spacing between notes within a burst
 
 type Dot = {
   id: number;
@@ -40,11 +41,13 @@ export default function NoteBurst() {
   const spawnBurst = (x: number, y: number) => {
     const count = 5 + ((Math.random() * 4) | 0); // 5..8 notes
 
-    // Audio: notes sampled from F minor, lightly staggered into a burst.
+    // Audio: notes sampled from F minor, spaced out into a quick spray (ordered
+    // gaps + a little jitter so they don't clump).
     for (let k = 0; k < count; k++) {
       const freq = randItem(F_MINOR);
       const gain = 0.5 + Math.random() * 0.4;
-      setTimeout(() => pluck(freq, gain), Math.random() * 90);
+      const delay = k * NOTE_GAP_MS + Math.random() * 25;
+      setTimeout(() => pluck(freq, gain), delay);
     }
 
     // Visual: a cloud of tiny dots flung radially from the tap point.

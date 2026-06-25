@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import { SettingsGear, SettingsProvider, SettingsSheet } from './settings';
 
 // Whether the hosted experiment is currently "live": on-screen AND the app is
 // foregrounded. Experiments should gate their hardware (camera, sensors) and
@@ -33,7 +34,13 @@ export function useExperimentActive(): boolean {
  *    still works).
  * Intentionally lean: no error boundary, no safe-area wrapper (yet).
  */
-export function ExperimentHost({ children }: { children: ReactNode }) {
+export function ExperimentHost({
+  children,
+  settingsKey = 'experiment',
+}: {
+  children: ReactNode;
+  settingsKey?: string;
+}) {
   const router = useRouter();
   const [focused, setFocused] = useState(true);
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
@@ -58,18 +65,22 @@ export function ExperimentHost({ children }: { children: ReactNode }) {
 
   return (
     <ActiveContext.Provider value={active}>
-      <View style={styles.fill}>
-        {children}
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={16}
-          accessibilityRole="button"
-          accessibilityLabel="Back to Home"
-          style={styles.back}
-        >
-          <Text style={styles.chevron}>‹</Text>
-        </Pressable>
-      </View>
+      <SettingsProvider id={settingsKey}>
+        <View style={styles.fill}>
+          {children}
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={16}
+            accessibilityRole="button"
+            accessibilityLabel="Back to Home"
+            style={styles.back}
+          >
+            <Text style={styles.chevron}>‹</Text>
+          </Pressable>
+          <SettingsGear />
+          <SettingsSheet />
+        </View>
+      </SettingsProvider>
     </ActiveContext.Provider>
   );
 }

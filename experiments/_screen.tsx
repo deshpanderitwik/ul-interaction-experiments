@@ -11,15 +11,17 @@ export function HostedExperiment({
   load,
   props,
   missingLabel,
+  settingsKey,
 }: {
   load?: Load;
   props?: Record<string, unknown>;
   missingLabel?: string;
+  settingsKey?: string;
 }) {
   const Lazy = useMemo(() => (load ? React.lazy(load) : null), [load]);
 
   return (
-    <ExperimentHost>
+    <ExperimentHost settingsKey={settingsKey}>
       {Lazy ? (
         <Suspense
           fallback={

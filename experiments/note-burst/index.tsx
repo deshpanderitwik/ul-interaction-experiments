@@ -8,7 +8,21 @@ import {
   type SharedValue,
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
+import { useSettings } from '../settings';
 import { DOT_COLORS, F_MINOR, pluck, randItem } from './shared';
+
+// Note spacing is user-adjustable: 0 ms = all notes at once, up to 240 ms apart.
+const SETTINGS = {
+  spacing: {
+    type: 'slider',
+    label: 'Note spacing',
+    min: 0,
+    max: 240,
+    step: 10,
+    unit: 'ms',
+    default: 80,
+  },
+} as const;
 
 // Note Burst — tap anywhere to fire a burst of notes randomly sampled from the
 // F minor scale, with a matching shower of tiny dots exploding from the tap.
@@ -17,7 +31,6 @@ import { DOT_COLORS, F_MINOR, pluck, randItem } from './shared';
 // when dots spawn or expire (not every frame).
 
 const MAX_DOTS = 500; // safety cap across overlapping bursts
-const NOTE_GAP_MS = 80; // spacing between notes within a burst
 
 type Dot = {
   id: number;
@@ -34,6 +47,7 @@ type Dot = {
 
 export default function NoteBurst() {
   const live = useExperimentActive();
+  const { spacing } = useSettings(SETTINGS);
   const clock = useClock();
   const [dots, setDots] = useState<Dot[]>([]);
   const nextId = useRef(0);
@@ -46,7 +60,7 @@ export default function NoteBurst() {
     for (let k = 0; k < count; k++) {
       const freq = randItem(F_MINOR);
       const gain = 0.5 + Math.random() * 0.4;
-      const delay = k * NOTE_GAP_MS + Math.random() * 25;
+      const delay = k * spacing + Math.random() * 25;
       setTimeout(() => pluck(freq, gain), delay);
     }
 

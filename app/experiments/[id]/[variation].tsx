@@ -22,6 +22,7 @@ export default function ExperimentVariation() {
     <HostedExperiment
       load={v ? load : undefined}
       props={v?.preset}
+      settingsKey={`${id}/${variation}`}
       missingLabel={`${id}/${variation}`}
     />
   );

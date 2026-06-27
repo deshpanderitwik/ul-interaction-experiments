@@ -1,4 +1,4 @@
-import { Canvas, Circle, useClock } from '@shopify/react-native-skia';
+import { Canvas, Circle, Path, useClock } from '@shopify/react-native-skia';
 import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -9,7 +9,7 @@ import {
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
 import { useSettings } from '../settings';
-import { F_MINOR, colorForFreq, pitchNorm, pluck, randItem } from './shared';
+import { F_MINOR, pitchNorm, pluck, randItem } from './shared';
 
 // Note spacing is user-adjustable: 0 ms = all notes at once, up to 240 ms apart.
 const SETTINGS = {
@@ -25,16 +25,14 @@ const SETTINGS = {
 } as const;
 
 // Note Burst — tap to fire a burst of notes randomly sampled from F minor. The
-// visual is driven directly by the notes: each note, the moment it sounds,
-// emits its own puff of dots whose
-//   - horizontal position encodes WHEN it fires (so gaps between puffs == the
-//     time spacing between notes; the spacing slider visibly stretches it),
-//   - vertical position encodes its pitch (higher note = higher), and
-//   - color encodes pitch, size encodes loudness.
-// Particle motion runs on the UI thread off a shared Skia clock, so the React
-// tree only changes when dots spawn or expire.
+// visual is driven directly by the notes: each note, the moment it sounds, emits
+// a white puff whose horizontal position encodes WHEN it fires (gaps between
+// puffs == time spacing between notes) and vertical position encodes its pitch.
+// A faint white line threads the note points in time order, so the burst reads
+// as a melodic contour. Motion runs on the UI thread off a shared Skia clock.
 
 const MAX_DOTS = 500; // safety cap across overlapping bursts
+const MAX_LINES = 12;
 const PX_PER_MS = 0.22; // horizontal pixels per ms of note timing
 const PITCH_SPAN = 220; // vertical pixels across the pitch range
 const DOTS_PER_NOTE = 5;
@@ -46,9 +44,15 @@ type Dot = {
   dx: number;
   dy: number;
   size: number;
-  color: string;
   born: number; // clock ms at spawn
   life: number; // ms
+};
+
+type BurstLine = {
+  id: number;
+  born: number;
+  life: number;
+  pts: { x: number; y: number }[];
 };
 
 export default function NoteBurst() {
@@ -56,11 +60,13 @@ export default function NoteBurst() {
   const { spacing } = useSettings(SETTINGS);
   const clock = useClock();
   const [dots, setDots] = useState<Dot[]>([]);
+  const [lines, setLines] = useState<BurstLine[]>([]);
   const nextId = useRef(0);
+  const nextLineId = useRef(0);
 
-  // One note's worth of dots: a small radial puff at the note's (x, y), colored
-  // and sized by the note, spawned at the instant the note sounds.
-  const spawnNoteDots = (ox: number, oy: number, color: string, baseSize: number) => {
+  // One note's worth of dots: a small white radial puff at the note's (x, y),
+  // sized by loudness, spawned the instant the note sounds.
+  const spawnNoteDots = (ox: number, oy: number, baseSize: number) => {
     const now = clock.value;
     const fresh: Dot[] = [];
     for (let j = 0; j < DOTS_PER_NOTE; j++) {
@@ -73,7 +79,6 @@ export default function NoteBurst() {
         dx: Math.cos(a) * d,
         dy: Math.sin(a) * d,
         size: baseSize * (0.7 + Math.random() * 0.6),
-        color,
         born: now,
         life: 650 + Math.random() * 300,
       });
@@ -88,6 +93,12 @@ export default function NoteBurst() {
     // Center the time-sequence horizontally on the tap so it stays on-screen.
     const centerDelay = ((count - 1) * spacing) / 2;
 
+    const lineId = nextLineId.current++;
+    const lineLife = (count - 1) * spacing + 1200;
+    setLines((prev) =>
+      [...prev, { id: lineId, born: clock.value, life: lineLife, pts: [] }].slice(-MAX_LINES)
+    );
+
     for (let k = 0; k < count; k++) {
       const freq = randItem(F_MINOR);
       const gain = 0.5 + Math.random() * 0.4;
@@ -96,19 +107,26 @@ export default function NoteBurst() {
       // Position derived from the note: X from its onset time, Y from its pitch.
       const ox = x + (delay - centerDelay) * PX_PER_MS;
       const oy = y - (pitchNorm(freq) - 0.5) * PITCH_SPAN;
-      const color = colorForFreq(freq);
       const size = 2 + gain * 4;
 
       setTimeout(() => {
         pluck(freq, gain);
-        spawnNoteDots(ox, oy, color, size);
+        spawnNoteDots(ox, oy, size);
+        setLines((prev) =>
+          prev.map((l) => (l.id === lineId ? { ...l, pts: [...l.pts, { x: ox, y: oy }] } : l))
+        );
       }, delay);
     }
+
+    setTimeout(() => setLines((prev) => prev.filter((l) => l.id !== lineId)), lineLife);
   };
 
-  // Clear any lingering dots when the screen goes off/background.
+  // Clear anything lingering when the screen goes off/background.
   useEffect(() => {
-    if (!live) setDots([]);
+    if (!live) {
+      setDots([]);
+      setLines([]);
+    }
   }, [live]);
 
   const tap = Gesture.Tap().onBegin((e) => {
@@ -120,6 +138,9 @@ export default function NoteBurst() {
     <GestureDetector gesture={tap}>
       <View style={styles.fill}>
         <Canvas style={StyleSheet.absoluteFill}>
+          {lines.map((l) => (
+            <BurstLineView key={l.id} line={l} clock={clock} />
+          ))}
           {dots.map((d) => (
             <Particle key={d.id} dot={d} clock={clock} />
           ))}
@@ -141,7 +162,37 @@ function Particle({ dot, clock }: { dot: Dot; clock: SharedValue<number> }) {
   const r = useDerivedValue(() => Math.max(0, dot.size * (1 - 0.25 * prog.value)));
   const opacity = useDerivedValue(() => Math.max(0, 1 - prog.value));
 
-  return <Circle cx={cx} cy={cy} r={r} color={dot.color} opacity={opacity} />;
+  return <Circle cx={cx} cy={cy} r={r} color="white" opacity={opacity} />;
+}
+
+function BurstLineView({ line, clock }: { line: BurstLine; clock: SharedValue<number> }) {
+  // Faint fade-in then fade-out over the burst's life.
+  const opacity = useDerivedValue(() => {
+    const age = clock.value - line.born;
+    const t = age / line.life;
+    if (t >= 1) return 0;
+    const fadeIn = Math.min(1, age / 140);
+    const fadeOut = t > 0.6 ? Math.max(0, 1 - (t - 0.6) / 0.4) : 1;
+    return 0.3 * fadeIn * fadeOut;
+  });
+
+  if (line.pts.length < 2) return null;
+  // Order points left-to-right (i.e. by time) so the contour reads cleanly even
+  // if onset jitter reorders adjacent notes.
+  const sorted = [...line.pts].sort((a, b) => a.x - b.x);
+  const d = sorted.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+
+  return (
+    <Path
+      path={d}
+      style="stroke"
+      color="white"
+      strokeWidth={1.5}
+      strokeJoin="round"
+      strokeCap="round"
+      opacity={opacity}
+    />
+  );
 }
 
 const styles = StyleSheet.create({

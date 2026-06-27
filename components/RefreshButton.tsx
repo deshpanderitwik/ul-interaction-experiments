@@ -1,7 +1,7 @@
 import * as Updates from 'expo-updates';
 import { useUpdates } from 'expo-updates';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text } from 'react-native';
 
 // A top-level "apply update" affordance. It appears only when a JS (OTA) update
 // is available or already downloaded. Tapping fetches it (if needed) and reloads
@@ -26,11 +26,22 @@ export function RefreshButton() {
     if (busy) return;
     setBusy(true);
     try {
-      // If it isn't downloaded yet, grab it; then relaunch to apply.
-      if (!isUpdatePending) await Updates.fetchUpdateAsync();
-      await Updates.reloadAsync();
-    } catch {
-      setBusy(false); // leave the button up so they can retry
+      // Make sure there's genuinely a new update before relaunching: if it isn't
+      // already downloaded, fetch it and only proceed when it's actually new.
+      let pending = isUpdatePending;
+      if (!pending) {
+        const res = await Updates.fetchUpdateAsync();
+        pending = res.isNew;
+      }
+      if (pending) {
+        await Updates.reloadAsync(); // applies the update via a quick relaunch
+      } else {
+        setBusy(false); // nothing new to apply
+      }
+    } catch (e) {
+      // Surface the real reason instead of failing silently/hard.
+      setBusy(false);
+      Alert.alert('Update failed', String((e as Error)?.message ?? e));
     }
   };
 

@@ -3,13 +3,15 @@ import { useUpdates } from 'expo-updates';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text } from 'react-native';
 
-// A top-level "apply update" affordance. It appears only when a JS (OTA) update
-// is available or already downloaded. Tapping fetches it (if needed) and reloads
-// the JS runtime in place to apply — a quick relaunch, no quit/reopen.
+// A top-level "update ready" affordance. It appears only when a JS (OTA) update
+// is available or already downloaded. Tapping ensures the update is downloaded
+// and prompts a reopen to apply it.
 //
-// (The earlier native crash on reloadAsync came from expo-dev-client being
-// compiled into the release build; that's removed as of runtimeVersion 1.1.0,
-// so in-app reload is safe again. This JS only ships to runtime 1.1.0+ builds.)
+// NOTE: we do NOT call Updates.reloadAsync(). On this stack the in-app reload
+// segfaults natively in Expo's module/runtime teardown (ExpoModulesCore /
+// ExpoModulesJSI ModuleHolder.deinit) — a framework-level bug that a JS
+// try/catch can't catch and we can't patch over OTA. A normal OS relaunch
+// (quit + reopen) reinitializes cleanly, so we apply updates that way.
 //
 // expo-updates' APIs are disabled in dev, so this no-ops (and hides) there.
 export function RefreshButton() {
@@ -29,20 +31,17 @@ export function RefreshButton() {
     if (busy) return;
     setBusy(true);
     try {
-      // Make sure there's genuinely a new update, then reload in place to apply.
-      let pending = isUpdatePending;
-      if (!pending) {
-        const res = await Updates.fetchUpdateAsync();
-        pending = res.isNew;
-      }
-      if (pending) {
-        await Updates.reloadAsync();
-      } else {
-        setBusy(false); // nothing new to apply
-      }
+      // Ensure the update is downloaded (no-op if already pending), then prompt
+      // a reopen. We never call reloadAsync() — it crashes natively here.
+      if (!isUpdatePending) await Updates.fetchUpdateAsync();
+      Alert.alert(
+        'Update ready',
+        'Fully close and reopen the app to apply the latest update.'
+      );
     } catch (e) {
+      Alert.alert('Update check failed', String((e as Error)?.message ?? e));
+    } finally {
       setBusy(false);
-      Alert.alert('Update failed', String((e as Error)?.message ?? e));
     }
   };
 

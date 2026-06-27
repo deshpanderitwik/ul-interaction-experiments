@@ -2,6 +2,13 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  cancelAnimation,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   deleteRecording,
@@ -85,8 +92,11 @@ function Row({ rec, playing }: { rec: Recording; playing: boolean }) {
   };
 
   return (
-    <View style={styles.card}>
-      <Text style={styles.name}>{rec.name}</Text>
+    <View style={[styles.card, playing && styles.cardPlaying]}>
+      <View style={styles.nameRow}>
+        <Text style={styles.name}>{rec.name}</Text>
+        {playing ? <PlayingBars /> : null}
+      </View>
       <Text style={styles.meta}>{metaLine(rec)}</Text>
       <View style={styles.actions}>
         <Action label={playing ? 'Stop' : 'Play'} onPress={onPlay} />
@@ -123,6 +133,36 @@ function metaLine(rec: Recording): string {
   return `${date} · ${rec.noteCount} notes · ${secs}s`;
 }
 
+// Animated 3-bar equalizer shown on the currently-playing row.
+function PlayingBars() {
+  const a = useSharedValue(0.4);
+  const b = useSharedValue(0.9);
+  const c = useSharedValue(0.6);
+
+  useEffect(() => {
+    a.value = withRepeat(withTiming(1, { duration: 360 }), -1, true);
+    b.value = withRepeat(withTiming(0.35, { duration: 300 }), -1, true);
+    c.value = withRepeat(withTiming(0.95, { duration: 440 }), -1, true);
+    return () => {
+      cancelAnimation(a);
+      cancelAnimation(b);
+      cancelAnimation(c);
+    };
+  }, [a, b, c]);
+
+  const sa = useAnimatedStyle(() => ({ height: 4 + a.value * 14 }));
+  const sb = useAnimatedStyle(() => ({ height: 4 + b.value * 14 }));
+  const sc = useAnimatedStyle(() => ({ height: 4 + c.value * 14 }));
+
+  return (
+    <View style={styles.bars}>
+      <Animated.View style={[styles.bar, sa]} />
+      <Animated.View style={[styles.bar, sb]} />
+      <Animated.View style={[styles.bar, sc]} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   header: {
@@ -145,6 +185,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     backgroundColor: '#0c0c0c',
   },
+  cardPlaying: { borderColor: '#5b8cff', backgroundColor: '#0e1320' },
+  nameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  bars: { flexDirection: 'row', alignItems: 'flex-end', gap: 3, height: 18 },
+  bar: { width: 3, borderRadius: 1.5, backgroundColor: '#5b8cff' },
   name: { color: '#fff', fontSize: 17, fontWeight: '600' },
   meta: { color: '#8a8a8a', fontSize: 13, marginTop: 4, fontVariant: ['tabular-nums'] },
   actions: { flexDirection: 'row', gap: 18, marginTop: 14 },

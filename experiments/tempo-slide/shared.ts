@@ -22,12 +22,14 @@ export function pluck(freq: number) {
   NoteSynth?.pluck(freq, 0.85, 0.5).catch(() => {});
 }
 
-// Vertical position → step interval in ms. Top of the screen is fast, bottom is
-// slow, clamped to the range below.
-export const FAST_MS = 90;
-export const SLOW_MS = 520;
-
-export function intervalForY(y: number, height: number): number {
+// Vertical position → step interval in ms. Top of the screen is the fastest
+// interval, bottom is the slowest (both user-configurable).
+export function intervalForY(
+  y: number,
+  height: number,
+  fastMs: number,
+  slowMs: number
+): number {
   const t = height > 0 ? Math.max(0, Math.min(1, y / height)) : 0.5;
-  return FAST_MS + t * (SLOW_MS - FAST_MS);
+  return fastMs + t * (slowMs - fastMs);
 }

@@ -10,7 +10,30 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
+import { useSettings } from '../settings';
 import { ARP_COLORS, currentArp, intervalForY, pluck } from './shared';
+
+// Fastest (top of screen) and slowest (bottom) step intervals are adjustable.
+const SETTINGS = {
+  fastMs: {
+    type: 'slider',
+    label: 'Fastest (top)',
+    min: 40,
+    max: 300,
+    step: 5,
+    unit: 'ms',
+    default: 90,
+  },
+  slowMs: {
+    type: 'slider',
+    label: 'Slowest (bottom)',
+    min: 200,
+    max: 1000,
+    step: 10,
+    unit: 'ms',
+    default: 520,
+  },
+} as const;
 
 // Tempo Slide — touch the screen to start an F major arpeggio (root, third,
 // fifth, octave; F3→F4) and slide vertically to scrub its tempo: up = faster,
@@ -22,9 +45,14 @@ import { ARP_COLORS, currentArp, intervalForY, pluck } from './shared';
 // run on the UI thread off shared values, so each note's color is crisp.
 export default function TempoSlide() {
   const live = useExperimentActive();
+  const { fastMs, slowMs } = useSettings(SETTINGS);
   const { height } = useWindowDimensions();
   const heightRef = useRef(height);
   heightRef.current = height;
+  const fastRef = useRef(fastMs);
+  fastRef.current = fastMs;
+  const slowRef = useRef(slowMs);
+  slowRef.current = slowMs;
 
   // UI-thread visuals: which degree is flashing, the flash envelope, the hint.
   const deg = useSharedValue(0);
@@ -50,13 +78,13 @@ export default function TempoSlide() {
   };
 
   const startArp = (y: number) => {
-    intervalRef.current = intervalForY(y, heightRef.current);
+    intervalRef.current = intervalForY(y, heightRef.current, fastRef.current, slowRef.current);
     stepRef.current = 0;
     if (timerRef.current) clearTimeout(timerRef.current);
     tick();
   };
   const setTempo = (y: number) => {
-    intervalRef.current = intervalForY(y, heightRef.current);
+    intervalRef.current = intervalForY(y, heightRef.current, fastRef.current, slowRef.current);
   };
   const stopArp = () => {
     if (timerRef.current) {

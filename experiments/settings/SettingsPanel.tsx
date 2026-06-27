@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ScrollView } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -64,23 +65,29 @@ export function SettingsSheet() {
           </Pressable>
         </View>
 
-        <ScalePicker />
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <ScalePicker />
 
-        {Object.entries(schema ?? {}).map(([key, ctrl]) => (
-          <View key={key} style={styles.row}>
-            <View style={styles.rowHead}>
-              <Text style={styles.label}>{ctrl.label}</Text>
-              <Text style={styles.value}>{formatValue(values[key] ?? ctrl.default, ctrl)}</Text>
+          {Object.entries(schema ?? {}).map(([key, ctrl]) => (
+            <View key={key} style={styles.row}>
+              <View style={styles.rowHead}>
+                <Text style={styles.label}>{ctrl.label}</Text>
+                <Text style={styles.value}>{formatValue(values[key] ?? ctrl.default, ctrl)}</Text>
+              </View>
+              <Slider
+                value={values[key] ?? ctrl.default}
+                minimumValue={ctrl.min}
+                maximumValue={ctrl.max}
+                step={ctrl.step ?? 0}
+                onValueChange={(v) => setValue(key, v)}
+              />
             </View>
-            <Slider
-              value={values[key] ?? ctrl.default}
-              minimumValue={ctrl.min}
-              maximumValue={ctrl.max}
-              step={ctrl.step ?? 0}
-              onValueChange={(v) => setValue(key, v)}
-            />
-          </View>
-        ))}
+          ))}
+        </ScrollView>
       </Animated.View>
     </View>
   );
@@ -126,6 +133,8 @@ const styles = StyleSheet.create({
   },
   title: { color: '#fff', fontSize: 20, fontWeight: '700' },
   done: { color: '#5b8cff', fontSize: 16, fontWeight: '600' },
+  scroll: { flex: 1 },
+  scrollContent: { paddingBottom: 48 },
   row: { marginBottom: 22 },
   rowHead: {
     flexDirection: 'row',

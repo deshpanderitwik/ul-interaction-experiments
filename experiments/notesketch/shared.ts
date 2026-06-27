@@ -22,7 +22,7 @@ export const NOTE_RADIUS = 30;
 // Lay the current scale out as a vertical pitch ladder (one octave, 8 notes),
 // centered horizontally: root at the bottom, octave at the top.
 export function buildNotes(width: number, height: number, scale: Scale): Note[] {
-  const topPad = 120;
+  const topPad = 168; // clear the REC pill in the host overlay (top-center)
   const bottomPad = 120;
   const ladder = ladderNotes(scale, 48 + scale.root); // root at octave 3
   const n = ladder.length;

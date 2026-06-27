@@ -1,4 +1,5 @@
 import { NoteSynth } from '../../modules/note-synth';
+import { recordNote } from '../recorder/recorder';
 
 // Tempo Slide's arpeggio: an F major chord spelled across an octave — root,
 // major third, fifth, octave → F3, A3, C4, F4. Each degree flashes its own hue
@@ -18,6 +19,7 @@ export const ARP_COLORS = ARP.map((s) => s.color);
 // Sine pluck via the native synth. Optional-chaining short-circuits (no sound,
 // no throw) on a build without the module; never throws.
 export function pluck(freq: number) {
+  recordNote(freq, 0.85);
   NoteSynth?.pluck(freq, 0.85, 0.5).catch(() => {});
 }
 

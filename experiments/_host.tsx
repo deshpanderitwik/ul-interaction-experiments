@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import { RecordControl } from './recorder';
 import { SettingsGear, SettingsProvider, SettingsSheet } from './settings';
 
 // Whether the hosted experiment is currently "live": on-screen AND the app is
@@ -77,6 +78,7 @@ export function ExperimentHost({
           >
             <Text style={styles.chevron}>‹</Text>
           </Pressable>
+          <RecordControl />
           <SettingsGear />
           <SettingsSheet />
         </View>

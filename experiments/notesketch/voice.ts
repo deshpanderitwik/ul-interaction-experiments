@@ -1,6 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { FineHaptics } from '../../modules/fine-haptics';
 import { NoteSynth } from '../../modules/note-synth';
+import { recordNote } from '../recorder/recorder';
 
 // The "voice" seam for NoteSketch. A pluck is both heard and felt:
 //   - audio: a sine pluck from the NoteSynth native module (Swift/AVAudioEngine)
@@ -27,6 +28,8 @@ function canFineHaptics(): boolean {
  */
 export function playPluck(freq: number, bright: number) {
   const b = Math.max(0, Math.min(1, bright));
+
+  recordNote(freq, 0.85);
 
   // Sine pluck. Optional-chaining short-circuits (no call, no throw) when the
   // synth module isn't in this binary.

@@ -1,4 +1,5 @@
 import { NoteSynth } from '../../modules/note-synth';
+import { recordNote } from '../recorder/recorder';
 
 // F natural minor (F G A♭ B♭ C D♭ E♭) as a pool of frequencies spanning
 // F3..F5, so a burst can sample across a couple octaves. A4 = 440.
@@ -57,6 +58,7 @@ export function colorForFreq(freq: number): string {
 
 // Sine pluck via the native synth. Silent (no throw) on a build without it.
 export function pluck(freq: number, gain: number) {
+  recordNote(freq, gain);
   NoteSynth?.pluck(freq, gain, 0.6).catch(() => {});
 }
 

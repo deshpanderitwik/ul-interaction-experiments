@@ -1,20 +1,27 @@
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   deleteRecording,
+  loadEvents,
   renameRecording,
   shareRecording,
   useLibrary,
   type Recording,
 } from '../experiments/recorder/library';
+import { playRecording, stopPlayback, usePlayingId } from '../experiments/recorder/player';
 
 // Recordings library: list, rename, delete, and AirDrop (share) saved MIDI clips.
 export default function Recordings() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const recordings = useLibrary();
+  const playingId = usePlayingId();
+
+  // Stop preview playback when leaving the screen.
+  useEffect(() => stopPlayback, []);
 
   return (
     <View style={styles.container}>
@@ -36,13 +43,23 @@ export default function Recordings() {
             No recordings yet. Open an experiment, tap REC, play, then tap again.
           </Text>
         }
-        renderItem={({ item }) => <Row rec={item} />}
+        renderItem={({ item }) => <Row rec={item} playing={playingId === item.id} />}
       />
     </View>
   );
 }
 
-function Row({ rec }: { rec: Recording }) {
+function Row({ rec, playing }: { rec: Recording; playing: boolean }) {
+  const onPlay = () => {
+    if (playing) {
+      stopPlayback();
+      return;
+    }
+    loadEvents(rec)
+      .then((events) => playRecording(rec.id, events))
+      .catch(() => {});
+  };
+
   const onRename = () => {
     Alert.prompt(
       'Rename recording',
@@ -72,6 +89,7 @@ function Row({ rec }: { rec: Recording }) {
       <Text style={styles.name}>{rec.name}</Text>
       <Text style={styles.meta}>{metaLine(rec)}</Text>
       <View style={styles.actions}>
+        <Action label={playing ? 'Stop' : 'Play'} onPress={onPlay} />
         <Action label="AirDrop" onPress={onShare} />
         <Action label="Rename" onPress={onRename} />
         <Action label="Delete" onPress={onDelete} danger />

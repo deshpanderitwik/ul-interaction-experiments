@@ -73,6 +73,8 @@ export async function addRecording(
   await LegacyFS.writeAsStringAsync(`${DIR}${file}`, toBase64(bytes), {
     encoding: LegacyFS.EncodingType.Base64,
   });
+  // Raw events alongside the .mid, for in-app preview playback.
+  await LegacyFS.writeAsStringAsync(`${DIR}${id}.json`, JSON.stringify(events));
   const rec: Recording = {
     id,
     name: defaultName(meta.experiment),
@@ -100,6 +102,7 @@ export async function deleteRecording(id: string) {
   const rec = (cache ?? []).find((r) => r.id === id);
   if (rec) {
     await LegacyFS.deleteAsync(`${DIR}${rec.file}`, { idempotent: true }).catch(() => {});
+    await LegacyFS.deleteAsync(`${DIR}${rec.id}.json`, { idempotent: true }).catch(() => {});
   }
   cache = (cache ?? []).filter((r) => r.id !== id);
   await persist();
@@ -108,6 +111,16 @@ export async function deleteRecording(id: string) {
 
 export async function shareRecording(rec: Recording) {
   await Share.share({ url: `${DIR}${rec.file}` });
+}
+
+// Load the raw note events for preview playback (empty for clips recorded
+// before event persistence, or if the file is missing).
+export async function loadEvents(rec: Recording): Promise<NoteEvent[]> {
+  try {
+    return JSON.parse(await LegacyFS.readAsStringAsync(`${DIR}${rec.id}.json`)) as NoteEvent[];
+  } catch {
+    return [];
+  }
 }
 
 function defaultName(experiment: string): string {

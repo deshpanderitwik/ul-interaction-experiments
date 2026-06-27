@@ -3,10 +3,14 @@ import { useUpdates } from 'expo-updates';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text } from 'react-native';
 
-// A top-level "apply update" affordance. It appears only when a JS (OTA) update
-// is available or already downloaded. Tapping fetches it (if needed) and reloads
-// the JS runtime to apply — a quick in-app relaunch, no quit/reopen. Native
-// updates aren't covered here; those still ship via a TestFlight build.
+// A top-level "update ready" affordance. It appears only when a JS (OTA) update
+// is available or already downloaded. Tapping ensures the update is downloaded
+// and prompts a reopen to apply it.
+//
+// NOTE: we deliberately do NOT call Updates.reloadAsync() here — on this build
+// the in-app reload crashes natively (the whole app process dies), which a JS
+// try/catch can't prevent. Applying on the next natural launch is crash-free.
+// True one-tap apply needs a native fix shipped via a TestFlight rebuild.
 //
 // expo-updates' APIs are disabled in dev, so this no-ops (and hides) there.
 export function RefreshButton() {
@@ -26,22 +30,17 @@ export function RefreshButton() {
     if (busy) return;
     setBusy(true);
     try {
-      // Make sure there's genuinely a new update before relaunching: if it isn't
-      // already downloaded, fetch it and only proceed when it's actually new.
-      let pending = isUpdatePending;
-      if (!pending) {
-        const res = await Updates.fetchUpdateAsync();
-        pending = res.isNew;
-      }
-      if (pending) {
-        await Updates.reloadAsync(); // applies the update via a quick relaunch
-      } else {
-        setBusy(false); // nothing new to apply
-      }
+      // Ensure the update is downloaded (no-op if already pending), then prompt
+      // a reopen. We never call reloadAsync() — it crashes natively here.
+      if (!isUpdatePending) await Updates.fetchUpdateAsync();
+      Alert.alert(
+        'Update ready',
+        'Fully close and reopen the app to apply the latest update.'
+      );
     } catch (e) {
-      // Surface the real reason instead of failing silently/hard.
+      Alert.alert('Update check failed', String((e as Error)?.message ?? e));
+    } finally {
       setBusy(false);
-      Alert.alert('Update failed', String((e as Error)?.message ?? e));
     }
   };
 

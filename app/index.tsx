@@ -2,6 +2,7 @@ import { Link } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { RefreshButton } from '../components/RefreshButton';
 import { experiments } from '../experiments/registry';
 
 // Home menu. Maps over the experiment registry — adding an experiment (or a
@@ -13,7 +14,10 @@ export default function Home() {
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      <Text style={[styles.heading, { marginTop: insets.top + 16 }]}>Experiments</Text>
+      <View style={[styles.header, { marginTop: insets.top + 16 }]}>
+        <Text style={styles.heading}>Experiments</Text>
+        <RefreshButton />
+      </View>
       <FlatList
         data={experiments}
         keyExtractor={(e) => e.id}
@@ -47,12 +51,17 @@ export default function Home() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    marginBottom: 16,
+  },
   heading: {
     color: '#fff',
     fontSize: 28,
     fontWeight: '700',
-    paddingHorizontal: 20,
-    marginBottom: 16,
   },
   list: { paddingHorizontal: 20, paddingBottom: 40, gap: 16 },
   group: { gap: 8 },

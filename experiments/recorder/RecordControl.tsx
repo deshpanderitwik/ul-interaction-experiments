@@ -1,12 +1,13 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { exportAndShare } from './exportMidi';
+import { showToast } from '../../components/Toast';
+import { addRecording } from './library';
 import { isRecording, startRecording, stopRecording, subscribe } from './recorder';
 
 // Top-center record control in the experiment host overlay. Tap to arm (shows a
-// red dot + running timer); tap again to stop, encode the recorded notes to a
-// .mid file, and open the share sheet (AirDrop). Works in any experiment.
-export function RecordControl() {
+// red dot + running timer); tap again to stop, save the recording to the library
+// (Home → Recordings), and toast — no interruption, so you can keep recording.
+export function RecordControl({ experiment }: { experiment: string }) {
   const [, force] = useReducer((x) => x + 1, 0);
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -30,11 +31,16 @@ export function RecordControl() {
       return;
     }
     const events = stopRecording();
+    if (events.length === 0) {
+      showToast('No notes recorded');
+      return;
+    }
     setBusy(true);
     try {
-      await exportAndShare(events);
+      await addRecording(events, { experiment });
+      showToast('Recording saved');
     } catch {
-      // share cancelled / failed — nothing to do
+      showToast('Could not save recording');
     } finally {
       setBusy(false);
     }

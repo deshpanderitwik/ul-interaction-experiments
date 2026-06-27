@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { RecordControl } from './recorder';
+import { getExperiment } from './registry';
 import { SettingsGear, SettingsProvider, SettingsSheet } from './settings';
 
 // Whether the hosted experiment is currently "live": on-screen AND the app is
@@ -78,7 +79,9 @@ export function ExperimentHost({
           >
             <Text style={styles.chevron}>‹</Text>
           </Pressable>
-          <RecordControl />
+          <RecordControl
+            experiment={getExperiment(settingsKey.split('/')[0])?.title ?? 'Experiment'}
+          />
           <SettingsGear />
           <SettingsSheet />
         </View>

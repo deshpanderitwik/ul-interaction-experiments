@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RefreshButton } from '../components/RefreshButton';
+import { useLibrary } from '../experiments/recorder/library';
 import { experiments } from '../experiments/registry';
 
 // Home menu. Maps over the experiment registry — adding an experiment (or a
@@ -10,6 +11,7 @@ import { experiments } from '../experiments/registry';
 // its host route; variations render indented under their parent.
 export default function Home() {
   const insets = useSafeAreaInsets();
+  const recordings = useLibrary();
 
   return (
     <View style={styles.container}>
@@ -19,6 +21,14 @@ export default function Home() {
         <RefreshButton />
       </View>
       <FlatList
+        ListHeaderComponent={
+          <Link href="/recordings" asChild>
+            <Pressable style={styles.recordings}>
+              <Text style={styles.recordingsTitle}>♪ Recordings</Text>
+              <Text style={styles.recordingsCount}>{recordings.length}</Text>
+            </Pressable>
+          </Link>
+        }
         data={experiments}
         keyExtractor={(e) => e.id}
         contentContainerStyle={styles.list}
@@ -64,6 +74,24 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   list: { paddingHorizontal: 20, paddingBottom: 40, gap: 16 },
+  recordings: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#2a2f3a',
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    backgroundColor: '#0c0c0c',
+  },
+  recordingsTitle: { color: '#fff', fontSize: 17, fontWeight: '600' },
+  recordingsCount: {
+    color: '#8a8a8a',
+    fontSize: 15,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
   group: { gap: 8 },
   empty: { color: '#666', fontSize: 15, paddingHorizontal: 20 },
   card: {

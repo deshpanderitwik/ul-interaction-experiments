@@ -2,7 +2,6 @@ import { Link } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { RefreshButton } from '../components/RefreshButton';
 import { useLibrary } from '../experiments/recorder/library';
 import { experiments } from '../experiments/registry';
 
@@ -18,7 +17,6 @@ export default function Home() {
       <StatusBar style="light" />
       <View style={[styles.header, { marginTop: insets.top + 16 }]}>
         <Text style={styles.heading}>Experiments</Text>
-        <RefreshButton />
       </View>
       <FlatList
         ListHeaderComponent={

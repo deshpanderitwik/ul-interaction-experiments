@@ -9,7 +9,7 @@ import {
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
 import { useSettings } from '../settings';
-import { DOT_COLORS, F_MINOR, pluck, randItem } from './shared';
+import { F_MINOR, colorForFreq, pitchNorm, pluck, randItem } from './shared';
 
 // Note spacing is user-adjustable: 0 ms = all notes at once, up to 240 ms apart.
 const SETTINGS = {
@@ -24,13 +24,20 @@ const SETTINGS = {
   },
 } as const;
 
-// Note Burst — tap anywhere to fire a burst of notes randomly sampled from the
-// F minor scale, with a matching shower of tiny dots exploding from the tap.
-// Particle motion runs on the UI thread: each dot's position/size/opacity is a
-// derived value off a single shared Skia clock, so the React tree only changes
-// when dots spawn or expire (not every frame).
+// Note Burst — tap to fire a burst of notes randomly sampled from F minor. The
+// visual is driven directly by the notes: each note, the moment it sounds,
+// emits its own puff of dots whose
+//   - horizontal position encodes WHEN it fires (so gaps between puffs == the
+//     time spacing between notes; the spacing slider visibly stretches it),
+//   - vertical position encodes its pitch (higher note = higher), and
+//   - color encodes pitch, size encodes loudness.
+// Particle motion runs on the UI thread off a shared Skia clock, so the React
+// tree only changes when dots spawn or expire.
 
 const MAX_DOTS = 500; // safety cap across overlapping bursts
+const PX_PER_MS = 0.22; // horizontal pixels per ms of note timing
+const PITCH_SPAN = 220; // vertical pixels across the pitch range
+const DOTS_PER_NOTE = 5;
 
 type Dot = {
   id: number;
@@ -38,7 +45,6 @@ type Dot = {
   y0: number;
   dx: number;
   dy: number;
-  gravity: number;
   size: number;
   color: string;
   born: number; // clock ms at spawn
@@ -52,42 +58,52 @@ export default function NoteBurst() {
   const [dots, setDots] = useState<Dot[]>([]);
   const nextId = useRef(0);
 
+  // One note's worth of dots: a small radial puff at the note's (x, y), colored
+  // and sized by the note, spawned at the instant the note sounds.
+  const spawnNoteDots = (ox: number, oy: number, color: string, baseSize: number) => {
+    const now = clock.value;
+    const fresh: Dot[] = [];
+    for (let j = 0; j < DOTS_PER_NOTE; j++) {
+      const a = Math.random() * Math.PI * 2;
+      const d = 8 + Math.random() * 26;
+      fresh.push({
+        id: nextId.current++,
+        x0: ox,
+        y0: oy,
+        dx: Math.cos(a) * d,
+        dy: Math.sin(a) * d,
+        size: baseSize * (0.7 + Math.random() * 0.6),
+        color,
+        born: now,
+        life: 650 + Math.random() * 300,
+      });
+    }
+    setDots((prev) => [...prev, ...fresh].slice(-MAX_DOTS));
+    const ids = new Set(fresh.map((p) => p.id));
+    setTimeout(() => setDots((prev) => prev.filter((p) => !ids.has(p.id))), 1100);
+  };
+
   const spawnBurst = (x: number, y: number) => {
     const count = 5 + ((Math.random() * 4) | 0); // 5..8 notes
+    // Center the time-sequence horizontally on the tap so it stays on-screen.
+    const centerDelay = ((count - 1) * spacing) / 2;
 
-    // Audio: notes sampled from F minor, spaced out into a quick spray (ordered
-    // gaps + a little jitter so they don't clump).
     for (let k = 0; k < count; k++) {
       const freq = randItem(F_MINOR);
       const gain = 0.5 + Math.random() * 0.4;
       const delay = k * spacing + Math.random() * 25;
-      setTimeout(() => pluck(freq, gain), delay);
-    }
 
-    // Visual: a cloud of tiny dots flung radially from the tap point.
-    const now = clock.value;
-    const dotCount = count * 4;
-    const fresh: Dot[] = [];
-    for (let k = 0; k < dotCount; k++) {
-      const angle = Math.random() * Math.PI * 2;
-      const dist = 40 + Math.random() * 130;
-      fresh.push({
-        id: nextId.current++,
-        x0: x,
-        y0: y,
-        dx: Math.cos(angle) * dist,
-        dy: Math.sin(angle) * dist,
-        gravity: 30 + Math.random() * 50,
-        size: 2 + Math.random() * 3,
-        color: randItem(DOT_COLORS),
-        born: now,
-        life: 600 + Math.random() * 300,
-      });
-    }
-    setDots((prev) => [...prev, ...fresh].slice(-MAX_DOTS));
+      // Position derived from the note: X from its onset time, Y from its pitch.
+      const ox = x + (delay - centerDelay) * PX_PER_MS;
+      const oy = y - (pitchNorm(freq) - 0.5) * PITCH_SPAN;
+      const color = colorForFreq(freq);
+      const size = 2 + gain * 4;
 
-    const ids = new Set(fresh.map((d) => d.id));
-    setTimeout(() => setDots((prev) => prev.filter((d) => !ids.has(d.id))), 1000);
+      setTimeout(() => {
+        pluck(freq, gain);
+        spawnNoteDots(ox, oy, color, size);
+      }, delay);
+    }
   };
 
   // Clear any lingering dots when the screen goes off/background.
@@ -121,9 +137,7 @@ function Particle({ dot, clock }: { dot: Dot; clock: SharedValue<number> }) {
     return 1 - (1 - t) * (1 - t);
   });
   const cx = useDerivedValue(() => dot.x0 + dot.dx * prog.value);
-  const cy = useDerivedValue(
-    () => dot.y0 + dot.dy * prog.value + dot.gravity * prog.value * prog.value
-  );
+  const cy = useDerivedValue(() => dot.y0 + dot.dy * prog.value);
   const r = useDerivedValue(() => Math.max(0, dot.size * (1 - 0.25 * prog.value)));
   const opacity = useDerivedValue(() => Math.max(0, 1 - prog.value));
 

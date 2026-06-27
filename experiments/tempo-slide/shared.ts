@@ -1,20 +1,19 @@
 import { NoteSynth } from '../../modules/note-synth';
 import { recordNote } from '../recorder/recorder';
+import { arpFrequencies, getScale } from '../scale';
 
-// Tempo Slide's arpeggio: an F major chord spelled across an octave — root,
-// major third, fifth, octave → F3, A3, C4, F4. Each degree flashes its own hue
-// the moment it sounds.
-export type ArpStep = { freq: number; color: string };
+// Tempo Slide's arpeggio: root / third / fifth / octave of the current scale,
+// spelled across an octave from the root at octave 3. Each degree flashes its
+// own hue the moment it sounds.
+export const ARP_COLORS = ['#2e7bff', '#c64fff', '#ffb02e', '#2ee08a'];
 
-export const ARP: ArpStep[] = [
-  { freq: 174.61, color: '#2e7bff' }, // F3  root    — blue
-  { freq: 220.0, color: '#c64fff' }, // A3  third   — violet
-  { freq: 261.63, color: '#ffb02e' }, // C4  fifth   — amber
-  { freq: 349.23, color: '#2ee08a' }, // F4  octave  — green
-];
-
-// Parallel list of just the flash colors, for interpolateColor in the worklet.
-export const ARP_COLORS = ARP.map((s) => s.color);
+export function currentArp(): { freq: number; color: string }[] {
+  const rootMidi = 48 + getScale().root; // root at octave 3 (C3 = 48, F3 = 53)
+  return arpFrequencies(getScale(), rootMidi).map((freq, i) => ({
+    freq,
+    color: ARP_COLORS[i],
+  }));
+}
 
 // Sine pluck via the native synth. Optional-chaining short-circuits (no sound,
 // no throw) on a build without the module; never throws.

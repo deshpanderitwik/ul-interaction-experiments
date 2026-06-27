@@ -1,11 +1,15 @@
-// Note model + layout for NoteSketch. Kept separate from the interaction so the
-// next step (wiring activation to sound) can import the same note definitions.
+// Note model + layout for NoteSketch — a vertical pitch ladder of the current
+// global scale (one octave).
+
+import { ladderNotes, type Scale } from '../scale';
 
 export type Note = {
   /** Stable id / pitch name, e.g. "F3". */
   id: string;
   /** Display label. */
   label: string;
+  /** Pitch in Hz. */
+  freq: number;
   /** Center on the canvas. */
   cx: number;
   cy: number;
@@ -13,49 +17,22 @@ export type Note = {
   r: number;
 };
 
-// Natural notes spanning one octave, F3 → F4 (low to high). Swap to the
-// chromatic set here to get all 13 — everything else is data-driven.
-export const NOTE_LABELS = [
-  'F3',
-  'G3',
-  'A3',
-  'B3',
-  'C4',
-  'D4',
-  'E4',
-  'F4',
-] as const;
-
 export const NOTE_RADIUS = 30;
 
-// Semitone offset from C within an octave, for note-name → frequency.
-const SEMITONE: Record<string, number> = {
-  C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5,
-  'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11,
-};
-
-// Equal-tempered frequency (A4 = 440 Hz) for a label like "F3" / "F#3" / "Gb3".
-export function noteFrequency(label: string): number {
-  const m = /^([A-G][#b]?)(-?\d+)$/.exec(label);
-  if (!m) return 440;
-  const semitone = SEMITONE[m[1]] ?? 0;
-  const octave = parseInt(m[2], 10);
-  const midi = (octave + 1) * 12 + semitone; // MIDI: C4 = 60
-  return 440 * Math.pow(2, (midi - 69) / 12);
-}
-
-// Lay the notes out as a vertical pitch ladder centered horizontally: lowest
-// (F3) at the bottom, highest (F4) at the top.
-export function buildNotes(width: number, height: number): Note[] {
+// Lay the current scale out as a vertical pitch ladder (one octave, 8 notes),
+// centered horizontally: root at the bottom, octave at the top.
+export function buildNotes(width: number, height: number, scale: Scale): Note[] {
   const topPad = 120;
   const bottomPad = 120;
-  const n = NOTE_LABELS.length;
+  const ladder = ladderNotes(scale, 48 + scale.root); // root at octave 3
+  const n = ladder.length;
   const span = Math.max(1, height - topPad - bottomPad);
   const gap = n > 1 ? span / (n - 1) : 0;
   const cx = width / 2;
-  return NOTE_LABELS.map((label, i) => ({
-    id: label,
-    label,
+  return ladder.map((nt, i) => ({
+    id: nt.label,
+    label: nt.label,
+    freq: nt.freq,
     cx,
     cy: height - bottomPad - i * gap,
     r: NOTE_RADIUS,
@@ -64,9 +41,7 @@ export function buildNotes(width: number, height: number): Note[] {
 
 // Active-note color by trigger order. t in [0,1] is the note's position in the
 // trigger sequence (0 = first/oldest, 1 = most recent). Ramps a blue from a
-// dim-but-clearly-active shade up to a bright near-white, so the draw order
-// reads as increasing intensity. Even t=0 stays distinct from the inactive
-// outline.
+// dim-but-clearly-active shade up to a bright near-white.
 export function intensityColor(t: number): string {
   const c = Math.max(0, Math.min(1, t));
   const lerp = (a: number, b: number) => Math.round(a + (b - a) * c);

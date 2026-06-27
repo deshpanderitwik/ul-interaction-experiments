@@ -6,15 +6,15 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
+import { ScalePicker } from './ScalePicker';
 import { useSettingsContext } from './context';
 import { Slider } from './Slider';
 import type { Setting } from './types';
 
-// Gear control, mirroring the host's back button but on the right. Renders only
-// once the experiment has registered a schema.
+// Gear control, mirroring the host's back button but on the right. Always shown
+// (every experiment has the global scale picker at minimum).
 export function SettingsGear() {
-  const { schema, setOpen } = useSettingsContext();
-  if (!schema) return null;
+  const { setOpen } = useSettingsContext();
   return (
     <Pressable
       onPress={() => setOpen(true)}
@@ -50,8 +50,6 @@ export function SettingsSheet() {
   const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateX: tx.value }] }));
   const scrimStyle = useAnimatedStyle(() => ({ opacity: scrim.value * 0.5 }));
 
-  if (!schema) return null;
-
   return (
     <View pointerEvents={open ? 'auto' : 'none'} style={StyleSheet.absoluteFill}>
       <Animated.View style={[StyleSheet.absoluteFill, styles.scrim, scrimStyle]}>
@@ -66,7 +64,9 @@ export function SettingsSheet() {
           </Pressable>
         </View>
 
-        {Object.entries(schema).map(([key, ctrl]) => (
+        <ScalePicker />
+
+        {Object.entries(schema ?? {}).map(([key, ctrl]) => (
           <View key={key} style={styles.row}>
             <View style={styles.rowHead}>
               <Text style={styles.label}>{ctrl.label}</Text>

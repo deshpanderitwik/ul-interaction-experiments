@@ -12,14 +12,8 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
-import {
-  NOTE_LABELS,
-  buildNotes,
-  distToSegment,
-  intensityColor,
-  noteFrequency,
-  type Note,
-} from './shared';
+import { useScale } from '../scale';
+import { buildNotes, distToSegment, intensityColor, type Note } from './shared';
 import { playPluck } from './voice';
 
 // NoteSketch — draw freehand white strokes on a field of "note" circles laid
@@ -36,8 +30,9 @@ const PULSE_RISE_MS = 55;
 export default function NoteSketch() {
   const live = useExperimentActive();
   const { width, height } = useWindowDimensions();
+  const scale = useScale();
 
-  const notes = useMemo(() => buildNotes(width, height), [width, height]);
+  const notes = useMemo(() => buildNotes(width, height, scale), [width, height, scale]);
   const notesRef = useRef(notes);
   notesRef.current = notes;
 
@@ -129,11 +124,12 @@ export default function NoteSketch() {
         withTiming(0, { duration: STEP_MS - PULSE_RISE_MS, easing: Easing.out(Easing.quad) })
       );
       const id = seq[rank];
-      const pitchT =
-        NOTE_LABELS.length > 1
-          ? (NOTE_LABELS as readonly string[]).indexOf(id) / (NOTE_LABELS.length - 1)
-          : 0;
-      playPluck(noteFrequency(id), pitchT);
+      const all = notesRef.current;
+      const idx = all.findIndex((nt) => nt.id === id);
+      if (idx >= 0) {
+        const pitchT = all.length > 1 ? idx / (all.length - 1) : 0;
+        playPluck(all[idx].freq, pitchT);
+      }
       step += 1;
     };
     tick(); // sound the first note immediately on (re)start

@@ -9,7 +9,7 @@ import {
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
 import { useSettings } from '../settings';
-import { F_MINOR, pitchNorm, pluck, randItem } from './shared';
+import { pitchNorm, pluck, randItem, scalePool } from './shared';
 
 // Note spacing is user-adjustable: 0 ms = all notes at once, up to 240 ms apart.
 const SETTINGS = {
@@ -89,6 +89,11 @@ export default function NoteBurst() {
   };
 
   const spawnBurst = (x: number, y: number) => {
+    const pool = scalePool();
+    if (pool.length === 0) return;
+    const lo = pool[0];
+    const hi = pool[pool.length - 1];
+
     const count = 5 + ((Math.random() * 4) | 0); // 5..8 notes
     // Center the time-sequence horizontally on the tap so it stays on-screen.
     const centerDelay = ((count - 1) * spacing) / 2;
@@ -100,13 +105,13 @@ export default function NoteBurst() {
     );
 
     for (let k = 0; k < count; k++) {
-      const freq = randItem(F_MINOR);
+      const freq = randItem(pool);
       const gain = 0.5 + Math.random() * 0.4;
       const delay = k * spacing + Math.random() * 25;
 
       // Position derived from the note: X from its onset time, Y from its pitch.
       const ox = x + (delay - centerDelay) * PX_PER_MS;
-      const oy = y - (pitchNorm(freq) - 0.5) * PITCH_SPAN;
+      const oy = y - (pitchNorm(freq, lo, hi) - 0.5) * PITCH_SPAN;
       const size = 2 + gain * 4;
 
       setTimeout(() => {

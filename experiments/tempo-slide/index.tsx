@@ -10,7 +10,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
-import { ARP, ARP_COLORS, intervalForY, pluck } from './shared';
+import { ARP_COLORS, currentArp, intervalForY, pluck } from './shared';
 
 // Tempo Slide — touch the screen to start an F major arpeggio (root, third,
 // fifth, octave; F3→F4) and slide vertically to scrub its tempo: up = faster,
@@ -37,8 +37,9 @@ export default function TempoSlide() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const tick = () => {
-    const i = stepRef.current % ARP.length;
-    pluck(ARP[i].freq);
+    const arp = currentArp();
+    const i = stepRef.current % arp.length;
+    pluck(arp[i].freq);
     deg.value = i;
     flash.value = withSequence(
       withTiming(0.92, { duration: 22 }),

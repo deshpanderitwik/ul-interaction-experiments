@@ -85,14 +85,14 @@ export default function NoteRadial() {
       showRadial(x, y);
     }
   };
-  const onUp = (movedFlag: number, sel: number) => {
+  // Runs on finalize (which always fires, unlike onEnd which needs the Pan to
+  // have activated — a stationary tap never activates it).
+  const onEndJS = (movedFlag: number, sel: number) => {
     if (pendingRemove.current != null && !movedFlag) {
       removeNote(pendingRemove.current); // a tap on a note removes it
     } else if (radialShownRef.current && sel >= 0) {
       popNote(sel); // dragged to a ring note and released
     }
-  };
-  const onFinalizeJS = () => {
     pendingRemove.current = null;
     hideRadial();
   };
@@ -154,13 +154,10 @@ export default function NoteRadial() {
       }
       selected.value = best;
     })
-    .onEnd(() => {
-      runOnJS(onUp)(moved.value, selected.value);
-    })
     .onFinalize(() => {
+      runOnJS(onEndJS)(moved.value, selected.value);
       selected.value = -1;
       moved.value = 0;
-      runOnJS(onFinalizeJS)();
     });
 
   const gesture = pan;

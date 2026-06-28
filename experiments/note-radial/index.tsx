@@ -37,10 +37,13 @@ export default function NoteRadial() {
   const notesRef = useRef<ActiveNote[]>(notes);
   notesRef.current = notes;
   const popId = useRef(0);
+  const pendingRemove = useRef<number | null>(null); // note tapped at touch-down
+  const radialShownRef = useRef(false);
 
   const centerX = useSharedValue(0);
   const centerY = useSharedValue(0);
   const selected = useSharedValue(-1);
+  const moved = useSharedValue(0); // 1 once the finger leaves the tap zone
   // Pulses 0→1→0 on every chord strum; active notes scale-pulse on it.
   const strumPulse = useSharedValue(0);
 
@@ -49,10 +52,12 @@ export default function NoteRadial() {
     const ring = ladderNotes(scale, 48 + scale.root).slice(0, N); // 7 degrees
     const state = { cx: x, cy: y, notes: ring };
     radialRef.current = state;
+    radialShownRef.current = true;
     setRadial(state);
   };
   const hideRadial = () => {
     radialRef.current = null;
+    radialShownRef.current = false;
     setRadial(null);
   };
   const popNote = (idx: number) => {
@@ -67,7 +72,30 @@ export default function NoteRadial() {
     setNotes((prev) => [...prev, { id, x, y, label: note.label, freq: note.freq }]);
   };
 
-  const clearNotes = () => setNotes([]);
+  const removeNote = (id: number) => setNotes((prev) => prev.filter((n) => n.id !== id));
+
+  // Touch-down: tapping an existing note arms it for removal (no radial);
+  // pressing empty space summons the radial.
+  const onDown = (x: number, y: number) => {
+    const hit = [...notesRef.current].reverse().find((n) => Math.hypot(x - n.x, y - n.y) <= POP_R);
+    if (hit) {
+      pendingRemove.current = hit.id;
+    } else {
+      pendingRemove.current = null;
+      showRadial(x, y);
+    }
+  };
+  const onUp = (movedFlag: number, sel: number) => {
+    if (pendingRemove.current != null && !movedFlag) {
+      removeNote(pendingRemove.current); // a tap on a note removes it
+    } else if (radialShownRef.current && sel >= 0) {
+      popNote(sel); // dragged to a ring note and released
+    }
+  };
+  const onFinalizeJS = () => {
+    pendingRemove.current = null;
+    hideRadial();
+  };
 
   // Chord engine: while any note is alive, strum them all together on a clock so
   // the chord keeps ringing, pulsing every note in unison.
@@ -100,12 +128,15 @@ export default function NoteRadial() {
       centerX.value = e.x;
       centerY.value = e.y;
       selected.value = -1;
-      runOnJS(showRadial)(e.x, e.y); // appear immediately on press
+      moved.value = 0;
+      runOnJS(onDown)(e.x, e.y);
     })
     .onUpdate((e) => {
       const dx = e.x - centerX.value;
       const dy = e.y - centerY.value;
-      if (Math.sqrt(dx * dx + dy * dy) < DEADZONE) {
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 12) moved.value = 1;
+      if (dist < DEADZONE) {
         selected.value = -1;
         return;
       }
@@ -124,22 +155,15 @@ export default function NoteRadial() {
       selected.value = best;
     })
     .onEnd(() => {
-      if (selected.value >= 0) runOnJS(popNote)(selected.value);
+      runOnJS(onUp)(moved.value, selected.value);
     })
     .onFinalize(() => {
       selected.value = -1;
-      runOnJS(hideRadial)();
+      moved.value = 0;
+      runOnJS(onFinalizeJS)();
     });
 
-  const doubleTap = Gesture.Tap()
-    .numberOfTaps(2)
-    .maxDuration(300)
-    .onEnd(() => {
-      if (!live) return;
-      runOnJS(clearNotes)();
-    });
-
-  const gesture = Gesture.Race(doubleTap, pan);
+  const gesture = pan;
 
   return (
     <GestureDetector gesture={gesture}>
@@ -166,7 +190,7 @@ export default function NoteRadial() {
           </View>
         ) : null}
 
-        <Text style={styles.hint}>press &amp; hold, drag to a note · double-tap clears</Text>
+        <Text style={styles.hint}>press &amp; hold to add · tap a note to remove</Text>
       </View>
     </GestureDetector>
   );

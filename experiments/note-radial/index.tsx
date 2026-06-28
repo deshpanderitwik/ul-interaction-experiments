@@ -22,7 +22,7 @@ import { DEADZONE, N, POP_R, RADIAL_NOTE_R, RADIAL_RADIUS, STRUM_MS, pluck } fro
 // each strum pulses every note in unison.
 
 type NoteData = { freq: number; label: string };
-type RadialState = { cx: number; cy: number; notes: NoteData[] };
+type RadialState = { cx: number; cy: number; notes: NoteData[]; disabled: boolean[] };
 type ActiveNote = { id: number; x: number; y: number; label: string; freq: number };
 
 function angleFor(i: number): number {
@@ -44,13 +44,22 @@ export default function NoteRadial() {
   const centerY = useSharedValue(0);
   const selected = useSharedValue(-1);
   const moved = useSharedValue(0); // 1 once the finger leaves the tap zone
+  const disabledMask = useSharedValue(0); // bit i set = ring note i already placed
   // Pulses 0→1→0 on every chord strum; active notes scale-pulse on it.
   const strumPulse = useSharedValue(0);
 
   const showRadial = (x: number, y: number) => {
     const scale = getScale();
     const ring = ladderNotes(scale, 48 + scale.root).slice(0, N); // 7 degrees
-    const state = { cx: x, cy: y, notes: ring };
+    // Disable ring notes already placed on screen (no duplicate pitches).
+    const active = new Set(notesRef.current.map((n) => n.label));
+    const disabled = ring.map((r) => active.has(r.label));
+    let mask = 0;
+    disabled.forEach((d, i) => {
+      if (d) mask |= 1 << i;
+    });
+    disabledMask.value = mask;
+    const state = { cx: x, cy: y, notes: ring, disabled };
     radialRef.current = state;
     radialShownRef.current = true;
     setRadial(state);
@@ -63,6 +72,7 @@ export default function NoteRadial() {
   const popNote = (idx: number) => {
     const r = radialRef.current;
     if (!r || idx < 0 || idx >= r.notes.length) return;
+    if (r.disabled[idx]) return; // already placed — no duplicate
     const note = r.notes[idx];
     const theta = angleFor(idx);
     const x = r.cx + RADIAL_RADIUS * Math.cos(theta);
@@ -141,9 +151,10 @@ export default function NoteRadial() {
         return;
       }
       const ang = Math.atan2(dy, dx);
-      let best = 0;
+      let best = -1;
       let bestDiff = 10;
       for (let i = 0; i < N; i++) {
+        if (disabledMask.value & (1 << i)) continue; // skip placed notes
         const theta = -Math.PI / 2 + (i * 2 * Math.PI) / N;
         let d = ang - theta;
         d = Math.abs(Math.atan2(Math.sin(d), Math.cos(d))); // smallest angular gap
@@ -180,6 +191,7 @@ export default function NoteRadial() {
                   x={radial.cx + RADIAL_RADIUS * Math.cos(theta) - RADIAL_NOTE_R}
                   y={radial.cy + RADIAL_RADIUS * Math.sin(theta) - RADIAL_NOTE_R}
                   label={n.label}
+                  disabled={radial.disabled[i]}
                   selected={selected}
                 />
               );
@@ -198,20 +210,23 @@ function RingNote({
   x,
   y,
   label,
+  disabled,
   selected,
 }: {
   index: number;
   x: number;
   y: number;
   label: string;
+  disabled: boolean;
   selected: SharedValue<number>;
 }) {
   const aStyle = useAnimatedStyle(() => {
-    const on = selected.value === index;
+    const on = !disabled && selected.value === index;
     return {
       transform: [{ scale: withTiming(on ? 1.3 : 1, { duration: 90 }) }],
       backgroundColor: on ? '#5b8cff' : 'rgba(18,18,18,0.9)',
       borderColor: on ? '#ffffff' : 'rgba(255,255,255,0.3)',
+      opacity: disabled ? 0.28 : 1,
     };
   });
   return (

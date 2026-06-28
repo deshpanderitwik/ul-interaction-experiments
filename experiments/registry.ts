@@ -40,6 +40,13 @@ export type Experiment = {
 
 export const experiments: Experiment[] = [
   {
+    id: 'note-radial',
+    title: 'Note Radial',
+    blurb: 'Press & hold for a ring of 7 scale notes; drag and release to pop one.',
+    accent: '#7af0d4',
+    load: () => import('./note-radial'),
+  },
+  {
     id: 'note-burst',
     title: 'Note Burst',
     blurb: 'Tap to burst notes from the F minor scale with a shower of dots.',

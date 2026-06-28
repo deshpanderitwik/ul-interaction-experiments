@@ -1,0 +1,14 @@
+import { NoteSynth } from '../../modules/note-synth';
+import { recordNote } from '../recorder/recorder';
+
+// Note Radial geometry + voice.
+export const N = 7; // ring notes (the 7 scale degrees)
+export const RADIAL_RADIUS = 96; // ring radius from the finger
+export const RADIAL_NOTE_R = 24; // ring note circle radius
+export const POP_R = 36; // popped-note circle radius
+export const DEADZONE = 28; // no selection within this radius of the finger
+
+export function pluck(freq: number) {
+  recordNote(freq, 0.9);
+  NoteSynth?.pluck(freq, 0.9, 0.6).catch(() => {});
+}

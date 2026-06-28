@@ -18,6 +18,7 @@ type SettingsCtx = {
   register: (schema: Schema) => void;
   open: boolean;
   setOpen: (open: boolean) => void;
+  audio: boolean; // musical experiment → show scale + tempo
 };
 
 const Context = createContext<SettingsCtx | null>(null);
@@ -29,9 +30,11 @@ const store = new Map<string, Values>();
 
 export function SettingsProvider({
   id,
+  audio = false,
   children,
 }: {
   id: string;
+  audio?: boolean;
   children: ReactNode;
 }) {
   const [schema, setSchema] = useState<Schema | null>(null);
@@ -67,8 +70,8 @@ export function SettingsProvider({
   );
 
   const ctx = useMemo<SettingsCtx>(
-    () => ({ schema, values, setValue, register, open, setOpen }),
-    [schema, values, setValue, register, open]
+    () => ({ schema, values, setValue, register, open, setOpen, audio }),
+    [schema, values, setValue, register, open, audio]
   );
 
   return <Context.Provider value={ctx}>{children}</Context.Provider>;

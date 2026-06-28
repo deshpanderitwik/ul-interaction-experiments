@@ -13,10 +13,12 @@ import { useSettingsContext } from './context';
 import { Slider } from './Slider';
 import type { SliderSetting } from './types';
 
-// Gear control, mirroring the host's back button but on the right. Always shown
-// (every experiment has the global scale picker at minimum).
+// Gear control, mirroring the host's back button but on the right. Shown when
+// there's something to configure: a musical experiment (scale + tempo) or one
+// that registered its own controls.
 export function SettingsGear() {
-  const { setOpen } = useSettingsContext();
+  const { setOpen, audio, schema } = useSettingsContext();
+  if (!audio && !schema) return null;
   return (
     <Pressable
       onPress={() => setOpen(true)}
@@ -35,7 +37,7 @@ const SHEET_W = 320;
 // Side sheet that slides in from the right. Live-apply: each control writes
 // straight to the settings store, so the experiment behind updates immediately.
 export function SettingsSheet() {
-  const { schema, values, setValue, open, setOpen } = useSettingsContext();
+  const { schema, values, setValue, open, setOpen, audio } = useSettingsContext();
   const { width } = useWindowDimensions();
   const sheetW = Math.min(SHEET_W, width * 0.86);
 
@@ -71,8 +73,12 @@ export function SettingsSheet() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <ScalePicker />
-          <TempoControl />
+          {audio ? (
+            <>
+              <ScalePicker />
+              <TempoControl />
+            </>
+          ) : null}
 
           {Object.entries(schema ?? {}).map(([key, ctrl]) => {
             const value = values[key] ?? ctrl.default;

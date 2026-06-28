@@ -67,7 +67,10 @@ export function ExperimentHost({
 
   return (
     <ActiveContext.Provider value={active}>
-      <SettingsProvider id={settingsKey}>
+      <SettingsProvider
+        id={settingsKey}
+        audio={getExperiment(settingsKey.split('/')[0])?.audio ?? false}
+      >
         <View style={styles.fill}>
           {children}
           <Pressable

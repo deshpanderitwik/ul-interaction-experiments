@@ -32,6 +32,8 @@ export type Experiment = {
   blurb?: string;
   /** Optional accent color for the menu card. */
   accent?: string;
+  /** Musical experiments — show the global scale + tempo controls in settings. */
+  audio?: boolean;
   /** Lazy import of the experiment's screen (default export). */
   load: Load;
   /** Optional sub-experiments shown indented under this one. */
@@ -44,6 +46,7 @@ export const experiments: Experiment[] = [
     title: 'Note Radial',
     blurb: 'Build chords from a radial of scale notes; chain them into an auto-playing progression.',
     accent: '#7af0d4',
+    audio: true,
     load: () => import('./note-radial'),
   },
   {
@@ -51,6 +54,7 @@ export const experiments: Experiment[] = [
     title: 'Note Burst',
     blurb: 'Tap to burst notes from the F minor scale with a shower of dots.',
     accent: '#8ecbff',
+    audio: true,
     load: () => import('./note-burst'),
   },
   {
@@ -58,6 +62,7 @@ export const experiments: Experiment[] = [
     title: 'Tempo Slide',
     blurb: 'Touch to arpeggiate F3–F4; slide up/down to speed it up or slow it down.',
     accent: '#c64fff',
+    audio: true,
     load: () => import('./tempo-slide'),
   },
   {
@@ -65,6 +70,7 @@ export const experiments: Experiment[] = [
     title: 'NoteSketch',
     blurb: 'Draw through notes (F3–F4) to arpeggiate them at 120 BPM; double-tap clears.',
     accent: '#cfd8ff',
+    audio: true,
     load: () => import('./notesketch'),
   },
   {

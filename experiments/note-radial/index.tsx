@@ -1,6 +1,6 @@
 import { Canvas, DashPathEffect, Rect } from '@shopify/react-native-skia';
 import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
@@ -12,22 +12,25 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useExperimentActive } from '../_host';
 import { getScale, ladderNotes, noteName } from '../scale';
-import { DEADZONE, N, POP_R, RADIAL_NOTE_R, RADIAL_RADIUS, STRUM_MS, pluck } from './shared';
+import { DEADZONE, N, POP_R, RADIAL_NOTE_R, RADIAL_RADIUS, SLOT_MS, pluck } from './shared';
 
-// Note Radial — press & hold to summon a ring of the current scale's 7 notes
-// around your finger; drag toward one and release to pop it onto the screen.
-// Popped notes persist (double-tap to wipe them). While notes are present a
-// clock strums them together so they ring as a chord (the pluck synth decays);
-// each strum pulses every note in unison.
+// Note Radial — press & hold to summon a ring of the current scale's 7 notes;
+// drag and release to pop a note into the SELECTED chord. The bottom bar holds a
+// progression of chords (dots); tap a dot to edit it, + to add (copy current or
+// blank), long-press to delete. The progression auto-plays on a loop: each slot
+// strums its chord (blank = silent rest); the playhead highlight moves across
+// the dots. Recording captures the looping progression including live edits.
 
 type NoteData = { freq: number; label: string };
 type RadialState = { cx: number; cy: number; notes: NoteData[]; disabled: boolean[] };
 type ActiveNote = { id: number; x: number; y: number; label: string; freq: number };
+type Chord = { id: number; notes: ActiveNote[] };
 
 function angleFor(i: number): number {
-  return -Math.PI / 2 + (i * 2 * Math.PI) / N; // start at top, clockwise
+  return -Math.PI / 2 + (i * 2 * Math.PI) / N;
 }
 
 function freqLabel(freq: number): string {
@@ -37,27 +40,57 @@ function freqLabel(freq: number): string {
 export default function NoteRadial() {
   const live = useExperimentActive();
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const BAR_AREA = 60 + insets.bottom;
+  const canvasH = height - BAR_AREA;
+
+  const [chords, setChords] = useState<Chord[]>([{ id: 0, notes: [] }]);
+  const [chordIndex, setChordIndex] = useState(0); // selected (editing) chord
+  const [playhead, setPlayhead] = useState(0); // currently-sounding chord
   const [radial, setRadial] = useState<RadialState | null>(null);
-  const [notes, setNotes] = useState<ActiveNote[]>([]);
+
+  const chordsRef = useRef(chords);
+  chordsRef.current = chords;
+  const chordIndexRef = useRef(chordIndex);
+  chordIndexRef.current = chordIndex;
+  const playheadRef = useRef(playhead);
+  playheadRef.current = playhead;
+
+  const activeNotes = chords[chordIndex]?.notes ?? [];
+  const activeNotesRef = useRef<ActiveNote[]>(activeNotes);
+  activeNotesRef.current = activeNotes;
+
   const radialRef = useRef<RadialState | null>(null);
-  const notesRef = useRef<ActiveNote[]>(notes);
-  notesRef.current = notes;
-  const popId = useRef(0);
-  const pendingRemove = useRef<number | null>(null); // note tapped at touch-down
   const radialShownRef = useRef(false);
-  const octaveBoundaryRef = useRef(height / 2); // y that splits low/high octave
+  const octaveBoundaryRef = useRef(canvasH / 2);
+  const pendingRemove = useRef<number | null>(null);
+  const noteId = useRef(1);
+  const nextChordId = useRef(1);
 
   const centerX = useSharedValue(0);
   const centerY = useSharedValue(0);
-  const selected = useSharedValue(-1);
-  const moved = useSharedValue(0); // 1 once the finger leaves the tap zone
-  const disabledMask = useSharedValue(0); // bit i set = ring note i already placed
-  // Pulses 0→1→0 on every chord strum; active notes scale-pulse on it.
+  const selected = useSharedValue(-1); // ring index under the finger
+  const moved = useSharedValue(0);
+  const disabledMask = useSharedValue(0);
   const strumPulse = useSharedValue(0);
 
+  // ---- chord note edits (operate on the selected chord) ----
+  const addNote = (note: ActiveNote) => {
+    setChords((prev) =>
+      prev.map((c, i) => (i === chordIndexRef.current ? { ...c, notes: [...c.notes, note] } : c))
+    );
+  };
+  const removeNote = (id: number) => {
+    setChords((prev) =>
+      prev.map((c, i) =>
+        i === chordIndexRef.current ? { ...c, notes: c.notes.filter((n) => n.id !== id) } : c
+      )
+    );
+  };
+
+  // ---- radial ----
   const showRadial = (x: number, y: number) => {
     const scale = getScale();
-    // Pressing above the split line (between the squares) raises the ring an octave.
     const octaveShift = y < octaveBoundaryRef.current ? 1 : 0;
     const ring = ladderNotes(scale, 48 + scale.root)
       .slice(0, N)
@@ -65,8 +98,7 @@ export default function NoteRadial() {
         const freq = rn.freq * Math.pow(2, octaveShift);
         return { freq, label: freqLabel(freq) };
       });
-    // Disable ring notes already placed on screen (no duplicate pitches).
-    const active = new Set(notesRef.current.map((n) => n.label));
+    const active = new Set(activeNotesRef.current.map((n) => n.label));
     const disabled = ring.map((r) => active.has(r.label));
     let mask = 0;
     disabled.forEach((d, i) => {
@@ -85,23 +117,19 @@ export default function NoteRadial() {
   };
   const popNote = (idx: number) => {
     const r = radialRef.current;
-    if (!r || idx < 0 || idx >= r.notes.length) return;
-    if (r.disabled[idx]) return; // already placed — no duplicate
+    if (!r || idx < 0 || idx >= r.notes.length || r.disabled[idx]) return;
     const note = r.notes[idx];
     const theta = angleFor(idx);
     const x = r.cx + RADIAL_RADIUS * Math.cos(theta);
     const y = r.cy + RADIAL_RADIUS * Math.sin(theta);
-    const id = popId.current++;
-    pluck(note.freq); // strike immediately for responsiveness
-    setNotes((prev) => [...prev, { id, x, y, label: note.label, freq: note.freq }]);
+    pluck(note.freq);
+    addNote({ id: noteId.current++, x, y, label: note.label, freq: note.freq });
   };
 
-  const removeNote = (id: number) => setNotes((prev) => prev.filter((n) => n.id !== id));
-
-  // Touch-down: tapping an existing note arms it for removal (no radial);
-  // pressing empty space summons the radial.
   const onDown = (x: number, y: number) => {
-    const hit = [...notesRef.current].reverse().find((n) => Math.hypot(x - n.x, y - n.y) <= POP_R);
+    const hit = [...activeNotesRef.current]
+      .reverse()
+      .find((n) => Math.hypot(x - n.x, y - n.y) <= POP_R);
     if (hit) {
       pendingRemove.current = hit.id;
     } else {
@@ -109,40 +137,64 @@ export default function NoteRadial() {
       showRadial(x, y);
     }
   };
-  // Runs on finalize (which always fires, unlike onEnd which needs the Pan to
-  // have activated — a stationary tap never activates it).
   const onEndJS = (movedFlag: number, sel: number) => {
     if (pendingRemove.current != null && !movedFlag) {
-      removeNote(pendingRemove.current); // a tap on a note removes it
+      removeNote(pendingRemove.current);
     } else if (radialShownRef.current && sel >= 0) {
-      popNote(sel); // dragged to a ring note and released
+      popNote(sel);
     }
     pendingRemove.current = null;
     hideRadial();
   };
 
-  // Chord engine: while any note is alive, strum them all together on a clock so
-  // the chord keeps ringing, pulsing every note in unison.
-  const hasNotes = notes.length > 0;
+  // ---- chord bar actions ----
+  const onSelectChord = (i: number) => setChordIndex(i); // silent swap
+  const onAddCopy = () => {
+    const cur = chordsRef.current[chordIndexRef.current];
+    const notes = cur ? cur.notes.map((n) => ({ ...n, id: noteId.current++ })) : [];
+    const newIndex = chordsRef.current.length;
+    setChords((prev) => [...prev, { id: nextChordId.current++, notes }]);
+    setChordIndex(newIndex);
+  };
+  const onAddBlank = () => {
+    const newIndex = chordsRef.current.length;
+    setChords((prev) => [...prev, { id: nextChordId.current++, notes: [] }]);
+    setChordIndex(newIndex);
+  };
+  const onDeleteChord = (i: number) => {
+    const len = chordsRef.current.length;
+    if (len <= 1) return;
+    const clamp = (n: number) => Math.min(Math.max(0, n), len - 2);
+    setChords((prev) => prev.filter((_, idx) => idx !== i));
+    setChordIndex((ci) => clamp(ci === i ? i - 1 : ci > i ? ci - 1 : ci));
+    setPlayhead((ph) => clamp(ph === i ? i - 1 : ph > i ? ph - 1 : ph));
+  };
+
+  // ---- auto-play loop ----
   useEffect(() => {
-    if (!live || !hasNotes) return;
-    const strum = () => {
-      for (const n of notesRef.current) pluck(n.freq);
-      strumPulse.value = 0;
-      strumPulse.value = withSequence(
-        withTiming(1, { duration: 110, easing: Easing.out(Easing.quad) }),
-        withTiming(0, { duration: STRUM_MS - 110, easing: Easing.inOut(Easing.quad) })
-      );
+    if (!live) return;
+    const tick = () => {
+      const list = chordsRef.current;
+      if (list.length === 0) return;
+      const next = (playheadRef.current + 1) % list.length;
+      playheadRef.current = next;
+      setPlayhead(next);
+      const chord = list[next];
+      for (const n of chord.notes) pluck(n.freq);
+      if (next === chordIndexRef.current && chord.notes.length > 0) {
+        strumPulse.value = 0;
+        strumPulse.value = withSequence(
+          withTiming(1, { duration: 110, easing: Easing.out(Easing.quad) }),
+          withTiming(0, { duration: 520, easing: Easing.inOut(Easing.quad) })
+        );
+      }
     };
-    const id = setInterval(strum, STRUM_MS);
+    const id = setInterval(tick, SLOT_MS);
     return () => clearInterval(id);
-  }, [live, hasNotes, strumPulse]);
+  }, [live, strumPulse]);
 
   useEffect(() => {
-    if (!live) {
-      hideRadial();
-      setNotes([]);
-    }
+    if (!live) hideRadial();
   }, [live]);
 
   const pan = Gesture.Pan()
@@ -168,10 +220,10 @@ export default function NoteRadial() {
       let best = -1;
       let bestDiff = 10;
       for (let i = 0; i < N; i++) {
-        if (disabledMask.value & (1 << i)) continue; // skip placed notes
+        if (disabledMask.value & (1 << i)) continue;
         const theta = -Math.PI / 2 + (i * 2 * Math.PI) / N;
         let d = ang - theta;
-        d = Math.abs(Math.atan2(Math.sin(d), Math.cos(d))); // smallest angular gap
+        d = Math.abs(Math.atan2(Math.sin(d), Math.cos(d)));
         if (d < bestDiff) {
           bestDiff = d;
           best = i;
@@ -185,73 +237,67 @@ export default function NoteRadial() {
       moved.value = 0;
     });
 
-  const gesture = pan;
-
-  // Two octave zones: dashed squares stacked with an 8px gap, kept clear of the
-  // top controls (back / REC / gear).
+  // octave squares (within the canvas area, above the bar)
   const TOP_CLEAR = 112;
-  const BOTTOM_CLEAR = 44;
+  const BOTTOM_CLEAR = 24;
   const gap = 8;
-  const band = height - TOP_CLEAR - BOTTOM_CLEAR;
+  const band = canvasH - TOP_CLEAR - BOTTOM_CLEAR;
   const side = Math.max(40, Math.min((band - gap) / 2, width - 48));
   const sqX = (width - side) / 2;
   const startY = TOP_CLEAR + Math.max(0, (band - (side * 2 + gap)) / 2);
   const topSq = { x: sqX, y: startY };
   const botSq = { x: sqX, y: startY + side + gap };
-  octaveBoundaryRef.current = startY + side + gap / 2; // mid-gap = octave split
+  octaveBoundaryRef.current = startY + side + gap / 2;
 
   return (
-    <GestureDetector gesture={gesture}>
-      <View style={styles.fill}>
-        <Canvas style={StyleSheet.absoluteFill} pointerEvents="none">
-          <Rect
-            x={topSq.x}
-            y={topSq.y}
-            width={side}
-            height={side}
-            color="rgba(255,255,255,0.28)"
-            style="stroke"
-            strokeWidth={2}
-          >
-            <DashPathEffect intervals={[3, 4]} />
-          </Rect>
-          <Rect
-            x={botSq.x}
-            y={botSq.y}
-            width={side}
-            height={side}
-            color="rgba(255,255,255,0.28)"
-            style="stroke"
-            strokeWidth={2}
-          >
-            <DashPathEffect intervals={[3, 4]} />
-          </Rect>
-        </Canvas>
+    <View style={styles.fill}>
+      <GestureDetector gesture={pan}>
+        <View style={[StyleSheet.absoluteFill, { bottom: BAR_AREA }]}>
+          <Canvas style={StyleSheet.absoluteFill} pointerEvents="none">
+            <Rect x={topSq.x} y={topSq.y} width={side} height={side} color="rgba(255,255,255,0.28)" style="stroke" strokeWidth={2}>
+              <DashPathEffect intervals={[3, 4]} />
+            </Rect>
+            <Rect x={botSq.x} y={botSq.y} width={side} height={side} color="rgba(255,255,255,0.28)" style="stroke" strokeWidth={2}>
+              <DashPathEffect intervals={[3, 4]} />
+            </Rect>
+          </Canvas>
 
-        {notes.map((n) => (
-          <ActiveNoteView key={n.id} note={n} strumPulse={strumPulse} />
-        ))}
+          {activeNotes.map((n) => (
+            <ActiveNoteView key={n.id} note={n} strumPulse={strumPulse} />
+          ))}
 
-        {radial ? (
-          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-            {radial.notes.map((n, i) => {
-              const theta = angleFor(i);
-              return (
-                <RingNote
-                  key={i}
-                  index={i}
-                  x={radial.cx + RADIAL_RADIUS * Math.cos(theta) - RADIAL_NOTE_R}
-                  y={radial.cy + RADIAL_RADIUS * Math.sin(theta) - RADIAL_NOTE_R}
-                  label={n.label}
-                  disabled={radial.disabled[i]}
-                  selected={selected}
-                />
-              );
-            })}
-          </View>
-        ) : null}
-      </View>
-    </GestureDetector>
+          {radial ? (
+            <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+              {radial.notes.map((n, i) => {
+                const theta = angleFor(i);
+                return (
+                  <RingNote
+                    key={i}
+                    index={i}
+                    x={radial.cx + RADIAL_RADIUS * Math.cos(theta) - RADIAL_NOTE_R}
+                    y={radial.cy + RADIAL_RADIUS * Math.sin(theta) - RADIAL_NOTE_R}
+                    label={n.label}
+                    disabled={radial.disabled[i]}
+                    selected={selected}
+                  />
+                );
+              })}
+            </View>
+          ) : null}
+        </View>
+      </GestureDetector>
+
+      <ChordsBar
+        chords={chords}
+        chordIndex={chordIndex}
+        playhead={playhead}
+        bottomInset={insets.bottom}
+        onSelect={onSelectChord}
+        onAddCopy={onAddCopy}
+        onAddBlank={onAddBlank}
+        onDelete={onDeleteChord}
+      />
+    </View>
   );
 }
 
@@ -286,13 +332,7 @@ function RingNote({
   );
 }
 
-function ActiveNoteView({
-  note,
-  strumPulse,
-}: {
-  note: ActiveNote;
-  strumPulse: SharedValue<number>;
-}) {
+function ActiveNoteView({ note, strumPulse }: { note: ActiveNote; strumPulse: SharedValue<number> }) {
   const enter = useSharedValue(0);
   useEffect(() => {
     enter.value = withTiming(1, { duration: 240, easing: Easing.out(Easing.back(1.6)) });
@@ -311,8 +351,131 @@ function ActiveNoteView({
   );
 }
 
+function ChordsBar({
+  chords,
+  chordIndex,
+  playhead,
+  bottomInset,
+  onSelect,
+  onAddCopy,
+  onAddBlank,
+  onDelete,
+}: {
+  chords: Chord[];
+  chordIndex: number;
+  playhead: number;
+  bottomInset: number;
+  onSelect: (i: number) => void;
+  onAddCopy: () => void;
+  onAddBlank: () => void;
+  onDelete: (i: number) => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [deleteIdx, setDeleteIdx] = useState<number | null>(null);
+
+  return (
+    <View style={[styles.bar, { paddingBottom: bottomInset + 6 }]} pointerEvents="box-none">
+      {menuOpen ? (
+        <View style={styles.menu}>
+          <Pressable
+            style={styles.menuItem}
+            onPress={() => {
+              setMenuOpen(false);
+              onAddCopy();
+            }}
+          >
+            <Text style={styles.menuText}>Copy current</Text>
+          </Pressable>
+          <View style={styles.menuDivider} />
+          <Pressable
+            style={styles.menuItem}
+            onPress={() => {
+              setMenuOpen(false);
+              onAddBlank();
+            }}
+          >
+            <Text style={styles.menuText}>Blank</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <View style={styles.barRow}>
+        {chords.map((c, i) => (
+          <Dot
+            key={c.id}
+            hasNotes={c.notes.length > 0}
+            selected={i === chordIndex}
+            playing={i === playhead}
+            showDelete={deleteIdx === i && chords.length > 1}
+            onPress={() => {
+              setDeleteIdx(null);
+              setMenuOpen(false);
+              onSelect(i);
+            }}
+            onLongPress={() => setDeleteIdx(i)}
+            onDelete={() => {
+              setDeleteIdx(null);
+              onDelete(i);
+            }}
+          />
+        ))}
+        <Pressable
+          style={styles.plus}
+          hitSlop={6}
+          onPress={() => {
+            setDeleteIdx(null);
+            setMenuOpen((o) => !o);
+          }}
+        >
+          <Text style={styles.plusText}>+</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function Dot({
+  hasNotes,
+  selected,
+  playing,
+  showDelete,
+  onPress,
+  onLongPress,
+  onDelete,
+}: {
+  hasNotes: boolean;
+  selected: boolean;
+  playing: boolean;
+  showDelete: boolean;
+  onPress: () => void;
+  onLongPress: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <View style={styles.dotWrap}>
+      {showDelete ? (
+        <Pressable style={styles.del} hitSlop={8} onPress={onDelete}>
+          <Text style={styles.delText}>×</Text>
+        </Pressable>
+      ) : null}
+      <Pressable
+        onPress={onPress}
+        onLongPress={onLongPress}
+        delayLongPress={300}
+        hitSlop={8}
+        style={[
+          styles.dot,
+          hasNotes && styles.dotFilled,
+          playing && styles.dotPlaying,
+          selected && styles.dotSelected,
+        ]}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  fill: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
+  fill: { flex: 1, backgroundColor: '#000' },
   ringNote: {
     position: 'absolute',
     width: RADIAL_NOTE_R * 2,
@@ -335,4 +498,54 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.5)',
   },
   noteLabel: { color: '#fff', fontSize: 18, fontWeight: '700' },
+
+  bar: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', paddingTop: 8 },
+  barRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 18,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(22,22,22,0.94)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  dotWrap: { alignItems: 'center', justifyContent: 'center' },
+  dot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.45)',
+    backgroundColor: 'transparent',
+  },
+  dotFilled: { backgroundColor: 'rgba(255,255,255,0.5)' },
+  dotPlaying: { backgroundColor: '#7af0d4', borderColor: '#7af0d4' },
+  dotSelected: { borderColor: '#fff', borderWidth: 2.5, transform: [{ scale: 1.25 }] },
+  del: {
+    position: 'absolute',
+    top: -24,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#cc3b3b',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  delText: { color: '#fff', fontSize: 15, fontWeight: '700', marginTop: -2 },
+  plus: { width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
+  plusText: { color: '#fff', fontSize: 24, fontWeight: '300', marginTop: -2 },
+  menu: {
+    marginBottom: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(28,28,28,0.98)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+    overflow: 'hidden',
+    minWidth: 150,
+  },
+  menuItem: { paddingVertical: 12, paddingHorizontal: 16 },
+  menuText: { color: '#fff', fontSize: 15, fontWeight: '500' },
+  menuDivider: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.12)' },
 });

@@ -42,7 +42,7 @@ export const experiments: Experiment[] = [
   {
     id: 'note-radial',
     title: 'Note Radial',
-    blurb: 'Press & hold for a ring of 7 scale notes; drag and release to pop one.',
+    blurb: 'Build chords from a radial of scale notes; chain them into an auto-playing progression.',
     accent: '#7af0d4',
     load: () => import('./note-radial'),
   },

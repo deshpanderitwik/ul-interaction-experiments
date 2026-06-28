@@ -7,21 +7,32 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  withSequence,
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
 import { getScale, ladderNotes } from '../scale';
-import { DEADZONE, N, POP_R, RADIAL_NOTE_R, RADIAL_RADIUS, pluck } from './shared';
+import {
+  DEADZONE,
+  LIFE_MS,
+  N,
+  POP_R,
+  RADIAL_NOTE_R,
+  RADIAL_RADIUS,
+  STRUM_MS,
+  pluck,
+} from './shared';
 
 // Note Radial — press & hold to summon a ring of the current scale's 7 notes
-// around your finger; drag toward one and release to pop it onto the screen
-// (and play it). The ring highlight tracks your finger on the UI thread; the
-// pop is a quick scale-overshoot that lingers and fades.
+// around your finger; drag toward one and release to pop it onto the screen. A
+// popped note stays ~3.5s, pulsing. While notes are alive a clock strums them
+// together so they ring as a chord (the pluck synth decays); each strum pulses
+// every note in unison.
 
 type NoteData = { freq: number; label: string };
 type RadialState = { cx: number; cy: number; notes: NoteData[] };
-type PopData = { id: number; x: number; y: number; label: string };
+type ActiveNote = { id: number; x: number; y: number; label: string; freq: number };
 
 function angleFor(i: number): number {
   return -Math.PI / 2 + (i * 2 * Math.PI) / N; // start at top, clockwise
@@ -30,18 +41,22 @@ function angleFor(i: number): number {
 export default function NoteRadial() {
   const live = useExperimentActive();
   const [radial, setRadial] = useState<RadialState | null>(null);
-  const [pops, setPops] = useState<PopData[]>([]);
+  const [notes, setNotes] = useState<ActiveNote[]>([]);
   const radialRef = useRef<RadialState | null>(null);
+  const notesRef = useRef<ActiveNote[]>(notes);
+  notesRef.current = notes;
   const popId = useRef(0);
 
   const centerX = useSharedValue(0);
   const centerY = useSharedValue(0);
   const selected = useSharedValue(-1);
+  // Pulses 0→1→0 on every chord strum; active notes scale-pulse on it.
+  const strumPulse = useSharedValue(0);
 
   const showRadial = (x: number, y: number) => {
     const scale = getScale();
-    const notes = ladderNotes(scale, 48 + scale.root).slice(0, N); // 7 degrees
-    const state = { cx: x, cy: y, notes };
+    const ring = ladderNotes(scale, 48 + scale.root).slice(0, N); // 7 degrees
+    const state = { cx: x, cy: y, notes: ring };
     radialRef.current = state;
     setRadial(state);
   };
@@ -53,30 +68,47 @@ export default function NoteRadial() {
     const r = radialRef.current;
     if (!r || idx < 0 || idx >= r.notes.length) return;
     const note = r.notes[idx];
-    pluck(note.freq);
     const theta = angleFor(idx);
-    const px = r.cx + RADIAL_RADIUS * Math.cos(theta);
-    const py = r.cy + RADIAL_RADIUS * Math.sin(theta);
+    const x = r.cx + RADIAL_RADIUS * Math.cos(theta);
+    const y = r.cy + RADIAL_RADIUS * Math.sin(theta);
     const id = popId.current++;
-    setPops((prev) => [...prev, { id, x: px, y: py, label: note.label }]);
-    setTimeout(() => setPops((prev) => prev.filter((p) => p.id !== id)), 1600);
+    pluck(note.freq); // strike immediately for responsiveness
+    setNotes((prev) => [...prev, { id, x, y, label: note.label, freq: note.freq }]);
+    setTimeout(() => setNotes((prev) => prev.filter((n) => n.id !== id)), LIFE_MS);
   };
+
+  // Chord engine: while any note is alive, strum them all together on a clock so
+  // the chord keeps ringing, pulsing every note in unison.
+  const hasNotes = notes.length > 0;
+  useEffect(() => {
+    if (!live || !hasNotes) return;
+    const strum = () => {
+      for (const n of notesRef.current) pluck(n.freq);
+      strumPulse.value = 0;
+      strumPulse.value = withSequence(
+        withTiming(1, { duration: 110, easing: Easing.out(Easing.quad) }),
+        withTiming(0, { duration: STRUM_MS - 110, easing: Easing.inOut(Easing.quad) })
+      );
+    };
+    const id = setInterval(strum, STRUM_MS);
+    return () => clearInterval(id);
+  }, [live, hasNotes, strumPulse]);
 
   useEffect(() => {
     if (!live) {
       hideRadial();
-      setPops([]);
+      setNotes([]);
     }
   }, [live]);
 
   const gesture = Gesture.Pan()
     .minDistance(0)
-    .onStart((e) => {
+    .onBegin((e) => {
       if (!live) return;
       centerX.value = e.x;
       centerY.value = e.y;
       selected.value = -1;
-      runOnJS(showRadial)(e.x, e.y);
+      runOnJS(showRadial)(e.x, e.y); // appear immediately on press
     })
     .onUpdate((e) => {
       const dx = e.x - centerX.value;
@@ -110,6 +142,10 @@ export default function NoteRadial() {
   return (
     <GestureDetector gesture={gesture}>
       <View style={styles.fill}>
+        {notes.map((n) => (
+          <ActiveNoteView key={n.id} note={n} strumPulse={strumPulse} />
+        ))}
+
         {radial ? (
           <View pointerEvents="none" style={StyleSheet.absoluteFill}>
             {radial.notes.map((n, i) => {
@@ -127,10 +163,6 @@ export default function NoteRadial() {
             })}
           </View>
         ) : null}
-
-        {pops.map((p) => (
-          <Pop key={p.id} pop={p} />
-        ))}
 
         <Text style={styles.hint}>press &amp; hold, drag to a note</Text>
       </View>
@@ -166,21 +198,29 @@ function RingNote({
   );
 }
 
-function Pop({ pop }: { pop: PopData }) {
-  const p = useSharedValue(0);
+function ActiveNoteView({
+  note,
+  strumPulse,
+}: {
+  note: ActiveNote;
+  strumPulse: SharedValue<number>;
+}) {
+  const life = useSharedValue(0);
   useEffect(() => {
-    p.value = withTiming(1, { duration: 1500, easing: Easing.out(Easing.cubic) });
-  }, [p]);
-  const style = useAnimatedStyle(() => ({
-    transform: [{ scale: interpolate(p.value, [0, 0.15, 0.28, 1], [0.2, 1.18, 1, 1]) }],
-    opacity: interpolate(p.value, [0, 0.06, 0.7, 1], [0, 1, 1, 0]),
-  }));
+    life.value = withTiming(1, { duration: LIFE_MS, easing: Easing.linear });
+  }, [life]);
+  const style = useAnimatedStyle(() => {
+    const entrance = interpolate(life.value, [0, 0.05, 1], [0.3, 1, 1]);
+    const scale = entrance * (1 + strumPulse.value * 0.18);
+    const opacity = interpolate(life.value, [0, 0.8, 1], [1, 1, 0]);
+    return { transform: [{ scale }], opacity };
+  });
   return (
     <Animated.View
       pointerEvents="none"
-      style={[styles.pop, { left: pop.x - POP_R, top: pop.y - POP_R }, style]}
+      style={[styles.note, { left: note.x - POP_R, top: note.y - POP_R }, style]}
     >
-      <Text style={styles.popLabel}>{pop.label}</Text>
+      <Text style={styles.noteLabel}>{note.label}</Text>
     </Animated.View>
   );
 }
@@ -198,7 +238,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ringLabel: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  pop: {
+  note: {
     position: 'absolute',
     width: POP_R * 2,
     height: POP_R * 2,
@@ -209,5 +249,5 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.5)',
   },
-  popLabel: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  noteLabel: { color: '#fff', fontSize: 18, fontWeight: '700' },
 });

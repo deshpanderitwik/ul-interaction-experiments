@@ -1,3 +1,4 @@
+import { Canvas, DashPathEffect, Rect } from '@shopify/react-native-skia';
 import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -23,7 +24,7 @@ import { DEADZONE, N, POP_R, RADIAL_NOTE_R, RADIAL_RADIUS, STRUM_MS, pluck } fro
 
 type NoteData = { freq: number; label: string };
 type RadialState = { cx: number; cy: number; notes: NoteData[]; disabled: boolean[] };
-type ActiveNote = { id: number; x: number; y: number; label: string; freq: number; decay: number };
+type ActiveNote = { id: number; x: number; y: number; label: string; freq: number };
 
 function angleFor(i: number): number {
   return -Math.PI / 2 + (i * 2 * Math.PI) / N; // start at top, clockwise
@@ -55,8 +56,8 @@ export default function NoteRadial() {
 
   const showRadial = (x: number, y: number) => {
     const scale = getScale();
-    // Y → octave: top of the screen raises the whole ring an octave, bottom drops it.
-    const octaveShift = Math.round((0.5 - Math.max(0, Math.min(1, y / height))) * 2); // -1..+1
+    // Two halves: pressing in the top half raises the ring an octave.
+    const octaveShift = y < height / 2 ? 1 : 0;
     const ring = ladderNotes(scale, 48 + scale.root)
       .slice(0, N)
       .map((rn) => {
@@ -89,11 +90,9 @@ export default function NoteRadial() {
     const theta = angleFor(idx);
     const x = r.cx + RADIAL_RADIUS * Math.cos(theta);
     const y = r.cy + RADIAL_RADIUS * Math.sin(theta);
-    // X → decay: left = tight pluck, right = long ring-out.
-    const decay = 0.2 + Math.max(0, Math.min(1, r.cx / width)) * 1.6;
     const id = popId.current++;
-    pluck(note.freq, decay); // strike immediately for responsiveness
-    setNotes((prev) => [...prev, { id, x, y, label: note.label, freq: note.freq, decay }]);
+    pluck(note.freq); // strike immediately for responsiveness
+    setNotes((prev) => [...prev, { id, x, y, label: note.label, freq: note.freq }]);
   };
 
   const removeNote = (id: number) => setNotes((prev) => prev.filter((n) => n.id !== id));
@@ -127,7 +126,7 @@ export default function NoteRadial() {
   useEffect(() => {
     if (!live || !hasNotes) return;
     const strum = () => {
-      for (const n of notesRef.current) pluck(n.freq, n.decay);
+      for (const n of notesRef.current) pluck(n.freq);
       strumPulse.value = 0;
       strumPulse.value = withSequence(
         withTiming(1, { duration: 110, easing: Easing.out(Easing.quad) }),
@@ -187,9 +186,41 @@ export default function NoteRadial() {
 
   const gesture = pan;
 
+  // Two octave zones: a dashed square centered in each screen half.
+  const half = height / 2;
+  const side = Math.max(40, Math.min(width - 56, half - 56));
+  const sqX = (width - side) / 2;
+  const topSq = { x: sqX, y: half / 2 - side / 2 };
+  const botSq = { x: sqX, y: half + half / 2 - side / 2 };
+
   return (
     <GestureDetector gesture={gesture}>
       <View style={styles.fill}>
+        <Canvas style={StyleSheet.absoluteFill} pointerEvents="none">
+          <Rect
+            x={topSq.x}
+            y={topSq.y}
+            width={side}
+            height={side}
+            color="rgba(255,255,255,0.28)"
+            style="stroke"
+            strokeWidth={2}
+          >
+            <DashPathEffect intervals={[12, 9]} />
+          </Rect>
+          <Rect
+            x={botSq.x}
+            y={botSq.y}
+            width={side}
+            height={side}
+            color="rgba(255,255,255,0.28)"
+            style="stroke"
+            strokeWidth={2}
+          >
+            <DashPathEffect intervals={[12, 9]} />
+          </Rect>
+        </Canvas>
+
         {notes.map((n) => (
           <ActiveNoteView key={n.id} note={n} strumPulse={strumPulse} />
         ))}
@@ -212,8 +243,6 @@ export default function NoteRadial() {
             })}
           </View>
         ) : null}
-
-        <Text style={styles.hint}>height = octave · right = longer · tap a note to remove</Text>
       </View>
     </GestureDetector>
   );
@@ -277,7 +306,6 @@ function ActiveNoteView({
 
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
-  hint: { color: 'rgba(255,255,255,0.3)', fontSize: 16, letterSpacing: 1 },
   ringNote: {
     position: 'absolute',
     width: RADIAL_NOTE_R * 2,

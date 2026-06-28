@@ -525,7 +525,7 @@ const styles = StyleSheet.create({
   dotSelected: { borderColor: '#fff', borderWidth: 2.5, transform: [{ scale: 1.25 }] },
   del: {
     position: 'absolute',
-    top: -24,
+    top: -28,
     width: 22,
     height: 22,
     borderRadius: 11,

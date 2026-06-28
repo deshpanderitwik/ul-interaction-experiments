@@ -16,10 +16,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useExperimentActive } from '../_host';
 import { getScale, ladderNotes, noteName } from '../scale';
 import { useSettings } from '../settings';
+import { useTempo } from '../tempo';
 import { DEADZONE, N, POP_R, RADIAL_NOTE_R, RADIAL_RADIUS, pluck } from './shared';
 
-// Each chord lasts (and re-triggers) for the selected note length, at 120 BPM.
-const BPM = 120;
+// Each chord lasts (and re-triggers) for the selected note length, at the
+// global tempo.
 const SETTINGS = {
   noteLength: {
     type: 'select',
@@ -57,7 +58,8 @@ function freqLabel(freq: number): string {
 export default function NoteRadial() {
   const live = useExperimentActive();
   const { noteLength } = useSettings(SETTINGS);
-  const slotMs = 240000 / BPM / noteLength; // 1/4 note .. 1/32 note
+  const bpm = useTempo();
+  const slotMs = 240000 / bpm / noteLength; // 1/4 note .. 1/32 note at the tempo
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const BAR_AREA = 60 + insets.bottom;

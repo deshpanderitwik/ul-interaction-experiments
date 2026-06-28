@@ -8,6 +8,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { ScalePicker } from './ScalePicker';
+import { TempoControl } from './TempoControl';
 import { useSettingsContext } from './context';
 import { Slider } from './Slider';
 import type { SliderSetting } from './types';
@@ -71,6 +72,7 @@ export function SettingsSheet() {
           showsVerticalScrollIndicator={false}
         >
           <ScalePicker />
+          <TempoControl />
 
           {Object.entries(schema ?? {}).map(([key, ctrl]) => {
             const value = values[key] ?? ctrl.default;

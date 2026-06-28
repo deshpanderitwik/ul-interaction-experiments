@@ -13,6 +13,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
 import { useScale } from '../scale';
+import { useTempo } from '../tempo';
 import { buildNotes, distToSegment, intensityColor, type Note } from './shared';
 import { playPluck } from './voice';
 
@@ -22,8 +23,6 @@ import { playPluck } from './voice';
 // newest bright). Active notes form an arpeggio that loops at 120 BPM in eighth
 // notes: each step the current note pulses and a pluck fires. Double-tap clears.
 //
-// 120 BPM, eighth notes → quarter = 500ms, eighth = 250ms per step.
-const STEP_MS = 250;
 // Fraction of the step the pulse spends rising before it decays.
 const PULSE_RISE_MS = 55;
 
@@ -31,6 +30,8 @@ export default function NoteSketch() {
   const live = useExperimentActive();
   const { width, height } = useWindowDimensions();
   const scale = useScale();
+  const tempo = useTempo();
+  const stepMs = 30000 / tempo; // eighth note at the global tempo (250ms @ 120)
 
   const notes = useMemo(() => buildNotes(width, height, scale), [width, height, scale]);
   const notesRef = useRef(notes);
@@ -121,7 +122,7 @@ export default function NoteSketch() {
       pulse.value = 0;
       pulse.value = withSequence(
         withTiming(1, { duration: PULSE_RISE_MS, easing: Easing.out(Easing.quad) }),
-        withTiming(0, { duration: STEP_MS - PULSE_RISE_MS, easing: Easing.out(Easing.quad) })
+        withTiming(0, { duration: stepMs - PULSE_RISE_MS, easing: Easing.out(Easing.quad) })
       );
       const id = seq[rank];
       const all = notesRef.current;
@@ -133,12 +134,12 @@ export default function NoteSketch() {
       step += 1;
     };
     tick(); // sound the first note immediately on (re)start
-    const handle = setInterval(tick, STEP_MS);
+    const handle = setInterval(tick, stepMs);
     return () => {
       clearInterval(handle);
       playingRank.value = -1;
     };
-  }, [live, hasActive, playingRank, pulse]);
+  }, [live, hasActive, stepMs, playingRank, pulse]);
 
   const draw = Gesture.Pan()
     .minDistance(2)

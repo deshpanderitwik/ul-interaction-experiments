@@ -7,7 +7,6 @@ export const RADIAL_RADIUS = 96; // ring radius from the finger
 export const RADIAL_NOTE_R = 24; // ring note circle radius
 export const POP_R = 36; // popped-note circle radius
 export const DEADZONE = 28; // no selection within this radius of the finger
-export const SLOT_MS = 1100; // duration of each chord in the auto-play loop
 
 export function pluck(freq: number, decay = 0.6) {
   recordNote(freq, 0.9);

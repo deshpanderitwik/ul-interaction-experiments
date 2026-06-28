@@ -12,7 +12,16 @@ export type SliderSetting = {
   default: number;
 };
 
-export type Setting = SliderSetting;
+export type SelectOption = { label: string; value: number };
+
+export type SelectSetting = {
+  type: 'select';
+  label: string;
+  options: readonly SelectOption[];
+  default: number;
+};
+
+export type Setting = SliderSetting | SelectSetting;
 
 export type Schema = Record<string, Setting>;
 

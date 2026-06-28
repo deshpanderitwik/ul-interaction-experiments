@@ -15,7 +15,24 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useExperimentActive } from '../_host';
 import { getScale, ladderNotes, noteName } from '../scale';
-import { DEADZONE, N, POP_R, RADIAL_NOTE_R, RADIAL_RADIUS, SLOT_MS, pluck } from './shared';
+import { useSettings } from '../settings';
+import { DEADZONE, N, POP_R, RADIAL_NOTE_R, RADIAL_RADIUS, pluck } from './shared';
+
+// Each chord lasts (and re-triggers) for the selected note length, at 120 BPM.
+const BPM = 120;
+const SETTINGS = {
+  noteLength: {
+    type: 'select',
+    label: 'Note length',
+    options: [
+      { label: '1/4', value: 4 },
+      { label: '1/8', value: 8 },
+      { label: '1/16', value: 16 },
+      { label: '1/32', value: 32 },
+    ],
+    default: 4,
+  },
+} as const;
 
 // Note Radial — press & hold to summon a ring of the current scale's 7 notes;
 // drag and release to pop a note into the SELECTED chord. The bottom bar holds a
@@ -39,6 +56,8 @@ function freqLabel(freq: number): string {
 
 export default function NoteRadial() {
   const live = useExperimentActive();
+  const { noteLength } = useSettings(SETTINGS);
+  const slotMs = 240000 / BPM / noteLength; // 1/4 note .. 1/32 note
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const BAR_AREA = 60 + insets.bottom;
@@ -189,9 +208,9 @@ export default function NoteRadial() {
         );
       }
     };
-    const id = setInterval(tick, SLOT_MS);
+    const id = setInterval(tick, slotMs);
     return () => clearInterval(id);
-  }, [live, strumPulse]);
+  }, [live, slotMs, strumPulse]);
 
   useEffect(() => {
     if (!live) hideRadial();

@@ -10,7 +10,7 @@ import Animated, {
 import { ScalePicker } from './ScalePicker';
 import { useSettingsContext } from './context';
 import { Slider } from './Slider';
-import type { Setting } from './types';
+import type { SliderSetting } from './types';
 
 // Gear control, mirroring the host's back button but on the right. Always shown
 // (every experiment has the global scale picker at minimum).
@@ -72,28 +72,54 @@ export function SettingsSheet() {
         >
           <ScalePicker />
 
-          {Object.entries(schema ?? {}).map(([key, ctrl]) => (
-            <View key={key} style={styles.row}>
-              <View style={styles.rowHead}>
-                <Text style={styles.label}>{ctrl.label}</Text>
-                <Text style={styles.value}>{formatValue(values[key] ?? ctrl.default, ctrl)}</Text>
+          {Object.entries(schema ?? {}).map(([key, ctrl]) => {
+            const value = values[key] ?? ctrl.default;
+            if (ctrl.type === 'select') {
+              return (
+                <View key={key} style={styles.row}>
+                  <Text style={styles.label}>{ctrl.label}</Text>
+                  <View style={styles.segments}>
+                    {ctrl.options.map((opt) => {
+                      const on = value === opt.value;
+                      return (
+                        <Pressable
+                          key={opt.value}
+                          onPress={() => setValue(key, opt.value)}
+                          style={[styles.segment, on && styles.segmentOn]}
+                        >
+                          <Text style={[styles.segmentText, on && styles.segmentTextOn]}>
+                            {opt.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              );
+            }
+            return (
+              <View key={key} style={styles.row}>
+                <View style={styles.rowHead}>
+                  <Text style={styles.label}>{ctrl.label}</Text>
+                  <Text style={styles.value}>{formatValue(value, ctrl)}</Text>
+                </View>
+                <Slider
+                  value={value}
+                  minimumValue={ctrl.min}
+                  maximumValue={ctrl.max}
+                  step={ctrl.step ?? 0}
+                  onValueChange={(v) => setValue(key, v)}
+                />
               </View>
-              <Slider
-                value={values[key] ?? ctrl.default}
-                minimumValue={ctrl.min}
-                maximumValue={ctrl.max}
-                step={ctrl.step ?? 0}
-                onValueChange={(v) => setValue(key, v)}
-              />
-            </View>
-          ))}
+            );
+          })}
         </ScrollView>
       </Animated.View>
     </View>
   );
 }
 
-function formatValue(v: number, ctrl: Setting): string {
+function formatValue(v: number, ctrl: SliderSetting): string {
   const n = ctrl.step && ctrl.step >= 1 ? Math.round(v) : Math.round(v * 100) / 100;
   return `${n}${ctrl.unit ? ` ${ctrl.unit}` : ''}`;
 }
@@ -144,4 +170,18 @@ const styles = StyleSheet.create({
   },
   label: { color: '#dddddd', fontSize: 15 },
   value: { color: '#888888', fontSize: 14, fontVariant: ['tabular-nums'] },
+  segments: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  segment: {
+    flex: 1,
+    height: 38,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1c1c1c',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  segmentOn: { backgroundColor: '#5b8cff', borderColor: '#5b8cff' },
+  segmentText: { color: '#bbbbbb', fontSize: 14, fontWeight: '600' },
+  segmentTextOn: { color: '#ffffff' },
 });

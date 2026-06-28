@@ -65,12 +65,12 @@ export function ExperimentHost({
 
   const active = focused && appActive;
 
+  const exp = getExperiment(settingsKey.split('/')[0]);
+  const audio = exp?.audio ?? false;
+
   return (
     <ActiveContext.Provider value={active}>
-      <SettingsProvider
-        id={settingsKey}
-        audio={getExperiment(settingsKey.split('/')[0])?.audio ?? false}
-      >
+      <SettingsProvider id={settingsKey} audio={audio}>
         <View style={styles.fill}>
           {children}
           <Pressable
@@ -82,9 +82,7 @@ export function ExperimentHost({
           >
             <Text style={styles.chevron}>‹</Text>
           </Pressable>
-          <RecordControl
-            experiment={getExperiment(settingsKey.split('/')[0])?.title ?? 'Experiment'}
-          />
+          {audio ? <RecordControl experiment={exp?.title ?? 'Experiment'} /> : null}
           <SettingsGear />
           <SettingsSheet />
         </View>

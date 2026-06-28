@@ -187,11 +187,11 @@ export default function NoteRadial() {
 
   const gesture = pan;
 
-  // Two octave zones: dashed squares stacked with an 8% gap, kept clear of the
+  // Two octave zones: dashed squares stacked with an 8px gap, kept clear of the
   // top controls (back / REC / gear).
   const TOP_CLEAR = 112;
   const BOTTOM_CLEAR = 44;
-  const gap = height * 0.08;
+  const gap = 8;
   const band = height - TOP_CLEAR - BOTTOM_CLEAR;
   const side = Math.max(40, Math.min((band - gap) / 2, width - 48));
   const sqX = (width - side) / 2;

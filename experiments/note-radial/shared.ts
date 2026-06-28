@@ -7,7 +7,6 @@ export const RADIAL_RADIUS = 96; // ring radius from the finger
 export const RADIAL_NOTE_R = 24; // ring note circle radius
 export const POP_R = 36; // popped-note circle radius
 export const DEADZONE = 28; // no selection within this radius of the finger
-export const LIFE_MS = 3500; // how long a popped note stays before fading
 export const STRUM_MS = 800; // chord re-strike interval while notes are alive
 
 export function pluck(freq: number) {

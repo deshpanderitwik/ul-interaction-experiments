@@ -13,22 +13,13 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
 import { getScale, ladderNotes } from '../scale';
-import {
-  DEADZONE,
-  LIFE_MS,
-  N,
-  POP_R,
-  RADIAL_NOTE_R,
-  RADIAL_RADIUS,
-  STRUM_MS,
-  pluck,
-} from './shared';
+import { DEADZONE, N, POP_R, RADIAL_NOTE_R, RADIAL_RADIUS, STRUM_MS, pluck } from './shared';
 
 // Note Radial — press & hold to summon a ring of the current scale's 7 notes
-// around your finger; drag toward one and release to pop it onto the screen. A
-// popped note stays ~3.5s, pulsing. While notes are alive a clock strums them
-// together so they ring as a chord (the pluck synth decays); each strum pulses
-// every note in unison.
+// around your finger; drag toward one and release to pop it onto the screen.
+// Popped notes persist (double-tap to wipe them). While notes are present a
+// clock strums them together so they ring as a chord (the pluck synth decays);
+// each strum pulses every note in unison.
 
 type NoteData = { freq: number; label: string };
 type RadialState = { cx: number; cy: number; notes: NoteData[] };
@@ -74,8 +65,9 @@ export default function NoteRadial() {
     const id = popId.current++;
     pluck(note.freq); // strike immediately for responsiveness
     setNotes((prev) => [...prev, { id, x, y, label: note.label, freq: note.freq }]);
-    setTimeout(() => setNotes((prev) => prev.filter((n) => n.id !== id)), LIFE_MS);
   };
+
+  const clearNotes = () => setNotes([]);
 
   // Chord engine: while any note is alive, strum them all together on a clock so
   // the chord keeps ringing, pulsing every note in unison.
@@ -101,7 +93,7 @@ export default function NoteRadial() {
     }
   }, [live]);
 
-  const gesture = Gesture.Pan()
+  const pan = Gesture.Pan()
     .minDistance(0)
     .onBegin((e) => {
       if (!live) return;
@@ -139,6 +131,16 @@ export default function NoteRadial() {
       runOnJS(hideRadial)();
     });
 
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .maxDuration(300)
+    .onEnd(() => {
+      if (!live) return;
+      runOnJS(clearNotes)();
+    });
+
+  const gesture = Gesture.Race(doubleTap, pan);
+
   return (
     <GestureDetector gesture={gesture}>
       <View style={styles.fill}>
@@ -164,7 +166,7 @@ export default function NoteRadial() {
           </View>
         ) : null}
 
-        <Text style={styles.hint}>press &amp; hold, drag to a note</Text>
+        <Text style={styles.hint}>press &amp; hold, drag to a note · double-tap clears</Text>
       </View>
     </GestureDetector>
   );
@@ -205,15 +207,13 @@ function ActiveNoteView({
   note: ActiveNote;
   strumPulse: SharedValue<number>;
 }) {
-  const life = useSharedValue(0);
+  const enter = useSharedValue(0);
   useEffect(() => {
-    life.value = withTiming(1, { duration: LIFE_MS, easing: Easing.linear });
-  }, [life]);
+    enter.value = withTiming(1, { duration: 240, easing: Easing.out(Easing.back(1.6)) });
+  }, [enter]);
   const style = useAnimatedStyle(() => {
-    const entrance = interpolate(life.value, [0, 0.05, 1], [0.3, 1, 1]);
-    const scale = entrance * (1 + strumPulse.value * 0.18);
-    const opacity = interpolate(life.value, [0, 0.8, 1], [1, 1, 0]);
-    return { transform: [{ scale }], opacity };
+    const scale = interpolate(enter.value, [0, 1], [0.3, 1]) * (1 + strumPulse.value * 0.18);
+    return { transform: [{ scale }] };
   });
   return (
     <Animated.View

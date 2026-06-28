@@ -45,6 +45,7 @@ export default function NoteRadial() {
   const popId = useRef(0);
   const pendingRemove = useRef<number | null>(null); // note tapped at touch-down
   const radialShownRef = useRef(false);
+  const octaveBoundaryRef = useRef(height / 2); // y that splits low/high octave
 
   const centerX = useSharedValue(0);
   const centerY = useSharedValue(0);
@@ -56,8 +57,8 @@ export default function NoteRadial() {
 
   const showRadial = (x: number, y: number) => {
     const scale = getScale();
-    // Two halves: pressing in the top half raises the ring an octave.
-    const octaveShift = y < height / 2 ? 1 : 0;
+    // Pressing above the split line (between the squares) raises the ring an octave.
+    const octaveShift = y < octaveBoundaryRef.current ? 1 : 0;
     const ring = ladderNotes(scale, 48 + scale.root)
       .slice(0, N)
       .map((rn) => {
@@ -186,12 +187,18 @@ export default function NoteRadial() {
 
   const gesture = pan;
 
-  // Two octave zones: a dashed square centered in each screen half.
-  const half = height / 2;
-  const side = Math.max(40, Math.min(width - 56, half - 56));
+  // Two octave zones: dashed squares stacked with an 8% gap, kept clear of the
+  // top controls (back / REC / gear).
+  const TOP_CLEAR = 112;
+  const BOTTOM_CLEAR = 44;
+  const gap = height * 0.08;
+  const band = height - TOP_CLEAR - BOTTOM_CLEAR;
+  const side = Math.max(40, Math.min((band - gap) / 2, width - 48));
   const sqX = (width - side) / 2;
-  const topSq = { x: sqX, y: half / 2 - side / 2 };
-  const botSq = { x: sqX, y: half + half / 2 - side / 2 };
+  const startY = TOP_CLEAR + Math.max(0, (band - (side * 2 + gap)) / 2);
+  const topSq = { x: sqX, y: startY };
+  const botSq = { x: sqX, y: startY + side + gap };
+  octaveBoundaryRef.current = startY + side + gap / 2; // mid-gap = octave split
 
   return (
     <GestureDetector gesture={gesture}>
@@ -206,7 +213,7 @@ export default function NoteRadial() {
             style="stroke"
             strokeWidth={2}
           >
-            <DashPathEffect intervals={[12, 9]} />
+            <DashPathEffect intervals={[3, 4]} />
           </Rect>
           <Rect
             x={botSq.x}
@@ -217,7 +224,7 @@ export default function NoteRadial() {
             style="stroke"
             strokeWidth={2}
           >
-            <DashPathEffect intervals={[12, 9]} />
+            <DashPathEffect intervals={[3, 4]} />
           </Rect>
         </Canvas>
 

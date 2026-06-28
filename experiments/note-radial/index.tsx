@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
@@ -12,7 +12,7 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
-import { getScale, ladderNotes } from '../scale';
+import { getScale, ladderNotes, noteName } from '../scale';
 import { DEADZONE, N, POP_R, RADIAL_NOTE_R, RADIAL_RADIUS, STRUM_MS, pluck } from './shared';
 
 // Note Radial — press & hold to summon a ring of the current scale's 7 notes
@@ -23,14 +23,19 @@ import { DEADZONE, N, POP_R, RADIAL_NOTE_R, RADIAL_RADIUS, STRUM_MS, pluck } fro
 
 type NoteData = { freq: number; label: string };
 type RadialState = { cx: number; cy: number; notes: NoteData[]; disabled: boolean[] };
-type ActiveNote = { id: number; x: number; y: number; label: string; freq: number };
+type ActiveNote = { id: number; x: number; y: number; label: string; freq: number; decay: number };
 
 function angleFor(i: number): number {
   return -Math.PI / 2 + (i * 2 * Math.PI) / N; // start at top, clockwise
 }
 
+function freqLabel(freq: number): string {
+  return noteName(Math.round(69 + 12 * Math.log2(freq / 440)));
+}
+
 export default function NoteRadial() {
   const live = useExperimentActive();
+  const { width, height } = useWindowDimensions();
   const [radial, setRadial] = useState<RadialState | null>(null);
   const [notes, setNotes] = useState<ActiveNote[]>([]);
   const radialRef = useRef<RadialState | null>(null);
@@ -50,7 +55,14 @@ export default function NoteRadial() {
 
   const showRadial = (x: number, y: number) => {
     const scale = getScale();
-    const ring = ladderNotes(scale, 48 + scale.root).slice(0, N); // 7 degrees
+    // Y → octave: top of the screen raises the whole ring an octave, bottom drops it.
+    const octaveShift = Math.round((0.5 - Math.max(0, Math.min(1, y / height))) * 2); // -1..+1
+    const ring = ladderNotes(scale, 48 + scale.root)
+      .slice(0, N)
+      .map((rn) => {
+        const freq = rn.freq * Math.pow(2, octaveShift);
+        return { freq, label: freqLabel(freq) };
+      });
     // Disable ring notes already placed on screen (no duplicate pitches).
     const active = new Set(notesRef.current.map((n) => n.label));
     const disabled = ring.map((r) => active.has(r.label));
@@ -77,9 +89,11 @@ export default function NoteRadial() {
     const theta = angleFor(idx);
     const x = r.cx + RADIAL_RADIUS * Math.cos(theta);
     const y = r.cy + RADIAL_RADIUS * Math.sin(theta);
+    // X → decay: left = tight pluck, right = long ring-out.
+    const decay = 0.2 + Math.max(0, Math.min(1, r.cx / width)) * 1.6;
     const id = popId.current++;
-    pluck(note.freq); // strike immediately for responsiveness
-    setNotes((prev) => [...prev, { id, x, y, label: note.label, freq: note.freq }]);
+    pluck(note.freq, decay); // strike immediately for responsiveness
+    setNotes((prev) => [...prev, { id, x, y, label: note.label, freq: note.freq, decay }]);
   };
 
   const removeNote = (id: number) => setNotes((prev) => prev.filter((n) => n.id !== id));
@@ -113,7 +127,7 @@ export default function NoteRadial() {
   useEffect(() => {
     if (!live || !hasNotes) return;
     const strum = () => {
-      for (const n of notesRef.current) pluck(n.freq);
+      for (const n of notesRef.current) pluck(n.freq, n.decay);
       strumPulse.value = 0;
       strumPulse.value = withSequence(
         withTiming(1, { duration: 110, easing: Easing.out(Easing.quad) }),
@@ -199,7 +213,7 @@ export default function NoteRadial() {
           </View>
         ) : null}
 
-        <Text style={styles.hint}>press &amp; hold to add · tap a note to remove</Text>
+        <Text style={styles.hint}>height = octave · right = longer · tap a note to remove</Text>
       </View>
     </GestureDetector>
   );

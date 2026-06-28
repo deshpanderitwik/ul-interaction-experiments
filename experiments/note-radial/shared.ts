@@ -9,7 +9,7 @@ export const POP_R = 36; // popped-note circle radius
 export const DEADZONE = 28; // no selection within this radius of the finger
 export const STRUM_MS = 800; // chord re-strike interval while notes are alive
 
-export function pluck(freq: number) {
+export function pluck(freq: number, decay = 0.6) {
   recordNote(freq, 0.9);
-  NoteSynth?.pluck(freq, 0.9, 0.6).catch(() => {});
+  NoteSynth?.pluck(freq, 0.9, decay).catch(() => {});
 }

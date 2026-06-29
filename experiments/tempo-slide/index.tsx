@@ -13,8 +13,10 @@ import Animated, {
   interpolateColor,
   runOnJS,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
   withTiming,
+  type SharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useExperimentActive } from '../_host';
@@ -56,6 +58,12 @@ const SETTINGS = {
 // lands on a grid line, so playback stays rhythmic. Ordered fast → slow.
 const GRID_DIV = 8; // finest = a 32nd note (8 per beat)
 const GRID_MULTS = [1, 2, 4, 8]; // 32nd, 16th, 8th, quarter
+
+// Comet-tail trail that follows the finger. Each dot eases toward the finger
+// with progressively more lag, so they spread out while moving and converge
+// when still; hue shifts down the tail and the whole thing fades with touch.
+const TRAIL_COUNT = 12;
+const TRAIL_STOPS = ['#5b8cff', '#c64fff', '#2ee08a'];
 
 // Diameter of a fully-expanded ripple ring.
 const RIPPLE_D = 240;
@@ -127,8 +135,12 @@ export default function TempoSlide() {
 
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  // UI-thread visual: the hint text fade.
+  // UI-thread visuals: the hint text fade, and the live finger position + touch
+  // envelope that drive the trail.
   const hint = useSharedValue(1);
+  const fingerX = useSharedValue(0);
+  const fingerY = useSharedValue(0);
+  const touch = useSharedValue(0);
 
   // Sequencer state (JS thread).
   const intervalRef = useRef(250);
@@ -203,6 +215,7 @@ export default function TempoSlide() {
     if (!live) {
       stopArp();
       hint.value = 1;
+      touch.value = 0;
     }
     return stopArp;
   }, [live]);
@@ -212,13 +225,19 @@ export default function TempoSlide() {
     .onStart((e) => {
       if (!live) return;
       hint.value = withTiming(0, { duration: 250 });
+      fingerX.value = e.x;
+      fingerY.value = e.y;
+      touch.value = withTiming(1, { duration: 200 });
       runOnJS(startArp)(e.x, e.y);
     })
     .onUpdate((e) => {
+      fingerX.value = e.x;
+      fingerY.value = e.y;
       runOnJS(moveArp)(e.x, e.y);
     })
     .onFinalize(() => {
       hint.value = withTiming(1, { duration: 600 });
+      touch.value = withTiming(0, { duration: 450 });
       runOnJS(stopArp)();
     });
 
@@ -233,6 +252,18 @@ export default function TempoSlide() {
     <View style={styles.root}>
       <GestureDetector gesture={pan}>
         <View style={[styles.slideArea, { bottom: BAR_AREA }]}>
+          {Array.from({ length: TRAIL_COUNT }).map((_, k) => {
+            const index = TRAIL_COUNT - 1 - k; // render head last → on top
+            return (
+              <TrailDot
+                key={index}
+                index={index}
+                fingerX={fingerX}
+                fingerY={fingerY}
+                touch={touch}
+              />
+            );
+          })}
           {Array.from({ length: RIPPLE_POOL }).map((_, i) => (
             <Ripple
               key={i}
@@ -361,6 +392,42 @@ function NotesSheet({
   );
 }
 
+// One dot of the comet tail. Eases toward the finger with a lag that grows with
+// its index, so later dots trail further behind; fades with the touch envelope.
+function TrailDot({
+  index,
+  fingerX,
+  fingerY,
+  touch,
+}: {
+  index: number;
+  fingerX: SharedValue<number>;
+  fingerY: SharedValue<number>;
+  touch: SharedValue<number>;
+}) {
+  const frac = 1 - index / TRAIL_COUNT; // 1 at the head → ~0 at the tail
+  const lag = 55 + index * 40; // ms of easing toward the finger
+  const size = 10 + frac * 30;
+  const ct = index / Math.max(1, TRAIL_COUNT - 1);
+
+  const x = useDerivedValue(() => withTiming(fingerX.value, { duration: lag }));
+  const y = useDerivedValue(() => withTiming(fingerY.value, { duration: lag }));
+
+  const style = useAnimatedStyle(() => ({
+    left: x.value - size / 2,
+    top: y.value - size / 2,
+    opacity: touch.value * frac * 0.5,
+    backgroundColor: interpolateColor(ct, [0, 0.5, 1], TRAIL_STOPS),
+  }));
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[styles.trailDot, { width: size, height: size, borderRadius: size / 2 }, style]}
+    />
+  );
+}
+
 type RippleHandle = {
   trigger: (x: number, y: number, colorIndex: number, durationMs: number) => void;
 };
@@ -416,6 +483,7 @@ const styles = StyleSheet.create({
     borderWidth: 6,
   },
   hint: { color: '#fff', fontSize: 16, letterSpacing: 1 },
+  trailDot: { position: 'absolute' },
 
   // Bottom "Notes" bar.
   bar: {

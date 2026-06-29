@@ -1,5 +1,5 @@
 import { Canvas, DashPathEffect, Rect } from '@shopify/react-native-skia';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -14,7 +14,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useExperimentActive } from '../_host';
-import { getScale, ladderNotes, noteName } from '../scale';
+import { getScale, ladderNotes, noteName, useScale } from '../scale';
 import { useSettings } from '../settings';
 import { useTempo } from '../tempo';
 import { DEADZONE, N, RADIAL_NOTE_R, RADIAL_RADIUS, pluck } from './shared';
@@ -35,12 +35,19 @@ const SETTINGS = {
   },
 } as const;
 
+type CellMode = 'radial' | 'tap';
+type Cell = { degree: number; octave: number; label: string; freq: number };
+
 // Note Radial — press & hold to summon a ring of the current scale's 7 notes;
 // drag and release to pop a note into the SELECTED chord. The bottom bar holds a
 // progression of chords (dots); tap a dot to edit it, + to add (copy current or
 // blank), long-press to delete. The progression auto-plays on a loop: each slot
 // strums its chord (blank = silent rest); the playhead highlight moves across
 // the dots. Recording captures the looping progression including live edits.
+//
+// The "tap" mode (Non Radial variation) drops the radial entirely: every lane
+// cell shows up front in a warm waiting state with its note name, and you tap a
+// cell to toggle that note on/off in the selected chord.
 
 type NoteData = { freq: number; label: string };
 type RadialState = {
@@ -64,8 +71,9 @@ function freqLabel(freq: number): string {
   return noteName(Math.round(69 + 12 * Math.log2(freq / 440)));
 }
 
-export default function NoteRadial() {
+export default function NoteRadial({ mode = 'radial' }: { mode?: CellMode }) {
   const live = useExperimentActive();
+  const scale = useScale();
   const { noteLength } = useSettings(SETTINGS);
   const bpm = useTempo();
   const slotMs = 240000 / bpm / noteLength; // 1/4 note .. 1/32 note at the tempo
@@ -122,19 +130,46 @@ export default function NoteRadial() {
     );
   };
 
-  // The on-screen rect for a placed note: full-width of its octave square, one
-  // lane tall (1/7 of the square), with the root lane at the bottom and degrees
+  // The on-screen rect for a lane: full-width of its octave square, one lane
+  // tall (1/7 of the square), with the root lane at the bottom and degrees
   // stacking upward.
-  const rectFor = (note: ActiveNote) => {
+  const laneRect = (degree: number, octave: number) => {
     const L = layoutRef.current;
     const laneH = L.side / N;
-    const sqTop = note.octave === 1 ? L.topY : L.botY;
-    return {
-      x: L.sqX,
-      y: sqTop + L.side - (note.degree + 1) * laneH,
-      w: L.side,
-      h: laneH,
-    };
+    const sqTop = octave === 1 ? L.topY : L.botY;
+    return { x: L.sqX, y: sqTop + L.side - (degree + 1) * laneH, w: L.side, h: laneH };
+  };
+  const rectFor = (note: ActiveNote) => laneRect(note.degree, note.octave);
+
+  // ---- tap mode: every lane shown as a tappable cell ----
+  // The full grid of cells (both octaves × 7 degrees) with their note names.
+  const cells = useMemo<Cell[]>(() => {
+    const ring = ladderNotes(scale, 48 + scale.root).slice(0, N);
+    const out: Cell[] = [];
+    for (const octave of [1, 0]) {
+      for (let d = 0; d < N; d++) {
+        const freq = ring[d].freq * Math.pow(2, octave);
+        out.push({ degree: d, octave, label: freqLabel(freq), freq });
+      }
+    }
+    return out;
+  }, [scale]);
+  const toggleCell = (cell: Cell) => {
+    const existing = activeNotesRef.current.find(
+      (n) => n.degree === cell.degree && n.octave === cell.octave
+    );
+    if (existing) {
+      removeNote(existing.id);
+    } else {
+      pluck(cell.freq);
+      addNote({
+        id: noteId.current++,
+        degree: cell.degree,
+        octave: cell.octave,
+        label: cell.label,
+        freq: cell.freq,
+      });
+    }
   };
 
   // ---- radial ----
@@ -303,43 +338,88 @@ export default function NoteRadial() {
   octaveBoundaryRef.current = startY + side + gap / 2;
   layoutRef.current = { sqX, side, topY: topSq.y, botY: botSq.y };
 
+  const octaveSquares = (
+    <Canvas style={StyleSheet.absoluteFill} pointerEvents="none">
+      <Rect x={topSq.x} y={topSq.y} width={side} height={side} color="rgba(255,255,255,0.28)" style="stroke" strokeWidth={2}>
+        <DashPathEffect intervals={[3, 4]} />
+      </Rect>
+      <Rect x={botSq.x} y={botSq.y} width={side} height={side} color="rgba(255,255,255,0.28)" style="stroke" strokeWidth={2}>
+        <DashPathEffect intervals={[3, 4]} />
+      </Rect>
+    </Canvas>
+  );
+
   return (
     <View style={styles.fill}>
-      <GestureDetector gesture={pan}>
+      {mode === 'tap' ? (
         <View style={[StyleSheet.absoluteFill, { bottom: BAR_AREA }]}>
-          <Canvas style={StyleSheet.absoluteFill} pointerEvents="none">
-            <Rect x={topSq.x} y={topSq.y} width={side} height={side} color="rgba(255,255,255,0.28)" style="stroke" strokeWidth={2}>
-              <DashPathEffect intervals={[3, 4]} />
-            </Rect>
-            <Rect x={botSq.x} y={botSq.y} width={side} height={side} color="rgba(255,255,255,0.28)" style="stroke" strokeWidth={2}>
-              <DashPathEffect intervals={[3, 4]} />
-            </Rect>
-          </Canvas>
+          {octaveSquares}
 
+          {/* Warm waiting cells for lanes that aren't on yet. */}
+          {cells.map((cell) => {
+            const on = activeNotes.some(
+              (n) => n.degree === cell.degree && n.octave === cell.octave
+            );
+            if (on) return null;
+            const r = laneRect(cell.degree, cell.octave);
+            return (
+              <View
+                key={`cell-${cell.octave}-${cell.degree}`}
+                pointerEvents="none"
+                style={[styles.cellWarm, { left: r.x, top: r.y + 2, width: r.w, height: r.h - 4 }]}
+              >
+                <Text style={styles.cellWarmLabel}>{cell.label}</Text>
+              </View>
+            );
+          })}
+
+          {/* On lanes render as the bright bar (with strum pulse). */}
           {activeNotes.map((n) => (
             <NoteBar key={n.id} rect={rectFor(n)} label={n.label} strumPulse={strumPulse} />
           ))}
 
-          {radial ? (
-            <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-              {radial.notes.map((n, i) => {
-                const theta = angleFor(i);
-                return (
-                  <RingNote
-                    key={i}
-                    index={i}
-                    x={radial.cx + RADIAL_RADIUS * Math.cos(theta) - RADIAL_NOTE_R}
-                    y={radial.cy + RADIAL_RADIUS * Math.sin(theta) - RADIAL_NOTE_R}
-                    label={n.label}
-                    disabled={radial.disabled[i]}
-                    selected={selected}
-                  />
-                );
-              })}
-            </View>
-          ) : null}
+          {/* Transparent tap targets over every lane. */}
+          {cells.map((cell) => {
+            const r = laneRect(cell.degree, cell.octave);
+            return (
+              <Pressable
+                key={`tap-${cell.octave}-${cell.degree}`}
+                onPress={() => toggleCell(cell)}
+                style={[styles.cellTap, { left: r.x, top: r.y, width: r.w, height: r.h }]}
+              />
+            );
+          })}
         </View>
-      </GestureDetector>
+      ) : (
+        <GestureDetector gesture={pan}>
+          <View style={[StyleSheet.absoluteFill, { bottom: BAR_AREA }]}>
+            {octaveSquares}
+
+            {activeNotes.map((n) => (
+              <NoteBar key={n.id} rect={rectFor(n)} label={n.label} strumPulse={strumPulse} />
+            ))}
+
+            {radial ? (
+              <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+                {radial.notes.map((n, i) => {
+                  const theta = angleFor(i);
+                  return (
+                    <RingNote
+                      key={i}
+                      index={i}
+                      x={radial.cx + RADIAL_RADIUS * Math.cos(theta) - RADIAL_NOTE_R}
+                      y={radial.cy + RADIAL_RADIUS * Math.sin(theta) - RADIAL_NOTE_R}
+                      label={n.label}
+                      disabled={radial.disabled[i]}
+                      selected={selected}
+                    />
+                  );
+                })}
+              </View>
+            ) : null}
+          </View>
+        </GestureDetector>
+      )}
 
       <ChordsBar
         chords={chords}
@@ -579,6 +659,18 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.5)',
   },
   noteBarLabel: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  cellWarm: {
+    position: 'absolute',
+    borderRadius: 5,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255,148,74,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,170,90,0.55)',
+  },
+  cellWarmLabel: { color: '#ffcaa0', fontSize: 15, fontWeight: '700' },
+  cellTap: { position: 'absolute' },
 
   playBtn: {
     position: 'absolute',

@@ -48,6 +48,14 @@ export const experiments: Experiment[] = [
     accent: '#7af0d4',
     audio: true,
     load: () => import('./note-radial'),
+    variations: [
+      {
+        id: 'non-radial',
+        title: 'Non Radial',
+        blurb: 'Tap warm cells to toggle scale notes on/off — no radial picker.',
+        preset: { mode: 'tap' },
+      },
+    ],
   },
   {
     id: 'note-burst',

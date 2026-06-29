@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-na
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
-  interpolate,
+  interpolateColor,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -17,7 +17,7 @@ import { useExperimentActive } from '../_host';
 import { getScale, ladderNotes, noteName } from '../scale';
 import { useSettings } from '../settings';
 import { useTempo } from '../tempo';
-import { DEADZONE, N, POP_R, RADIAL_NOTE_R, RADIAL_RADIUS, pluck } from './shared';
+import { DEADZONE, N, RADIAL_NOTE_R, RADIAL_RADIUS, pluck } from './shared';
 
 // Each chord lasts (and re-triggers) for the selected note length, at the
 // global tempo.
@@ -43,8 +43,16 @@ const SETTINGS = {
 // the dots. Recording captures the looping progression including live edits.
 
 type NoteData = { freq: number; label: string };
-type RadialState = { cx: number; cy: number; notes: NoteData[]; disabled: boolean[] };
-type ActiveNote = { id: number; x: number; y: number; label: string; freq: number };
+type RadialState = {
+  cx: number;
+  cy: number;
+  notes: NoteData[];
+  disabled: boolean[];
+  octave: number; // 1 = upper square, 0 = lower
+};
+// A placed note lives in a lane: its scale degree (0 = root .. 6) within an
+// octave square. It renders as a full-width bar in that lane.
+type ActiveNote = { id: number; degree: number; octave: number; label: string; freq: number };
 type Chord = { id: number; notes: ActiveNote[] };
 
 function angleFor(i: number): number {
@@ -88,6 +96,9 @@ export default function NoteRadial() {
   const pendingRemove = useRef<number | null>(null);
   const noteId = useRef(1);
   const nextChordId = useRef(1);
+  // Current octave-square geometry, kept in a ref so the gesture handler (and
+  // bar rects) can read it without re-creating the gesture each layout pass.
+  const layoutRef = useRef({ sqX: 0, side: 0, topY: 0, botY: 0 });
 
   const centerX = useSharedValue(0);
   const centerY = useSharedValue(0);
@@ -110,6 +121,21 @@ export default function NoteRadial() {
     );
   };
 
+  // The on-screen rect for a placed note: full-width of its octave square, one
+  // lane tall (1/7 of the square), with the root lane at the bottom and degrees
+  // stacking upward.
+  const rectFor = (note: ActiveNote) => {
+    const L = layoutRef.current;
+    const laneH = L.side / N;
+    const sqTop = note.octave === 1 ? L.topY : L.botY;
+    return {
+      x: L.sqX,
+      y: sqTop + L.side - (note.degree + 1) * laneH,
+      w: L.side,
+      h: laneH,
+    };
+  };
+
   // ---- radial ----
   const showRadial = (x: number, y: number) => {
     const scale = getScale();
@@ -127,7 +153,7 @@ export default function NoteRadial() {
       if (d) mask |= 1 << i;
     });
     disabledMask.value = mask;
-    const state = { cx: x, cy: y, notes: ring, disabled };
+    const state = { cx: x, cy: y, notes: ring, disabled, octave: octaveShift };
     radialRef.current = state;
     radialShownRef.current = true;
     setRadial(state);
@@ -141,17 +167,21 @@ export default function NoteRadial() {
     const r = radialRef.current;
     if (!r || idx < 0 || idx >= r.notes.length || r.disabled[idx]) return;
     const note = r.notes[idx];
-    const theta = angleFor(idx);
-    const x = r.cx + RADIAL_RADIUS * Math.cos(theta);
-    const y = r.cy + RADIAL_RADIUS * Math.sin(theta);
     pluck(note.freq);
-    addNote({ id: noteId.current++, x, y, label: note.label, freq: note.freq });
+    addNote({
+      id: noteId.current++,
+      degree: idx,
+      octave: r.octave,
+      label: note.label,
+      freq: note.freq,
+    });
   };
 
   const onDown = (x: number, y: number) => {
-    const hit = [...activeNotesRef.current]
-      .reverse()
-      .find((n) => Math.hypot(x - n.x, y - n.y) <= POP_R);
+    const hit = [...activeNotesRef.current].reverse().find((n) => {
+      const rc = rectFor(n);
+      return x >= rc.x && x <= rc.x + rc.w && y >= rc.y && y <= rc.y + rc.h;
+    });
     if (hit) {
       pendingRemove.current = hit.id;
     } else {
@@ -270,6 +300,7 @@ export default function NoteRadial() {
   const topSq = { x: sqX, y: startY };
   const botSq = { x: sqX, y: startY + side + gap };
   octaveBoundaryRef.current = startY + side + gap / 2;
+  layoutRef.current = { sqX, side, topY: topSq.y, botY: botSq.y };
 
   return (
     <View style={styles.fill}>
@@ -285,7 +316,7 @@ export default function NoteRadial() {
           </Canvas>
 
           {activeNotes.map((n) => (
-            <ActiveNoteView key={n.id} note={n} strumPulse={strumPulse} />
+            <NoteBar key={n.id} rect={rectFor(n)} label={n.label} strumPulse={strumPulse} />
           ))}
 
           {radial ? (
@@ -371,21 +402,33 @@ function RingNote({
   );
 }
 
-function ActiveNoteView({ note, strumPulse }: { note: ActiveNote; strumPulse: SharedValue<number> }) {
+function NoteBar({
+  rect,
+  label,
+  strumPulse,
+}: {
+  rect: { x: number; y: number; w: number; h: number };
+  label: string;
+  strumPulse: SharedValue<number>;
+}) {
   const enter = useSharedValue(0);
   useEffect(() => {
-    enter.value = withTiming(1, { duration: 240, easing: Easing.out(Easing.back(1.6)) });
+    enter.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.cubic) });
   }, [enter]);
-  const style = useAnimatedStyle(() => {
-    const scale = interpolate(enter.value, [0, 1], [0.3, 1]) * (1 + strumPulse.value * 0.18);
-    return { transform: [{ scale }] };
-  });
+  const style = useAnimatedStyle(() => ({
+    opacity: enter.value,
+    backgroundColor: interpolateColor(strumPulse.value, [0, 1], ['#39477e', '#5b8cff']),
+  }));
   return (
     <Animated.View
       pointerEvents="none"
-      style={[styles.note, { left: note.x - POP_R, top: note.y - POP_R }, style]}
+      style={[
+        styles.noteBar,
+        { left: rect.x, top: rect.y + 2, width: rect.w, height: rect.h - 4 },
+        style,
+      ]}
     >
-      <Text style={styles.noteLabel}>{note.label}</Text>
+      <Text style={styles.noteBarLabel}>{label}</Text>
     </Animated.View>
   );
 }
@@ -525,18 +568,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ringLabel: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  note: {
+  noteBar: {
     position: 'absolute',
-    width: POP_R * 2,
-    height: POP_R * 2,
-    borderRadius: POP_R,
-    backgroundColor: '#5b8cff',
-    alignItems: 'center',
+    borderRadius: 5,
+    alignItems: 'flex-start',
     justifyContent: 'center',
+    paddingHorizontal: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.5)',
   },
-  noteLabel: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  noteBarLabel: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
   playBtn: {
     position: 'absolute',

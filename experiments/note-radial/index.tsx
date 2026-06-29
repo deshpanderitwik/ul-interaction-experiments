@@ -68,6 +68,7 @@ export default function NoteRadial() {
   const [chords, setChords] = useState<Chord[]>([{ id: 0, notes: [] }]);
   const [chordIndex, setChordIndex] = useState(0); // selected (editing) chord
   const [playhead, setPlayhead] = useState(0); // currently-sounding chord
+  const [playing, setPlaying] = useState(true); // auto-play running?
   const [radial, setRadial] = useState<RadialState | null>(null);
 
   const chordsRef = useRef(chords);
@@ -193,7 +194,7 @@ export default function NoteRadial() {
 
   // ---- auto-play loop ----
   useEffect(() => {
-    if (!live) return;
+    if (!live || !playing) return;
     const tick = () => {
       const list = chordsRef.current;
       if (list.length === 0) return;
@@ -212,7 +213,7 @@ export default function NoteRadial() {
     };
     const id = setInterval(tick, slotMs);
     return () => clearInterval(id);
-  }, [live, slotMs, strumPulse]);
+  }, [live, playing, slotMs, strumPulse]);
 
   useEffect(() => {
     if (!live) hideRadial();
@@ -318,6 +319,23 @@ export default function NoteRadial() {
         onAddBlank={onAddBlank}
         onDelete={onDeleteChord}
       />
+
+      <Pressable
+        onPress={() => setPlaying((p) => !p)}
+        hitSlop={10}
+        accessibilityRole="button"
+        accessibilityLabel={playing ? 'Pause' : 'Play'}
+        style={[styles.playBtn, { bottom: insets.bottom + 6 }]}
+      >
+        {playing ? (
+          <View style={styles.pauseIcon}>
+            <View style={styles.pauseBar} />
+            <View style={styles.pauseBar} />
+          </View>
+        ) : (
+          <View style={styles.playTri} />
+        )}
+      </Pressable>
     </View>
   );
 }
@@ -520,6 +538,31 @@ const styles = StyleSheet.create({
   },
   noteLabel: { color: '#fff', fontSize: 18, fontWeight: '700' },
 
+  playBtn: {
+    position: 'absolute',
+    left: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(22,22,22,0.94)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  pauseIcon: { flexDirection: 'row', gap: 5 },
+  pauseBar: { width: 4, height: 15, borderRadius: 1.5, backgroundColor: '#fff' },
+  playTri: {
+    width: 0,
+    height: 0,
+    marginLeft: 3,
+    borderTopWidth: 8,
+    borderBottomWidth: 8,
+    borderLeftWidth: 13,
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
+    borderLeftColor: '#fff',
+  },
   bar: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', paddingTop: 8 },
   barRow: {
     flexDirection: 'row',

@@ -1,3 +1,4 @@
+import { BlurMask, Canvas, Path, Skia } from '@shopify/react-native-skia';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
@@ -16,7 +17,6 @@ import Animated, {
   useDerivedValue,
   useSharedValue,
   withTiming,
-  type SharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useExperimentActive } from '../_host';
@@ -59,11 +59,11 @@ const SETTINGS = {
 const GRID_DIV = 8; // finest = a 32nd note (8 per beat)
 const GRID_MULTS = [1, 2, 4, 8]; // 32nd, 16th, 8th, quarter
 
-// Comet-tail trail that follows the finger. Each dot eases toward the finger
-// with progressively more lag, so they spread out while moving and converge
-// when still; hue shifts down the tail and the whole thing fades with touch.
-const TRAIL_COUNT = 12;
-const TRAIL_STOPS = ['#5b8cff', '#c64fff', '#2ee08a'];
+// Glowing bloom line that traces the finger. We sample the path into a capped
+// polyline and stroke it in layers (two blurred bloom passes + a bright core);
+// the hue shifts with height and the whole line fades out on release.
+const LINE_MAX = 64; // max sampled points (older ones drop off)
+const LINE_MIN_STEP = 4; // px between samples
 
 // Diameter of a fully-expanded ripple ring.
 const RIPPLE_D = 240;
@@ -135,12 +135,35 @@ export default function TempoSlide() {
 
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  // UI-thread visuals: the hint text fade, and the live finger position + touch
-  // envelope that drive the trail.
+  // UI-thread visuals: the hint text fade, plus the sampled finger path, its
+  // fade envelope, and the live finger height that tints the glow.
   const hint = useSharedValue(1);
-  const fingerX = useSharedValue(0);
   const fingerY = useSharedValue(0);
-  const touch = useSharedValue(0);
+  const points = useSharedValue<{ x: number; y: number }[]>([]);
+  const lineOpacity = useSharedValue(0);
+
+  // The finger path as a Skia stroke, rebuilt on the UI thread as points change.
+  const linePath = useDerivedValue(() => {
+    const pts = points.value;
+    const path = Skia.Path.Make();
+    if (pts.length > 0) {
+      path.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) {
+        const mx = (pts[i - 1].x + pts[i].x) / 2;
+        const my = (pts[i - 1].y + pts[i].y) / 2;
+        path.quadTo(pts[i - 1].x, pts[i - 1].y, mx, my);
+      }
+      const last = pts[pts.length - 1];
+      path.lineTo(last.x, last.y);
+    }
+    return path;
+  });
+
+  // Glow hue follows height: warm pink up top → blue → mint at the bottom.
+  const glowColor = useDerivedValue(() => {
+    const t = canvasH > 0 ? Math.max(0, Math.min(1, fingerY.value / canvasH)) : 0.5;
+    return interpolateColor(t, [0, 0.5, 1], ['#ff5bb0', '#5b8cff', '#2ee0c0']);
+  }, [canvasH]);
 
   // Sequencer state (JS thread).
   const intervalRef = useRef(250);
@@ -215,7 +238,8 @@ export default function TempoSlide() {
     if (!live) {
       stopArp();
       hint.value = 1;
-      touch.value = 0;
+      lineOpacity.value = 0;
+      points.value = [];
     }
     return stopArp;
   }, [live]);
@@ -225,19 +249,24 @@ export default function TempoSlide() {
     .onStart((e) => {
       if (!live) return;
       hint.value = withTiming(0, { duration: 250 });
-      fingerX.value = e.x;
       fingerY.value = e.y;
-      touch.value = withTiming(1, { duration: 200 });
+      points.value = [{ x: e.x, y: e.y }];
+      lineOpacity.value = withTiming(1, { duration: 120 });
       runOnJS(startArp)(e.x, e.y);
     })
     .onUpdate((e) => {
-      fingerX.value = e.x;
       fingerY.value = e.y;
+      const pts = points.value;
+      const last = pts.length ? pts[pts.length - 1] : null;
+      if (!last || Math.hypot(e.x - last.x, e.y - last.y) > LINE_MIN_STEP) {
+        const next = [...pts, { x: e.x, y: e.y }];
+        points.value = next.length > LINE_MAX ? next.slice(next.length - LINE_MAX) : next;
+      }
       runOnJS(moveArp)(e.x, e.y);
     })
     .onFinalize(() => {
       hint.value = withTiming(1, { duration: 600 });
-      touch.value = withTiming(0, { duration: 450 });
+      lineOpacity.value = withTiming(0, { duration: 650 });
       runOnJS(stopArp)();
     });
 
@@ -252,18 +281,39 @@ export default function TempoSlide() {
     <View style={styles.root}>
       <GestureDetector gesture={pan}>
         <View style={[styles.slideArea, { bottom: BAR_AREA }]}>
-          {Array.from({ length: TRAIL_COUNT }).map((_, k) => {
-            const index = TRAIL_COUNT - 1 - k; // render head last → on top
-            return (
-              <TrailDot
-                key={index}
-                index={index}
-                fingerX={fingerX}
-                fingerY={fingerY}
-                touch={touch}
-              />
-            );
-          })}
+          <Canvas style={StyleSheet.absoluteFill} pointerEvents="none">
+            <Path
+              path={linePath}
+              style="stroke"
+              strokeWidth={26}
+              strokeCap="round"
+              strokeJoin="round"
+              color={glowColor}
+              opacity={lineOpacity}
+            >
+              <BlurMask blur={18} style="normal" />
+            </Path>
+            <Path
+              path={linePath}
+              style="stroke"
+              strokeWidth={12}
+              strokeCap="round"
+              strokeJoin="round"
+              color={glowColor}
+              opacity={lineOpacity}
+            >
+              <BlurMask blur={6} style="normal" />
+            </Path>
+            <Path
+              path={linePath}
+              style="stroke"
+              strokeWidth={3.5}
+              strokeCap="round"
+              strokeJoin="round"
+              color="#eaf2ff"
+              opacity={lineOpacity}
+            />
+          </Canvas>
           {Array.from({ length: RIPPLE_POOL }).map((_, i) => (
             <Ripple
               key={i}
@@ -392,42 +442,6 @@ function NotesSheet({
   );
 }
 
-// One dot of the comet tail. Eases toward the finger with a lag that grows with
-// its index, so later dots trail further behind; fades with the touch envelope.
-function TrailDot({
-  index,
-  fingerX,
-  fingerY,
-  touch,
-}: {
-  index: number;
-  fingerX: SharedValue<number>;
-  fingerY: SharedValue<number>;
-  touch: SharedValue<number>;
-}) {
-  const frac = 1 - index / TRAIL_COUNT; // 1 at the head → ~0 at the tail
-  const lag = 55 + index * 40; // ms of easing toward the finger
-  const size = 10 + frac * 30;
-  const ct = index / Math.max(1, TRAIL_COUNT - 1);
-
-  const x = useDerivedValue(() => withTiming(fingerX.value, { duration: lag }));
-  const y = useDerivedValue(() => withTiming(fingerY.value, { duration: lag }));
-
-  const style = useAnimatedStyle(() => ({
-    left: x.value - size / 2,
-    top: y.value - size / 2,
-    opacity: touch.value * frac * 0.5,
-    backgroundColor: interpolateColor(ct, [0, 0.5, 1], TRAIL_STOPS),
-  }));
-
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={[styles.trailDot, { width: size, height: size, borderRadius: size / 2 }, style]}
-    />
-  );
-}
-
 type RippleHandle = {
   trigger: (x: number, y: number, colorIndex: number, durationMs: number) => void;
 };
@@ -483,7 +497,6 @@ const styles = StyleSheet.create({
     borderWidth: 6,
   },
   hint: { color: '#fff', fontSize: 16, letterSpacing: 1 },
-  trailDot: { position: 'absolute' },
 
   // Bottom "Notes" bar.
   bar: {

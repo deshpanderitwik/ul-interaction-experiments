@@ -122,6 +122,13 @@ export const experiments: Experiment[] = [
       },
     ],
   },
+  {
+    id: 'adsr',
+    title: 'ADSR',
+    blurb: 'Shape an ADSR envelope by dragging handles; double-tap to fire a sine pulse through it.',
+    accent: '#ff9f43',
+    load: () => import('./adsr'),
+  },
 ];
 
 export function getExperiment(id: string | undefined): Experiment | undefined {

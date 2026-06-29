@@ -7,6 +7,15 @@ class NoteSynthModule extends NativeModule {
     return false;
   }
   async pluck(_frequency: number, _gain: number, _decay: number): Promise<void> {}
+  async playADSR(
+    _frequency: number,
+    _gain: number,
+    _attack: number,
+    _decay: number,
+    _sustain: number,
+    _hold: number,
+    _release: number
+  ): Promise<void> {}
 }
 
 export default registerWebModule(NoteSynthModule, 'NoteSynthModule');

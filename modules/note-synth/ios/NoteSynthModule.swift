@@ -14,12 +14,29 @@ public class NoteSynthModule: Module {
   // Round-robin voice pool so overlapping plucks (the arp moving fast, or a
   // chord) don't cut each other off — an earlier voice keeps decaying while a
   // new one starts.
+  //
+  // A voice is one of two kinds, set at trigger time:
+  //   - pluck: instant attack then exponential `decayMul` falloff (`amp`).
+  //   - adsr:  a linear-segment Attack→Decay→Sustain(hold)→Release envelope
+  //            (`env` scaled by `peak`), advanced by a per-voice stage machine.
+  private enum Stage: Int { case attack, decay, sustain, release }
   private struct Voice {
     var active: Bool = false
     var phase: Double = 0
     var phaseInc: Double = 0
+    // pluck
     var amp: Double = 0
     var decayMul: Double = 1
+    // adsr
+    var isADSR: Bool = false
+    var stage: Stage = .attack
+    var env: Double = 0          // current envelope level, 0...1
+    var peak: Double = 0         // gain the envelope is scaled by
+    var sustain: Double = 0      // sustain level, 0...1
+    var atkInc: Double = 0       // per-sample rise during attack
+    var decInc: Double = 0       // per-sample fall during decay
+    var relInc: Double = 0       // per-sample fall during release
+    var holdSamples: Int = 0     // samples to hold sustain before release
   }
   private let voiceCount = 16
   private var voices = [Voice]()
@@ -41,6 +58,18 @@ public class NoteSynthModule: Module {
     // Trigger a sine pluck. frequency: Hz; gain: 0...1; decay: seconds to ~-60dB.
     AsyncFunction("pluck") { (frequency: Double, gain: Double, decay: Double) in
       self.trigger(frequency: frequency, gain: gain, decay: decay)
+    }
+
+    // Trigger a one-shot sine note shaped by an ADSR envelope. attack/decay/
+    // release are in seconds; sustain is the held level (0...1); hold is how
+    // long (seconds) sustain is held before the release begins. This is a
+    // gate-on-then-gate-off pulse: A → D → S(held for `hold`) → R.
+    AsyncFunction("playADSR") {
+      (frequency: Double, gain: Double, attack: Double, decay: Double,
+       sustain: Double, hold: Double, release: Double) in
+      self.triggerADSR(
+        frequency: frequency, gain: gain, attack: attack, decay: decay,
+        sustain: sustain, hold: hold, release: release)
     }
 
     OnDestroy {
@@ -72,11 +101,42 @@ public class NoteSynthModule: Module {
       for frame in 0..<frames {
         var mix = 0.0
         for i in 0..<self.voiceCount where self.voices[i].active {
-          mix += sin(self.voices[i].phase) * self.voices[i].amp
+          if self.voices[i].isADSR {
+            // Advance the linear ADSR stage machine one sample.
+            switch self.voices[i].stage {
+            case .attack:
+              self.voices[i].env += self.voices[i].atkInc
+              if self.voices[i].env >= 1.0 {
+                self.voices[i].env = 1.0
+                self.voices[i].stage = .decay
+              }
+            case .decay:
+              self.voices[i].env -= self.voices[i].decInc
+              if self.voices[i].env <= self.voices[i].sustain {
+                self.voices[i].env = self.voices[i].sustain
+                self.voices[i].stage = .sustain
+              }
+            case .sustain:
+              if self.voices[i].holdSamples > 0 {
+                self.voices[i].holdSamples -= 1
+              } else {
+                self.voices[i].stage = .release
+              }
+            case .release:
+              self.voices[i].env -= self.voices[i].relInc
+              if self.voices[i].env <= 0.0 {
+                self.voices[i].env = 0.0
+                self.voices[i].active = false
+              }
+            }
+            mix += sin(self.voices[i].phase) * self.voices[i].env * self.voices[i].peak
+          } else {
+            mix += sin(self.voices[i].phase) * self.voices[i].amp
+            self.voices[i].amp *= self.voices[i].decayMul
+            if self.voices[i].amp < 0.0002 { self.voices[i].active = false }
+          }
           self.voices[i].phase += self.voices[i].phaseInc
           if self.voices[i].phase >= twoPi { self.voices[i].phase -= twoPi }
-          self.voices[i].amp *= self.voices[i].decayMul
-          if self.voices[i].amp < 0.0002 { self.voices[i].active = false }
         }
         // tanh soft-clip keeps summed voices bounded without harsh clipping.
         let sample = Float(tanh(mix))
@@ -112,10 +172,45 @@ public class NoteSynthModule: Module {
     let idx = nextVoice
     nextVoice = (nextVoice + 1) % voiceCount
     voices[idx].active = true
+    voices[idx].isADSR = false
     voices[idx].phase = 0
     voices[idx].phaseInc = inc
     voices[idx].amp = max(0.0, min(1.0, gain))
     voices[idx].decayMul = decayMul
+    lock.unlock()
+  }
+
+  private func triggerADSR(
+    frequency: Double, gain: Double, attack: Double, decay: Double,
+    sustain: Double, hold: Double, release: Double
+  ) {
+    if !engine.isRunning {
+      try? AVAudioSession.sharedInstance().setActive(true)
+      try? engine.start()
+    }
+
+    let sus = max(0.0, min(1.0, sustain))
+    // At least one sample per ramp so increments stay finite.
+    let atkSamples = max(1.0, attack * sampleRate)
+    let decSamples = max(1.0, decay * sampleRate)
+    let relSamples = max(1.0, release * sampleRate)
+    let inc = 2.0 * Double.pi * frequency / sampleRate
+
+    lock.lock()
+    let idx = nextVoice
+    nextVoice = (nextVoice + 1) % voiceCount
+    voices[idx].active = true
+    voices[idx].isADSR = true
+    voices[idx].stage = .attack
+    voices[idx].phase = 0
+    voices[idx].phaseInc = inc
+    voices[idx].env = 0
+    voices[idx].peak = max(0.0, min(1.0, gain))
+    voices[idx].sustain = sus
+    voices[idx].atkInc = 1.0 / atkSamples
+    voices[idx].decInc = (1.0 - sus) / decSamples
+    voices[idx].relInc = max(sus, 0.0001) / relSamples
+    voices[idx].holdSamples = Int(max(0.0, hold) * sampleRate)
     lock.unlock()
   }
 }

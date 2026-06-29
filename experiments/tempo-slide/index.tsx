@@ -1,4 +1,13 @@
-import { BlurMask, Canvas, Path, Skia } from '@shopify/react-native-skia';
+import {
+  BlurMask,
+  Canvas,
+  Circle,
+  Group,
+  Path,
+  RadialGradient,
+  Skia,
+  SweepGradient,
+} from '@shopify/react-native-skia';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
@@ -11,7 +20,6 @@ import {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
-  interpolateColor,
   runOnJS,
   useAnimatedStyle,
   useDerivedValue,
@@ -59,16 +67,16 @@ const SETTINGS = {
 const GRID_DIV = 8; // finest = a 32nd note (8 per beat)
 const GRID_MULTS = [1, 2, 4, 8]; // 32nd, 16th, 8th, quarter
 
-// Glowing bloom line that traces the finger. We sample the path into a capped
-// polyline and stroke it in layers (two blurred bloom passes + a bright core);
-// the hue shifts with height and the whole line fades out on release.
+// Glowing white bloom line that traces the finger. We sample the path into a
+// capped polyline and stroke it in layers (two blurred bloom passes + a bright
+// core); the whole line fades out on release.
 const LINE_MAX = 64; // max sampled points (older ones drop off)
 const LINE_MIN_STEP = 4; // px between samples
 
-// Diameter of a fully-expanded ripple ring.
-const RIPPLE_D = 240;
-// How many ripple views to cycle through. A fast arp can overlap several at
-// once; reusing the oldest just restarts it (reads as a tighter pulse).
+// Max radius a ripple grows to before it has fully faded.
+const RIPPLE_MAXR = 120;
+// How many ripples to cycle through. A fast arp can overlap several at once;
+// reusing the oldest just restarts it (reads as a tighter pulse).
 const RIPPLE_POOL = 8;
 
 type Note = { freq: number; label: string };
@@ -135,10 +143,7 @@ export default function TempoSlide() {
 
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  // UI-thread visuals: the hint text fade, plus the sampled finger path, its
-  // fade envelope, and the live finger height that tints the glow.
-  const hint = useSharedValue(1);
-  const fingerY = useSharedValue(0);
+  // UI-thread visuals: the sampled finger path and its fade envelope.
   const points = useSharedValue<{ x: number; y: number }[]>([]);
   const lineOpacity = useSharedValue(0);
 
@@ -158,12 +163,6 @@ export default function TempoSlide() {
     }
     return path;
   });
-
-  // Glow hue follows height: warm pink up top → blue → mint at the bottom.
-  const glowColor = useDerivedValue(() => {
-    const t = canvasH > 0 ? Math.max(0, Math.min(1, fingerY.value / canvasH)) : 0.5;
-    return interpolateColor(t, [0, 0.5, 1], ['#ff5bb0', '#5b8cff', '#2ee0c0']);
-  }, [canvasH]);
 
   // Sequencer state (JS thread).
   const intervalRef = useRef(250);
@@ -237,7 +236,6 @@ export default function TempoSlide() {
   useEffect(() => {
     if (!live) {
       stopArp();
-      hint.value = 1;
       lineOpacity.value = 0;
       points.value = [];
     }
@@ -248,14 +246,11 @@ export default function TempoSlide() {
     .minDistance(0)
     .onStart((e) => {
       if (!live) return;
-      hint.value = withTiming(0, { duration: 250 });
-      fingerY.value = e.y;
       points.value = [{ x: e.x, y: e.y }];
       lineOpacity.value = withTiming(1, { duration: 120 });
       runOnJS(startArp)(e.x, e.y);
     })
     .onUpdate((e) => {
-      fingerY.value = e.y;
       const pts = points.value;
       const last = pts.length ? pts[pts.length - 1] : null;
       if (!last || Math.hypot(e.x - last.x, e.y - last.y) > LINE_MIN_STEP) {
@@ -265,12 +260,9 @@ export default function TempoSlide() {
       runOnJS(moveArp)(e.x, e.y);
     })
     .onFinalize(() => {
-      hint.value = withTiming(1, { duration: 600 });
       lineOpacity.value = withTiming(0, { duration: 650 });
       runOnJS(stopArp)();
     });
-
-  const hintStyle = useAnimatedStyle(() => ({ opacity: hint.value * 0.5 }));
 
   const pickNote = (position: number, note: Note) => {
     pluck(note.freq); // preview
@@ -288,7 +280,7 @@ export default function TempoSlide() {
               strokeWidth={26}
               strokeCap="round"
               strokeJoin="round"
-              color={glowColor}
+              color="#ffffff"
               opacity={lineOpacity}
             >
               <BlurMask blur={18} style="normal" />
@@ -299,7 +291,7 @@ export default function TempoSlide() {
               strokeWidth={12}
               strokeCap="round"
               strokeJoin="round"
-              color={glowColor}
+              color="#ffffff"
               opacity={lineOpacity}
             >
               <BlurMask blur={6} style="normal" />
@@ -310,21 +302,18 @@ export default function TempoSlide() {
               strokeWidth={3.5}
               strokeCap="round"
               strokeJoin="round"
-              color="#eaf2ff"
+              color="#ffffff"
               opacity={lineOpacity}
             />
+            {Array.from({ length: RIPPLE_POOL }).map((_, i) => (
+              <Ripple
+                key={i}
+                ref={(h) => {
+                  rippleRefs.current[i] = h;
+                }}
+              />
+            ))}
           </Canvas>
-          {Array.from({ length: RIPPLE_POOL }).map((_, i) => (
-            <Ripple
-              key={i}
-              ref={(h) => {
-                rippleRefs.current[i] = h;
-              }}
-            />
-          ))}
-          <Animated.Text style={[styles.hint, hintStyle]}>
-            touch & slide — up faster, down slower
-          </Animated.Text>
         </View>
       </GestureDetector>
 
@@ -446,7 +435,12 @@ type RippleHandle = {
   trigger: (x: number, y: number, colorIndex: number, durationMs: number) => void;
 };
 
-// One reusable ripple: a colored ring that springs out from a point and fades.
+// One reusable ripple, drawn in Skia so it can layer shaders. On each note it
+// blooms out from the finger as three composited rings:
+//   1. a soft radial-gradient core (white → degree tint → transparent),
+//   2. a main ring whose sweep gradient shimmers between the tint and white
+//      around its circumference (the "texture"), softly blurred,
+//   3. a thinner inner accent ring, lagging slightly, for depth.
 // Driven imperatively so the JS-thread sequencer can fire it on each note.
 const Ripple = forwardRef<RippleHandle>(function Ripple(_, ref) {
   const p = useSharedValue(0); // 0 → 1 over the ripple's life
@@ -468,15 +462,40 @@ const Ripple = forwardRef<RippleHandle>(function Ripple(_, ref) {
     [cx, cy, colorIdx, p]
   );
 
-  const style = useAnimatedStyle(() => ({
-    left: cx.value - RIPPLE_D / 2,
-    top: cy.value - RIPPLE_D / 2,
-    opacity: (1 - p.value) * (p.value > 0 ? 1 : 0), // invisible until first fired
-    transform: [{ scale: 0.12 + p.value * 0.88 }],
-    borderColor: interpolateColor(colorIdx.value, [0, 1, 2, 3], ARP_COLORS),
-  }));
+  const center = useDerivedValue(() => ({ x: cx.value, y: cy.value }));
+  const ringR = useDerivedValue(() => 12 + p.value * RIPPLE_MAXR);
+  const innerR = useDerivedValue(() => (12 + p.value * RIPPLE_MAXR) * 0.66);
+  const coreR = useDerivedValue(() => 10 + p.value * RIPPLE_MAXR * 0.55);
+  const ringStroke = useDerivedValue(() => Math.max(1.5, (1 - p.value) * 9));
+  const innerStroke = useDerivedValue(() => Math.max(1, (1 - p.value) * 5));
+  // Invisible at rest (p === 0); blooms in then eases out as it expands.
+  const groupOpacity = useDerivedValue(() => (p.value > 0 ? (1 - p.value) * (1 - p.value) : 0));
 
-  return <Animated.View pointerEvents="none" style={[styles.ripple, style]} />;
+  const tint = useDerivedValue(() => ARP_COLORS[Math.round(colorIdx.value) % ARP_COLORS.length]);
+  const ringColors = useDerivedValue(() => {
+    const c = ARP_COLORS[Math.round(colorIdx.value) % ARP_COLORS.length];
+    return [c, '#ffffff', c, '#ffffff', c];
+  });
+  const coreColors = useDerivedValue(() => {
+    const c = ARP_COLORS[Math.round(colorIdx.value) % ARP_COLORS.length];
+    return ['rgba(255,255,255,0.85)', c, 'rgba(0,0,0,0)'];
+  });
+
+  return (
+    <Group opacity={groupOpacity}>
+      <Circle cx={cx} cy={cy} r={coreR}>
+        <RadialGradient c={center} r={coreR} colors={coreColors} />
+        <BlurMask blur={14} style="normal" />
+      </Circle>
+      <Circle cx={cx} cy={cy} r={ringR} style="stroke" strokeWidth={ringStroke}>
+        <SweepGradient c={center} colors={ringColors} />
+        <BlurMask blur={3} style="solid" />
+      </Circle>
+      <Circle cx={cx} cy={cy} r={innerR} style="stroke" strokeWidth={innerStroke} color={tint}>
+        <BlurMask blur={2} style="solid" />
+      </Circle>
+    </Group>
+  );
 });
 
 const styles = StyleSheet.create({
@@ -489,14 +508,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  ripple: {
-    position: 'absolute',
-    width: RIPPLE_D,
-    height: RIPPLE_D,
-    borderRadius: RIPPLE_D / 2,
-    borderWidth: 6,
-  },
-  hint: { color: '#fff', fontSize: 16, letterSpacing: 1 },
 
   // Bottom "Notes" bar.
   bar: {

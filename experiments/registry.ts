@@ -42,6 +42,14 @@ export type Experiment = {
 
 export const experiments: Experiment[] = [
   {
+    id: 'duet',
+    title: 'Duet',
+    blurb: 'Two cells you toggle on/off: a legato sine root and a pulsing square fifth that shimmer and ripple.',
+    accent: '#54f2e0',
+    audio: true,
+    load: () => import('./duet'),
+  },
+  {
     id: 'note-radial',
     title: 'Note Radial',
     blurb: 'Build chords from a radial of scale notes; chain them into an auto-playing progression.',

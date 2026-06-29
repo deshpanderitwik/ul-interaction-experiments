@@ -1,4 +1,13 @@
-import { Canvas, DashPathEffect, Rect } from '@shopify/react-native-skia';
+import {
+  BlurMask,
+  Canvas,
+  DashPathEffect,
+  Group,
+  LinearGradient,
+  Rect,
+  RoundedRect,
+  vec,
+} from '@shopify/react-native-skia';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -7,6 +16,7 @@ import Animated, {
   interpolateColor,
   runOnJS,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
   withSequence,
   withTiming,
@@ -70,6 +80,10 @@ function angleFor(i: number): number {
 function freqLabel(freq: number): string {
   return noteName(Math.round(69 + 12 * Math.log2(freq / 440)));
 }
+
+// Per-degree hues for the tap-mode cells — a tasteful spectrum across the
+// scale degrees (root → seventh).
+const CELL_HUES = ['#7af0d4', '#5fd0ff', '#7a9bff', '#a07bff', '#e070d0', '#ff7a9c', '#ffb070'];
 
 export default function NoteRadial({ mode = 'radial' }: { mode?: CellMode }) {
   const live = useExperimentActive();
@@ -353,30 +367,51 @@ export default function NoteRadial({ mode = 'radial' }: { mode?: CellMode }) {
     <View style={styles.fill}>
       {mode === 'tap' ? (
         <View style={[StyleSheet.absoluteFill, { bottom: BAR_AREA }]}>
-          {octaveSquares}
+          <Canvas style={StyleSheet.absoluteFill} pointerEvents="none">
+            <Rect x={topSq.x} y={topSq.y} width={side} height={side} color="rgba(255,255,255,0.28)" style="stroke" strokeWidth={2}>
+              <DashPathEffect intervals={[3, 4]} />
+            </Rect>
+            <Rect x={botSq.x} y={botSq.y} width={side} height={side} color="rgba(255,255,255,0.28)" style="stroke" strokeWidth={2}>
+              <DashPathEffect intervals={[3, 4]} />
+            </Rect>
+            {cells.map((cell) => {
+              const on = activeNotes.some(
+                (n) => n.degree === cell.degree && n.octave === cell.octave
+              );
+              const r = laneRect(cell.degree, cell.octave);
+              return (
+                <CellFill
+                  key={`fill-${cell.octave}-${cell.degree}`}
+                  x={r.x}
+                  y={r.y + 2}
+                  w={r.w}
+                  h={r.h - 4}
+                  active={on}
+                  degree={cell.degree}
+                  strumPulse={strumPulse}
+                />
+              );
+            })}
+          </Canvas>
 
-          {/* Warm waiting cells for lanes that aren't on yet. */}
+          {/* Note-name labels over each cell. */}
           {cells.map((cell) => {
             const on = activeNotes.some(
               (n) => n.degree === cell.degree && n.octave === cell.octave
             );
-            if (on) return null;
             const r = laneRect(cell.degree, cell.octave);
             return (
               <View
-                key={`cell-${cell.octave}-${cell.degree}`}
+                key={`label-${cell.octave}-${cell.degree}`}
                 pointerEvents="none"
-                style={[styles.cellWarm, { left: r.x, top: r.y + 2, width: r.w, height: r.h - 4 }]}
+                style={[styles.cellLabelWrap, { left: r.x, top: r.y + 2, width: r.w, height: r.h - 4 }]}
               >
-                <Text style={styles.cellWarmLabel}>{cell.label}</Text>
+                <Text style={[styles.cellLabel, on ? styles.cellLabelOn : styles.cellLabelOff]}>
+                  {cell.label}
+                </Text>
               </View>
             );
           })}
-
-          {/* On lanes render as the bright bar (with strum pulse). */}
-          {activeNotes.map((n) => (
-            <NoteBar key={n.id} rect={rectFor(n)} label={n.label} strumPulse={strumPulse} />
-          ))}
 
           {/* Transparent tap targets over every lane. */}
           {cells.map((cell) => {
@@ -480,6 +515,71 @@ function RingNote({
     <Animated.View style={[styles.ringNote, { left: x, top: y }, aStyle]}>
       <Text style={styles.ringLabel}>{label}</Text>
     </Animated.View>
+  );
+}
+
+// A tap-mode lane cell, drawn in Skia. Waiting cells get a calm warm gradient;
+// active cells get an iridescent two-hue sheen that blooms (blur grows) and
+// flashes white when the chord strums.
+function CellFill({
+  x,
+  y,
+  w,
+  h,
+  active,
+  degree,
+  strumPulse,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  active: boolean;
+  degree: number;
+  strumPulse: SharedValue<number>;
+}) {
+  const blur = useDerivedValue(() => 3 + strumPulse.value * 17);
+  const flash = useDerivedValue(() => strumPulse.value * 0.6);
+
+  if (!active) {
+    return (
+      <Group>
+        <RoundedRect x={x} y={y} width={w} height={h} r={6}>
+          <LinearGradient
+            start={vec(x, y)}
+            end={vec(x, y + h)}
+            colors={['rgba(255,170,90,0.10)', 'rgba(255,95,120,0.16)']}
+          />
+        </RoundedRect>
+        <RoundedRect
+          x={x}
+          y={y}
+          width={w}
+          height={h}
+          r={6}
+          style="stroke"
+          strokeWidth={1}
+          color="rgba(255,175,95,0.45)"
+        />
+      </Group>
+    );
+  }
+
+  const hueA = CELL_HUES[degree % CELL_HUES.length];
+  const hueB = CELL_HUES[(degree + 3) % CELL_HUES.length];
+  return (
+    <Group>
+      <RoundedRect x={x} y={y} width={w} height={h} r={6}>
+        <LinearGradient
+          start={vec(x, y)}
+          end={vec(x + w, y)}
+          positions={[0, 0.5, 1]}
+          colors={[hueA, '#ffffff', hueB]}
+        />
+        <BlurMask blur={blur} style="solid" />
+      </RoundedRect>
+      <RoundedRect x={x} y={y} width={w} height={h} r={6} color="#ffffff" opacity={flash} />
+    </Group>
   );
 }
 
@@ -659,17 +759,15 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.5)',
   },
   noteBarLabel: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  cellWarm: {
+  cellLabelWrap: {
     position: 'absolute',
-    borderRadius: 5,
     alignItems: 'flex-start',
     justifyContent: 'center',
     paddingHorizontal: 12,
-    backgroundColor: 'rgba(255,148,74,0.12)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,170,90,0.55)',
   },
-  cellWarmLabel: { color: '#ffcaa0', fontSize: 15, fontWeight: '700' },
+  cellLabel: { fontSize: 15, fontWeight: '700' },
+  cellLabelOff: { color: '#ffcaa0' },
+  cellLabelOn: { color: '#0c1414' },
   cellTap: { position: 'absolute' },
 
   playBtn: {

@@ -271,6 +271,14 @@ export default function NoteRadial({ mode = 'radial' }: { mode?: CellMode }) {
     setChordIndex((ci) => clamp(ci === i ? i - 1 : ci > i ? ci - 1 : ci));
     setPlayhead((ph) => clamp(ph === i ? i - 1 : ph > i ? ph - 1 : ph));
   };
+  // Reset the whole sketch back to a single blank chord.
+  const resetSketch = () => {
+    setChords([{ id: 0, notes: [] }]);
+    setChordIndex(0);
+    setPlayhead(0);
+    nextChordId.current = 1;
+    noteId.current = 1;
+  };
 
   // ---- auto-play loop ----
   useEffect(() => {
@@ -483,6 +491,22 @@ export default function NoteRadial({ mode = 'radial' }: { mode?: CellMode }) {
           <View style={styles.playTri} />
         )}
       </Pressable>
+
+      {mode === 'tap' ? (
+        <Pressable
+          onPress={resetSketch}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Clear all notes"
+          style={[styles.trashBtn, { bottom: insets.bottom + 6 }]}
+        >
+          <View style={styles.trashIcon}>
+            <View style={styles.trashHandle} />
+            <View style={styles.trashLid} />
+            <View style={styles.trashBody} />
+          </View>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -781,6 +805,31 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(22,22,22,0.94)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.14)',
+  },
+  trashBtn: {
+    position: 'absolute',
+    right: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(22,22,22,0.94)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  trashIcon: { alignItems: 'center' },
+  trashHandle: { width: 8, height: 2, borderRadius: 1, backgroundColor: '#fff', marginBottom: 1.5 },
+  trashLid: { width: 18, height: 2.5, borderRadius: 1, backgroundColor: '#fff' },
+  trashBody: {
+    width: 13,
+    height: 12,
+    marginTop: 2,
+    borderWidth: 2,
+    borderTopWidth: 0,
+    borderColor: '#fff',
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 2,
   },
   pauseIcon: { flexDirection: 'row', gap: 5 },
   pauseBar: { width: 4, height: 15, borderRadius: 1.5, backgroundColor: '#fff' },

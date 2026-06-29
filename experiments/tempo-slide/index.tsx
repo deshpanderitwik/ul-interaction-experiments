@@ -199,7 +199,7 @@ const styles = StyleSheet.create({
     width: RIPPLE_D,
     height: RIPPLE_D,
     borderRadius: RIPPLE_D / 2,
-    borderWidth: 3,
+    borderWidth: 6,
   },
   hint: { color: '#fff', fontSize: 16, letterSpacing: 1 },
 });

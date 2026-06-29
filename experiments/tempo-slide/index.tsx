@@ -3,6 +3,7 @@ import {
   Canvas,
   Circle,
   Group,
+  LinearGradient,
   Path,
   RadialGradient,
   Skia,
@@ -67,11 +68,16 @@ const SETTINGS = {
 const GRID_DIV = 8; // finest = a 32nd note (8 per beat)
 const GRID_MULTS = [1, 2, 4, 8]; // 32nd, 16th, 8th, quarter
 
-// Glowing white bloom line that traces the finger. We sample the path into a
-// capped polyline and stroke it in layers (two blurred bloom passes + a bright
-// core); the whole line fades out on release.
+// Glowing white bloom line that traces the finger like a comet trail. We sample
+// the path into a capped polyline, fade it head→tail with a length-wise alpha
+// gradient, and continuously trim the oldest points so the tail recedes toward
+// the finger and vanishes when movement stops (rather than lingering).
 const LINE_MAX = 64; // max sampled points (older ones drop off)
 const LINE_MIN_STEP = 4; // px between samples
+const TRAIL_DECAY_MS = 22; // how often the oldest point is trimmed
+// Alpha ramp along the trail: transparent at the tail → bright at the head.
+const TRAIL_COLORS = ['rgba(255,255,255,0)', 'rgba(255,255,255,0.18)', '#ffffff'];
+const TRAIL_POS = [0, 0.62, 1];
 
 // Max radius a ripple grows to before it has fully faded.
 const RIPPLE_MAXR = 120;
@@ -164,11 +170,22 @@ export default function TempoSlide() {
     return path;
   });
 
+  // Endpoints for the length-wise alpha gradient (tail = oldest, head = finger).
+  const tailPt = useDerivedValue(() => {
+    const pts = points.value;
+    return pts.length ? { x: pts[0].x, y: pts[0].y } : { x: 0, y: 0 };
+  });
+  const headPt = useDerivedValue(() => {
+    const pts = points.value;
+    return pts.length ? pts[pts.length - 1] : { x: 0, y: 0 };
+  });
+
   // Sequencer state (JS thread).
   const intervalRef = useRef(250);
   const stepRef = useRef(0); // index into the arp (only advances when a note fires)
   const gridPosRef = useRef(0); // master-clock tick counter (quantize mode)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const trailTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const posRef = useRef({ x: 0, y: 0 }); // last finger position
   const rippleRefs = useRef<(RippleHandle | null)[]>([]);
   const rippleCursor = useRef(0);
@@ -211,6 +228,16 @@ export default function TempoSlide() {
     timerRef.current = setTimeout(tickGrid, masterStep);
   };
 
+  // Trim the oldest trail point on a steady tick, so when the finger slows or
+  // stops the tail keeps receding toward it instead of lingering.
+  const startTrailDecay = () => {
+    if (trailTimerRef.current) clearInterval(trailTimerRef.current);
+    trailTimerRef.current = setInterval(() => {
+      const pts = points.value;
+      if (pts.length > 0) points.value = pts.slice(1);
+    }, TRAIL_DECAY_MS);
+  };
+
   const startArp = (x: number, y: number) => {
     posRef.current = { x, y };
     intervalRef.current = intervalForY(y, heightRef.current, fastRef.current, slowRef.current);
@@ -219,6 +246,7 @@ export default function TempoSlide() {
     if (timerRef.current) clearTimeout(timerRef.current);
     if (quantizeRef.current >= 1) tickGrid();
     else tickFree();
+    startTrailDecay();
   };
   const moveArp = (x: number, y: number) => {
     posRef.current = { x, y };
@@ -228,6 +256,10 @@ export default function TempoSlide() {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
+    }
+    if (trailTimerRef.current) {
+      clearInterval(trailTimerRef.current);
+      trailTimerRef.current = null;
     }
   };
 
@@ -280,9 +312,14 @@ export default function TempoSlide() {
               strokeWidth={26}
               strokeCap="round"
               strokeJoin="round"
-              color="#ffffff"
               opacity={lineOpacity}
             >
+              <LinearGradient
+                start={tailPt}
+                end={headPt}
+                positions={TRAIL_POS}
+                colors={TRAIL_COLORS}
+              />
               <BlurMask blur={18} style="normal" />
             </Path>
             <Path
@@ -291,9 +328,14 @@ export default function TempoSlide() {
               strokeWidth={12}
               strokeCap="round"
               strokeJoin="round"
-              color="#ffffff"
               opacity={lineOpacity}
             >
+              <LinearGradient
+                start={tailPt}
+                end={headPt}
+                positions={TRAIL_POS}
+                colors={TRAIL_COLORS}
+              />
               <BlurMask blur={6} style="normal" />
             </Path>
             <Path
@@ -302,9 +344,15 @@ export default function TempoSlide() {
               strokeWidth={3.5}
               strokeCap="round"
               strokeJoin="round"
-              color="#ffffff"
               opacity={lineOpacity}
-            />
+            >
+              <LinearGradient
+                start={tailPt}
+                end={headPt}
+                positions={TRAIL_POS}
+                colors={TRAIL_COLORS}
+              />
+            </Path>
             {Array.from({ length: RIPPLE_POOL }).map((_, i) => (
               <Ripple
                 key={i}

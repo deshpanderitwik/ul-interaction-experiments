@@ -19,6 +19,7 @@ import Animated, {
   useDerivedValue,
   useSharedValue,
   withSequence,
+  withSpring,
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
@@ -116,7 +117,8 @@ export default function NoteRadial({ mode = 'radial' }: { mode?: CellMode }) {
   const radialRef = useRef<RadialState | null>(null);
   const radialShownRef = useRef(false);
   const octaveBoundaryRef = useRef(canvasH / 2);
-  const pendingRemove = useRef<number | null>(null);
+  const bendNoteRef = useRef<ActiveNote | null>(null); // sphere being pitch-bent
+  const lastBendPluckRef = useRef(0); // throttle the audible bend
   const noteId = useRef(1);
   const nextChordId = useRef(1);
   // Current octave-square geometry, kept in a ref so the gesture handler (and
@@ -129,6 +131,10 @@ export default function NoteRadial({ mode = 'radial' }: { mode?: CellMode }) {
   const moved = useSharedValue(0);
   const disabledMask = useSharedValue(0);
   const strumPulse = useSharedValue(0);
+  // Pitch-bend: which sphere (note id) is held, and its live drag offset.
+  const bendId = useSharedValue(-1);
+  const bendDX = useSharedValue(0);
+  const bendDY = useSharedValue(0);
 
   // ---- chord note edits (operate on the selected chord) ----
   const addNote = (note: ActiveNote) => {
@@ -153,7 +159,24 @@ export default function NoteRadial({ mode = 'radial' }: { mode?: CellMode }) {
     const sqTop = octave === 1 ? L.topY : L.botY;
     return { x: L.sqX, y: sqTop + L.side - (degree + 1) * laneH, w: L.side, h: laneH };
   };
-  const rectFor = (note: ActiveNote) => laneRect(note.degree, note.octave);
+
+  // ---- radial-mode spheres ----
+  // A placed note is a sphere centered in its degree's lane. Its resting anchor
+  // is the lane center; dragging it pitch-bends, releasing springs it back.
+  const sphereRadius = () => {
+    const laneH = layoutRef.current.side / N;
+    return Math.max(16, Math.min(28, laneH * 0.42));
+  };
+  const sphereAnchor = (note: ActiveNote) => {
+    const r = laneRect(note.degree, note.octave);
+    return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
+  };
+  const hitSphere = (x: number, y: number) => {
+    const R = sphereRadius() + 10; // a little slop
+    return [...activeNotesRef.current]
+      .reverse()
+      .find((n) => Math.hypot(x - sphereAnchor(n).x, y - sphereAnchor(n).y) <= R);
+  };
 
   // ---- tap mode: every lane shown as a tappable cell ----
   // The full grid of cells (both octaves × 7 degrees) with their note names.
@@ -227,25 +250,45 @@ export default function NoteRadial({ mode = 'radial' }: { mode?: CellMode }) {
     });
   };
 
+  // Press down: grab a sphere to bend it, or (on empty space) summon the radial.
   const onDown = (x: number, y: number) => {
-    const hit = [...activeNotesRef.current].reverse().find((n) => {
-      const rc = rectFor(n);
-      return x >= rc.x && x <= rc.x + rc.w && y >= rc.y && y <= rc.y + rc.h;
-    });
+    const hit = hitSphere(x, y);
     if (hit) {
-      pendingRemove.current = hit.id;
+      bendNoteRef.current = hit;
+      lastBendPluckRef.current = 0;
+      bendDX.value = 0;
+      bendDY.value = 0;
+      bendId.value = hit.id;
     } else {
-      pendingRemove.current = null;
+      bendNoteRef.current = null;
+      bendId.value = -1;
       showRadial(x, y);
     }
   };
-  const onEndJS = (movedFlag: number, sel: number) => {
-    if (pendingRemove.current != null && !movedFlag) {
-      removeNote(pendingRemove.current);
-    } else if (radialShownRef.current && sel >= 0) {
-      popNote(sel);
-    }
-    pendingRemove.current = null;
+  // While dragging a sphere: map vertical travel to a pitch bend and let it be
+  // heard, throttled so the pluck synth glides rather than machine-guns.
+  const PX_PER_SEMITONE = 34;
+  const onBendMove = (ty: number) => {
+    const base = bendNoteRef.current?.freq;
+    if (!base) return;
+    const now = Date.now();
+    if (now - lastBendPluckRef.current < 85) return;
+    lastBendPluckRef.current = now;
+    const semis = Math.max(-7, Math.min(7, -ty / PX_PER_SEMITONE));
+    pluck(base * Math.pow(2, semis / 12));
+  };
+  const onBendSnap = () => {
+    // Release after a bend: sound the in-scale home note it snaps back to.
+    if (bendNoteRef.current) pluck(bendNoteRef.current.freq);
+  };
+  const onBendRemove = () => {
+    if (bendNoteRef.current) removeNote(bendNoteRef.current.id);
+    bendNoteRef.current = null;
+    bendId.value = -1;
+  };
+  // Release on empty space (or after a ring drag): pop the selected ring note.
+  const onRadialEnd = (sel: number) => {
+    if (radialShownRef.current && sel >= 0) popNote(sel);
     hideRadial();
   };
 
@@ -315,9 +358,19 @@ export default function NoteRadial({ mode = 'radial' }: { mode?: CellMode }) {
       centerY.value = e.y;
       selected.value = -1;
       moved.value = 0;
+      bendId.value = -1; // cleared synchronously; onDown sets it if a sphere is hit
       runOnJS(onDown)(e.x, e.y);
     })
     .onUpdate((e) => {
+      // Bending a held sphere: follow the finger and bend the pitch.
+      if (bendId.value >= 0) {
+        bendDX.value = e.translationX;
+        bendDY.value = e.translationY;
+        if (Math.abs(e.translationX) + Math.abs(e.translationY) > 6) moved.value = 1;
+        runOnJS(onBendMove)(e.translationY);
+        return;
+      }
+      // Otherwise drive the radial selection.
       const dx = e.x - centerX.value;
       const dy = e.y - centerY.value;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -342,7 +395,18 @@ export default function NoteRadial({ mode = 'radial' }: { mode?: CellMode }) {
       selected.value = best;
     })
     .onFinalize(() => {
-      runOnJS(onEndJS)(moved.value, selected.value);
+      if (bendId.value >= 0) {
+        if (moved.value) {
+          // Spring the sphere back into place; sound its snapped home note.
+          bendDX.value = withSpring(0, { damping: 13, stiffness: 170 });
+          bendDY.value = withSpring(0, { damping: 13, stiffness: 170 });
+          runOnJS(onBendSnap)();
+        } else {
+          runOnJS(onBendRemove)(); // a tap (no drag) removes the sphere
+        }
+      } else {
+        runOnJS(onRadialEnd)(selected.value);
+      }
       selected.value = -1;
       moved.value = 0;
     });
@@ -438,9 +502,22 @@ export default function NoteRadial({ mode = 'radial' }: { mode?: CellMode }) {
           <View style={[StyleSheet.absoluteFill, { bottom: BAR_AREA }]}>
             {octaveSquares}
 
-            {activeNotes.map((n) => (
-              <NoteBar key={n.id} rect={rectFor(n)} label={n.label} strumPulse={strumPulse} />
-            ))}
+            {activeNotes.map((n) => {
+              const a = sphereAnchor(n);
+              return (
+                <NoteSphere
+                  key={n.id}
+                  note={n}
+                  x={a.x}
+                  y={a.y}
+                  radius={sphereRadius()}
+                  bendId={bendId}
+                  bendDX={bendDX}
+                  bendDY={bendDY}
+                  strumPulse={strumPulse}
+                />
+              );
+            })}
 
             {radial ? (
               <View pointerEvents="none" style={StyleSheet.absoluteFill}>
@@ -607,33 +684,58 @@ function CellFill({
   );
 }
 
-function NoteBar({
-  rect,
-  label,
+// A placed note as a sphere. It springs in on placement, pulses on strum, and
+// while held follows the finger via the shared bend offset (pitch bend); on
+// release the offset springs back to 0 so it settles into place.
+function NoteSphere({
+  note,
+  x,
+  y,
+  radius,
+  bendId,
+  bendDX,
+  bendDY,
   strumPulse,
 }: {
-  rect: { x: number; y: number; w: number; h: number };
-  label: string;
+  note: ActiveNote;
+  x: number;
+  y: number;
+  radius: number;
+  bendId: SharedValue<number>;
+  bendDX: SharedValue<number>;
+  bendDY: SharedValue<number>;
   strumPulse: SharedValue<number>;
 }) {
   const enter = useSharedValue(0);
   useEffect(() => {
-    enter.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.cubic) });
+    enter.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.back(1.5)) });
   }, [enter]);
-  const style = useAnimatedStyle(() => ({
-    opacity: enter.value,
-    backgroundColor: interpolateColor(strumPulse.value, [0, 1], ['#39477e', '#5b8cff']),
-  }));
+  const style = useAnimatedStyle(() => {
+    const bent = bendId.value === note.id;
+    const tx = bent ? bendDX.value : 0;
+    const ty = bent ? bendDY.value : 0;
+    const scale = enter.value * (1 + strumPulse.value * 0.16);
+    return {
+      transform: [{ translateX: tx }, { translateY: ty }, { scale }],
+      backgroundColor: interpolateColor(strumPulse.value, [0, 1], ['#39477e', '#5b8cff']),
+    };
+  });
   return (
     <Animated.View
       pointerEvents="none"
       style={[
-        styles.noteBar,
-        { left: rect.x, top: rect.y + 2, width: rect.w, height: rect.h - 4 },
+        styles.sphere,
+        { left: x - radius, top: y - radius, width: radius * 2, height: radius * 2, borderRadius: radius },
         style,
       ]}
     >
-      <Text style={styles.noteBarLabel}>{label}</Text>
+      <View
+        style={[
+          styles.sphereSheen,
+          { top: radius * 0.26, left: radius * 0.42, width: radius * 0.7, height: radius * 0.5 },
+        ]}
+      />
+      <Text style={styles.sphereLabel}>{note.label}</Text>
     </Animated.View>
   );
 }
@@ -773,16 +875,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ringLabel: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  noteBar: {
+  sphere: {
     position: 'absolute',
-    borderRadius: 5,
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.5)',
+    overflow: 'hidden',
   },
-  noteBarLabel: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  sphereSheen: {
+    position: 'absolute',
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.32)',
+  },
+  sphereLabel: { color: '#fff', fontSize: 15, fontWeight: '700' },
   cellLabelWrap: {
     position: 'absolute',
     alignItems: 'flex-start',

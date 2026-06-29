@@ -21,7 +21,15 @@ export type SelectSetting = {
   default: number;
 };
 
-export type Setting = SliderSetting | SelectSetting;
+// On/off switch. Stored as a number (0 = off, 1 = on) so the values map stays
+// uniformly numeric.
+export type ToggleSetting = {
+  type: 'toggle';
+  label: string;
+  default: number;
+};
+
+export type Setting = SliderSetting | SelectSetting | ToggleSetting;
 
 export type Schema = Record<string, Setting>;
 

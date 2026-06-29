@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, View, useWindowDimensions } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
@@ -82,6 +82,20 @@ export function SettingsSheet() {
 
           {Object.entries(schema ?? {}).map(([key, ctrl]) => {
             const value = values[key] ?? ctrl.default;
+            if (ctrl.type === 'toggle') {
+              return (
+                <View key={key} style={[styles.row, styles.toggleRow]}>
+                  <Text style={styles.label}>{ctrl.label}</Text>
+                  <Switch
+                    value={value >= 1}
+                    onValueChange={(on) => setValue(key, on ? 1 : 0)}
+                    trackColor={{ false: '#3a3a3a', true: '#5b8cff' }}
+                    thumbColor="#ffffff"
+                    ios_backgroundColor="#3a3a3a"
+                  />
+                </View>
+              );
+            }
             if (ctrl.type === 'select') {
               return (
                 <View key={key} style={styles.row}>
@@ -170,6 +184,11 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 48 },
   row: { marginBottom: 22 },
+  toggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   rowHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',

@@ -21,6 +21,12 @@ declare class NoteSynthModule extends NativeModule {
     hold: number,
     release: number
   ): Promise<void>;
+  /** Gate on the sustained bend voice at a frequency/gain. */
+  bendStart(frequency: number, gain: number): Promise<void>;
+  /** Slide the bend voice to a new frequency (smooth, legato glide). */
+  bendSet(frequency: number): Promise<void>;
+  /** Gate off the bend voice (ramps to silence). */
+  bendStop(release: number): Promise<void>;
 }
 
 // requireOptional → returns null (instead of throwing) on a build that lacks the

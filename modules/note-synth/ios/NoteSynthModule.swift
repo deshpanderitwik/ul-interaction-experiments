@@ -43,6 +43,16 @@ public class NoteSynthModule: Module {
   private var nextVoice = 0
   private let lock = NSLock()
 
+  // A single sustained "bend" voice, separate from the pluck pool: gate it on,
+  // slide its frequency continuously (no phase reset → no clicks, true legato),
+  // then gate it off. Its amplitude ramps toward the target each sample so the
+  // gate on/off is click-free.
+  private var bendOn = false
+  private var bendGain: Double = 0
+  private var bendAmp: Double = 0
+  private var bendPhase: Double = 0
+  private var bendPhaseInc: Double = 0
+
   public func definition() -> ModuleDefinition {
     Name("NoteSynth")
 
@@ -72,8 +82,39 @@ public class NoteSynthModule: Module {
         sustain: sustain, hold: hold, release: release)
     }
 
+    // Gate on the sustained bend voice at a frequency/gain.
+    AsyncFunction("bendStart") { (frequency: Double, gain: Double) in
+      self.startEngineIfNeeded()
+      self.lock.lock()
+      self.bendOn = true
+      self.bendGain = max(0.0, min(1.0, gain))
+      self.bendPhaseInc = 2.0 * Double.pi * frequency / self.sampleRate
+      self.lock.unlock()
+    }
+
+    // Slide the bend voice to a new frequency (no phase reset → smooth glide).
+    AsyncFunction("bendSet") { (frequency: Double) in
+      self.lock.lock()
+      self.bendPhaseInc = 2.0 * Double.pi * frequency / self.sampleRate
+      self.lock.unlock()
+    }
+
+    // Gate off the bend voice; its amplitude ramps to zero in the render loop.
+    AsyncFunction("bendStop") { (_: Double) in
+      self.lock.lock()
+      self.bendOn = false
+      self.lock.unlock()
+    }
+
     OnDestroy {
       self.engine.stop()
+    }
+  }
+
+  private func startEngineIfNeeded() {
+    if !engine.isRunning {
+      try? AVAudioSession.sharedInstance().setActive(true)
+      try? engine.start()
     }
   }
 
@@ -137,6 +178,15 @@ public class NoteSynthModule: Module {
           }
           self.voices[i].phase += self.voices[i].phaseInc
           if self.voices[i].phase >= twoPi { self.voices[i].phase -= twoPi }
+        }
+        // Sustained bend voice: ramp amp toward the gate target (~5ms) so on/off
+        // is click-free, slide pitch via phaseInc with no phase reset.
+        if self.bendOn || self.bendAmp > 0.00001 {
+          let target = self.bendOn ? self.bendGain : 0.0
+          self.bendAmp += (target - self.bendAmp) * 0.006
+          mix += sin(self.bendPhase) * self.bendAmp
+          self.bendPhase += self.bendPhaseInc
+          if self.bendPhase >= twoPi { self.bendPhase -= twoPi }
         }
         // tanh soft-clip keeps summed voices bounded without harsh clipping.
         let sample = Float(tanh(mix))

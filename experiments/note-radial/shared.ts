@@ -12,3 +12,15 @@ export function pluck(freq: number, decay = 0.6) {
   recordNote(freq, 0.9);
   NoteSynth?.pluck(freq, 0.9, decay).catch(() => {});
 }
+
+// Sustained pitch-bend voice (legato). Optional-chained so it's a no-op on a
+// binary built before these native methods existed.
+export function bendStart(freq: number) {
+  NoteSynth?.bendStart?.(freq, 0.55)?.catch?.(() => {});
+}
+export function bendSet(freq: number) {
+  NoteSynth?.bendSet?.(freq)?.catch?.(() => {});
+}
+export function bendStop() {
+  NoteSynth?.bendStop?.(0.05)?.catch?.(() => {});
+}

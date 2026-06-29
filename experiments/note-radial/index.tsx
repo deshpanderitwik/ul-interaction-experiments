@@ -28,7 +28,7 @@ import { useExperimentActive } from '../_host';
 import { getScale, ladderNotes, noteName, useScale } from '../scale';
 import { useSettings } from '../settings';
 import { useTempo } from '../tempo';
-import { DEADZONE, N, RADIAL_NOTE_R, RADIAL_RADIUS, pluck } from './shared';
+import { DEADZONE, N, RADIAL_NOTE_R, RADIAL_RADIUS, bendSet, bendStart, bendStop, pluck } from './shared';
 
 // Each chord lasts (and re-triggers) for the selected note length, at the
 // global tempo.
@@ -259,29 +259,32 @@ export default function NoteRadial({ mode = 'radial' }: { mode?: CellMode }) {
       bendDX.value = 0;
       bendDY.value = 0;
       bendId.value = hit.id;
+      bendStart(hit.freq); // begin one sustained, legato note
     } else {
       bendNoteRef.current = null;
       bendId.value = -1;
       showRadial(x, y);
     }
   };
-  // While dragging a sphere: map vertical travel to a pitch bend and let it be
-  // heard, throttled so the pluck synth glides rather than machine-guns.
+  // While dragging a sphere: map vertical travel to semitones and slide the
+  // sustained voice's pitch (a continuous legato bend, not re-plucks).
   const PX_PER_SEMITONE = 34;
   const onBendMove = (ty: number) => {
     const base = bendNoteRef.current?.freq;
     if (!base) return;
     const now = Date.now();
-    if (now - lastBendPluckRef.current < 85) return;
+    if (now - lastBendPluckRef.current < 20) return; // light throttle on bridge calls
     lastBendPluckRef.current = now;
     const semis = Math.max(-7, Math.min(7, -ty / PX_PER_SEMITONE));
-    pluck(base * Math.pow(2, semis / 12));
+    bendSet(base * Math.pow(2, semis / 12));
   };
   const onBendSnap = () => {
-    // Release after a bend: sound the in-scale home note it snaps back to.
+    // Release after a bend: end the held voice and sound the in-scale home note.
+    bendStop();
     if (bendNoteRef.current) pluck(bendNoteRef.current.freq);
   };
   const onBendRemove = () => {
+    bendStop();
     if (bendNoteRef.current) removeNote(bendNoteRef.current.id);
     bendNoteRef.current = null;
     bendId.value = -1;
@@ -347,7 +350,11 @@ export default function NoteRadial({ mode = 'radial' }: { mode?: CellMode }) {
   }, [live, playing, slotMs, strumPulse]);
 
   useEffect(() => {
-    if (!live) hideRadial();
+    if (!live) {
+      hideRadial();
+      bendStop(); // never leave a held bend voice sounding off-screen
+      bendId.value = -1;
+    }
   }, [live]);
 
   const pan = Gesture.Pan()
@@ -729,12 +736,6 @@ function NoteSphere({
         style,
       ]}
     >
-      <View
-        style={[
-          styles.sphereSheen,
-          { top: radius * 0.26, left: radius * 0.42, width: radius * 0.7, height: radius * 0.5 },
-        ]}
-      />
       <Text style={styles.sphereLabel}>{note.label}</Text>
     </Animated.View>
   );
@@ -881,12 +882,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.5)',
-    overflow: 'hidden',
-  },
-  sphereSheen: {
-    position: 'absolute',
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.32)',
   },
   sphereLabel: { color: '#fff', fontSize: 15, fontWeight: '700' },
   cellLabelWrap: {

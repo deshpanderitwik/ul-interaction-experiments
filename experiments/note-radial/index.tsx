@@ -55,8 +55,9 @@ type RadialState = {
 type ActiveNote = { id: number; degree: number; octave: number; label: string; freq: number };
 type Chord = { id: number; notes: ActiveNote[] };
 
+// Root (i = 0) sits at the bottom (6 o'clock); successive notes go clockwise.
 function angleFor(i: number): number {
-  return -Math.PI / 2 + (i * 2 * Math.PI) / N;
+  return Math.PI / 2 + (i * 2 * Math.PI) / N;
 }
 
 function freqLabel(freq: number): string {
@@ -273,7 +274,7 @@ export default function NoteRadial() {
       let bestDiff = 10;
       for (let i = 0; i < N; i++) {
         if (disabledMask.value & (1 << i)) continue;
-        const theta = -Math.PI / 2 + (i * 2 * Math.PI) / N;
+        const theta = Math.PI / 2 + (i * 2 * Math.PI) / N;
         let d = ang - theta;
         d = Math.abs(Math.atan2(Math.sin(d), Math.cos(d)));
         if (d < bestDiff) {

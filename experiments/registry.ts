@@ -21,6 +21,8 @@ export type Variation = {
   blurb?: string;
   preset?: Record<string, unknown>;
   load?: Load;
+  /** Opt this variation into the audio controls (scale + tempo + record). */
+  audio?: boolean;
 };
 
 export type Experiment = {
@@ -58,6 +60,7 @@ export const experiments: Experiment[] = [
         id: 'waves',
         title: 'Waves',
         blurb: 'A full-screen gradient that undulates like fluid (domain-warped flow).',
+        audio: true,
         load: () => import('./fence/waves'),
       },
     ],

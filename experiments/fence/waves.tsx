@@ -4,7 +4,8 @@ import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS, useDerivedValue, useSharedValue } from 'react-native-reanimated';
 import { NoteSynth } from '../../modules/note-synth';
-import { getScale, scaleFrequencies } from '../scale';
+import { recordNote } from '../recorder/recorder';
+import { scaleFrequencies, useScale } from '../scale';
 
 // Fence · Waves — a full-screen gradient that UNDULATES (domain warping), with
 // TAP-TO-RIPPLE. The ripple adds no new geometry: each tap sends an expanding
@@ -137,12 +138,17 @@ export default function FenceWaves() {
 
   // Ascending scale ladder (two octaves from the root) and a climbing index, so
   // each ripple sounds the next note up; it wraps back to the bottom at the top.
-  const ladderRef = useRef<number[]>([]);
-  if (ladderRef.current.length === 0) {
-    const s = getScale();
-    ladderRef.current = scaleFrequencies(s, 48 + s.root, 48 + s.root + 24);
-  }
+  // Rebuilt when the global scale (settings picker) changes; the climb restarts.
+  const scale = useScale();
   const arpIndex = useRef(0);
+  const ladderRef = useRef<number[]>([]);
+  const scaleKey = `${scale.root}-${scale.type}`;
+  const prevScaleKey = useRef('');
+  if (prevScaleKey.current !== scaleKey) {
+    prevScaleKey.current = scaleKey;
+    ladderRef.current = scaleFrequencies(scale, 48 + scale.root, 48 + scale.root + 24);
+    arpIndex.current = 0;
+  }
 
   // Push one ripple (position, time, and a random seed) into the ring buffer,
   // and trigger its note — the ripple and the sound share this one moment.
@@ -153,7 +159,9 @@ export default function FenceWaves() {
 
     const ladder = ladderRef.current;
     if (ladder.length > 0) {
-      NoteSynth?.pluck(ladder[arpIndex.current % ladder.length], 0.5, 0.4).catch(() => {});
+      const freq = ladder[arpIndex.current % ladder.length];
+      recordNote(freq, 0.5); // so the REC control captures the arp
+      NoteSynth?.pluck(freq, 0.5, 0.4).catch(() => {});
       arpIndex.current = (arpIndex.current + 1) % ladder.length;
     }
   };

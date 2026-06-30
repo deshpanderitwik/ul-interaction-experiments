@@ -9,7 +9,7 @@ import {
 } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { RecordControl } from './recorder';
-import { getExperiment } from './registry';
+import { getExperiment, getVariation } from './registry';
 import { SettingsGear, SettingsProvider, SettingsSheet } from './settings';
 
 // Whether the hosted experiment is currently "live": on-screen AND the app is
@@ -65,8 +65,12 @@ export function ExperimentHost({
 
   const active = focused && appActive;
 
-  const exp = getExperiment(settingsKey.split('/')[0]);
-  const audio = exp?.audio ?? false;
+  const [expId, varId] = settingsKey.split('/');
+  const exp = getExperiment(expId);
+  const variation = getVariation(expId, varId);
+  // A variation can opt into audio on its own (e.g. a sound sketch under an
+  // otherwise visual experiment); otherwise inherit the parent's flag.
+  const audio = variation?.audio ?? exp?.audio ?? false;
 
   return (
     <ActiveContext.Provider value={active}>
@@ -82,7 +86,9 @@ export function ExperimentHost({
           >
             <Text style={styles.chevron}>‹</Text>
           </Pressable>
-          {audio ? <RecordControl experiment={exp?.title ?? 'Experiment'} /> : null}
+          {audio ? (
+            <RecordControl experiment={variation?.title ?? exp?.title ?? 'Experiment'} />
+          ) : null}
           <SettingsGear />
           <SettingsSheet />
         </View>

@@ -1,13 +1,14 @@
 import { Canvas, Fill, Shader, Skia, useClock } from '@shopify/react-native-skia';
+import { useEffect, useRef } from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { useDerivedValue, useSharedValue } from 'react-native-reanimated';
+import { runOnJS, useDerivedValue, useSharedValue } from 'react-native-reanimated';
 
 // Fence · Waves — a full-screen gradient that UNDULATES (domain warping), with
 // TAP-TO-RIPPLE. The ripple adds no new geometry: each tap sends an expanding
 // ring that radially displaces the *sampling coordinate* near its wavefront, so
 // the gradient itself warps outward like the surface of water.
-const N = 8; // max concurrent ripples
+const N = 12; // max concurrent ripples (a held finger emits a stream)
 
 const source = Skia.RuntimeEffect.Make(`
 uniform float2 u_resolution;
@@ -46,7 +47,7 @@ float2 rippleDisplacement(float2 fragcoord) {
     float band = (dist - age * 420.0) / 55.0;        // distance from the expanding wavefront
     float env = exp(-band * band);                   // localize to the ring
     float decay = max(0.0, 1.0 - age / 2.0);         // fade over the ripple's ~2s life
-    disp += dir * sin(band * 6.0) * env * decay * 20.0; // a few concentric rings
+    disp += dir * sin(band * 6.0) * env * decay * 46.0; // a few concentric rings
   }
   return disp;
 }
@@ -89,13 +90,46 @@ export default function FenceWaves() {
   const { width, height } = useWindowDimensions();
   const clock = useClock();
   const taps = useSharedValue<Tap[]>([]);
+  const holdPos = useRef({ x: 0, y: 0 });
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Record each tap (position + the time it happened) into a small ring buffer.
-  const tap = Gesture.Tap().onBegin((e) => {
+  // Push one ripple (position + the time it happened) into the ring buffer.
+  const spawn = (x: number, y: number) => {
     const list = taps.value.slice(-(N - 1));
-    list.push({ x: e.x, y: e.y, t: clock.value / 1000 });
+    list.push({ x, y, t: clock.value / 1000 });
     taps.value = list;
-  });
+  };
+  // Touch down: ripple now, then keep emitting at the finger while it's held.
+  const startHold = (x: number, y: number) => {
+    holdPos.current = { x, y };
+    spawn(x, y);
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(() => {
+      spawn(holdPos.current.x, holdPos.current.y);
+    }, 130);
+  };
+  const moveHold = (x: number, y: number) => {
+    holdPos.current = { x, y };
+  };
+  const stopHold = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  };
+  useEffect(() => stopHold, []);
+
+  const gesture = Gesture.Pan()
+    .minDistance(0)
+    .onBegin((e) => {
+      runOnJS(startHold)(e.x, e.y);
+    })
+    .onUpdate((e) => {
+      runOnJS(moveHold)(e.x, e.y);
+    })
+    .onFinalize(() => {
+      runOnJS(stopHold)();
+    });
 
   const uniforms = useDerivedValue(() => {
     const pos: number[] = [];
@@ -120,7 +154,7 @@ export default function FenceWaves() {
   });
 
   return (
-    <GestureDetector gesture={tap}>
+    <GestureDetector gesture={gesture}>
       <View style={styles.fill}>
         <Canvas style={StyleSheet.absoluteFill}>
           <Fill>

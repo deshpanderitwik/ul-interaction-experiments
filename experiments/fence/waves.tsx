@@ -11,36 +11,38 @@ const source = Skia.RuntimeEffect.Make(`
 uniform float2 u_resolution;
 uniform float u_time;
 
-// A smooth flow field: two stacked sines per axis → organic, non-repetitive.
+// A smooth flow field. Lower frequencies + smaller amplitude → large, soft,
+// gently-moving features (the "blurred, subtle" look).
 float2 flow(float2 p, float time) {
   return float2(
-    sin(p.y * 2.5 + time * 0.6) + 0.5 * sin(p.y * 4.7 - time * 0.9),
-    sin(p.x * 2.0 + time * 0.5) + 0.5 * sin(p.x * 4.1 + time * 0.8)
+    0.7 * sin(p.y * 1.5 + time * 0.35) + 0.22 * sin(p.y * 3.0 - time * 0.5),
+    0.7 * sin(p.x * 1.3 + time * 0.3) + 0.22 * sin(p.x * 2.6 + time * 0.45)
   );
 }
 
-// Ocean-ish palette: mostly deep→mid water, with brighter crests near the top.
+// Ocean-ish palette, kept low-contrast so the undulation reads as a soft wash
+// rather than sharp bands. Wide smoothstep ranges = gentle, blurred transitions.
 half3 oceanPalette(float f) {
-  half3 deep  = half3(0.02, 0.09, 0.20);
-  half3 mid   = half3(0.04, 0.33, 0.48);
-  half3 crest = half3(0.55, 0.86, 0.88);
-  half3 c = mix(deep, mid, smoothstep(0.0, 0.55, f));
-  c = mix(c, crest, smoothstep(0.62, 1.0, f));
+  half3 deep  = half3(0.04, 0.13, 0.24);
+  half3 mid   = half3(0.07, 0.30, 0.42);
+  half3 crest = half3(0.30, 0.55, 0.62);
+  half3 c = mix(deep, mid, smoothstep(0.08, 0.85, f));
+  c = mix(c, crest, smoothstep(0.78, 1.0, f));
   return c;
 }
 
 half4 main(float2 fragcoord) {
   float2 uv = fragcoord / u_resolution;
   uv.x *= u_resolution.x / u_resolution.y; // aspect-correct
-  float2 q = uv * 3.0;
+  float2 q = uv * 1.7; // lower scale → larger, softer features
 
-  // Warp, then warp the warp — the heart of the undulation.
+  // Warp, then warp the warp — but gently, for a subtle undulation.
   float2 w1 = flow(q, u_time);
-  float2 w2 = flow(q + 0.6 * w1, u_time * 1.15);
+  float2 w2 = flow(q + 0.35 * w1, u_time * 1.05);
   float field = w2.x + w2.y;
 
-  // A smooth 0..1 value from the warped field, drifting with time.
-  float f = 0.5 + 0.5 * sin(field * 1.3 + u_time * 0.2);
+  // A smooth 0..1 value from the warped field, drifting slowly with time.
+  float f = 0.5 + 0.5 * sin(field * 0.9 + u_time * 0.12);
   half3 col = oceanPalette(f);
 
   // Tiny dither to hide the banding 8-bit screens show on smooth gradients.

@@ -8,18 +8,20 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useDerivedValue, useSharedValue } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Fence · Rung 1 — Time.
 // A gradient sphere whose colors flow from a single rising clock uniform. The
-// button row swaps the GRADIENT DRIVER — the value `t` that the color palette
-// reads — so you can feel how the *same* time+palette looks under different
-// gradient geometries (directional / radial / angular / spiral).
+// button row swaps the GRADIENT DRIVER (`t`, the value the palette reads), and
+// swiping up/down ON the sphere grows/shrinks it (u_radius uniform). Caps keep
+// the circle fully visible and never filling the screen.
 const source = Skia.RuntimeEffect.Make(`
 uniform float2 u_resolution;
 uniform float u_time;
-uniform float u_mode;   // which driver feeds the gradient
+uniform float u_mode;     // which driver feeds the gradient
+uniform float u_radius;   // sphere radius, in screen-heights
 
 // A cosine color palette (Inigo Quilez): cheap, always-pretty gradients.
 half3 palette(float t) {
@@ -51,7 +53,7 @@ half4 main(float2 fragcoord) {
   float2 uv = (fragcoord - 0.5 * u_resolution) / u_resolution.y;
   float r = length(uv);
 
-  float radius = 0.32;
+  float radius = u_radius;
   float mask = smoothstep(radius, radius - 0.006, r);          // soft disc edge
   float sphere = sqrt(max(0.0, 1.0 - (r / radius) * (r / radius))); // ball shading
 
@@ -70,6 +72,13 @@ export default function FenceTime() {
   const insets = useSafeAreaInsets();
   const clock = useClock(); // ms since mount, drives the redraw
 
+  // Radius caps in screen-height units, derived from the SMALLER screen
+  // dimension so the circle is always fully on-screen (never clipped) and never
+  // fills the screen: max diameter ~86% of the short side, min ~22%.
+  const minDim = Math.min(width, height);
+  const MIN_R = (0.22 * minDim) / 2 / height;
+  const MAX_R = (0.86 * minDim) / 2 / height;
+
   const [mode, setMode] = useState(0);
   const modeSV = useSharedValue(0);
   const select = (i: number) => {
@@ -77,19 +86,45 @@ export default function FenceTime() {
     modeSV.value = i;
   };
 
+  const radiusSV = useSharedValue((MIN_R + MAX_R) / 2);
+  const startR = useSharedValue(0);
+  const grabbing = useSharedValue(0); // 1 while a swipe started on the sphere
+
+  // Swipe up/down on the sphere to grow/shrink it (1:1 with screen fraction),
+  // clamped to the caps.
+  const pan = Gesture.Pan()
+    .minDistance(0)
+    .onBegin((e) => {
+      const dx = e.x - width / 2;
+      const dy = e.y - height / 2;
+      const distUv = Math.sqrt(dx * dx + dy * dy) / height;
+      grabbing.value = distUv <= radiusSV.value ? 1 : 0;
+      startR.value = radiusSV.value;
+    })
+    .onUpdate((e) => {
+      if (grabbing.value < 0.5) return;
+      const next = startR.value - e.translationY / height; // up = bigger
+      radiusSV.value = Math.min(MAX_R, Math.max(MIN_R, next));
+    });
+
   const uniforms = useDerivedValue(() => ({
     u_resolution: [width, height],
     u_time: clock.value / 1000,
     u_mode: modeSV.value,
+    u_radius: Math.min(MAX_R, Math.max(MIN_R, radiusSV.value)),
   }));
 
   return (
     <View style={styles.fill}>
-      <Canvas style={StyleSheet.absoluteFill}>
-        <Fill>
-          <Shader source={source} uniforms={uniforms} />
-        </Fill>
-      </Canvas>
+      <GestureDetector gesture={pan}>
+        <View style={StyleSheet.absoluteFill}>
+          <Canvas style={StyleSheet.absoluteFill}>
+            <Fill>
+              <Shader source={source} uniforms={uniforms} />
+            </Fill>
+          </Canvas>
+        </View>
+      </GestureDetector>
 
       <ScrollView
         horizontal

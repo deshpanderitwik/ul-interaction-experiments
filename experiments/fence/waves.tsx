@@ -48,13 +48,12 @@ float2 rippleDisplacement(float2 fragcoord) {
     float len = length(d);
     float2 dir = len > 0.001 ? d / len : float2(0.0);
 
-    // Deform each ripple uniquely: a lobed, non-circular wavefront whose lobe
-    // count and phase come from the seed (so no two ripples are the same ring).
-    // A gentle wobble keeps them similar but not identical.
-    float ang = atan(d.y, d.x);
-    float lobes = 2.0 + floor(seed * 4.0);           // 2..5 lobes
-    float wob = 1.0 + 0.08 * sin(ang * lobes + seed * 6.2831);
-    float dist = len * wob;
+    // Deform each ripple organically (not star-like): perturb the radius with a
+    // smooth flow field sampled around the ring, offset per-ripple by the seed.
+    // Because it's a smooth 2-D field rather than an integer angular sine, the
+    // wavefront wobbles irregularly instead of forming symmetric star points.
+    float bump = flow(d * 0.012 + float2(seed * 21.0, seed * 13.0), u_time * 0.15).x;
+    float dist = len * (1.0 + 0.07 * bump);
 
     // Per-ripple speed / width / ring frequency / amplitude, kept in tighter
     // ranges so the ripples vary subtly; slower travel for a calmer radiation.

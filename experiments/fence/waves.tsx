@@ -2,38 +2,50 @@ import { Canvas, Fill, Shader, Skia, useClock } from '@shopify/react-native-skia
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useDerivedValue } from 'react-native-reanimated';
 
-// Fence · Waves — building an overlapping, ocean-like layered gradient.
-// STEP 1: one wave. A horizontal waterline displaced by sin(x + time), with a
-// vertical gradient in the water below it (lighter near the surface, deeper and
-// darker toward the bottom). This is the wave primitive everything else stacks
-// on: displace a coordinate by a sine of position + time.
+// Fence · Waves — a full-screen gradient that UNDULATES (not literal waves).
+// The move is "domain warping": before reading the gradient, we bend the
+// coordinate with smooth, time-evolving offsets — and then warp that warped
+// coordinate again. Feeding position+time through layered sines makes the whole
+// color field flow and ripple like fluid, with no horizon or waterline.
 const source = Skia.RuntimeEffect.Make(`
 uniform float2 u_resolution;
 uniform float u_time;
 
+// A smooth flow field: two stacked sines per axis → organic, non-repetitive.
+float2 flow(float2 p, float time) {
+  return float2(
+    sin(p.y * 2.5 + time * 0.6) + 0.5 * sin(p.y * 4.7 - time * 0.9),
+    sin(p.x * 2.0 + time * 0.5) + 0.5 * sin(p.x * 4.1 + time * 0.8)
+  );
+}
+
+// Ocean-ish palette: mostly deep→mid water, with brighter crests near the top.
+half3 oceanPalette(float f) {
+  half3 deep  = half3(0.02, 0.09, 0.20);
+  half3 mid   = half3(0.04, 0.33, 0.48);
+  half3 crest = half3(0.55, 0.86, 0.88);
+  half3 c = mix(deep, mid, smoothstep(0.0, 0.55, f));
+  c = mix(c, crest, smoothstep(0.62, 1.0, f));
+  return c;
+}
+
 half4 main(float2 fragcoord) {
-  float2 uv = fragcoord / u_resolution; // 0..1, y is DOWN
-  float y = 1.0 - uv.y;                 // flip so y = 0 is the bottom
+  float2 uv = fragcoord / u_resolution;
+  uv.x *= u_resolution.x / u_resolution.y; // aspect-correct
+  float2 q = uv * 3.0;
 
-  // The waterline: a sine of x scrolling with time.
-  float waterline = 0.5 + 0.06 * sin(uv.x * 6.2831 * 1.5 + u_time * 1.2);
+  // Warp, then warp the warp — the heart of the undulation.
+  float2 w1 = flow(q, u_time);
+  float2 w2 = flow(q + 0.6 * w1, u_time * 1.15);
+  float field = w2.x + w2.y;
 
-  // How far below the surface this pixel is (>0 = underwater).
-  float below = waterline - y;
-  float mask = smoothstep(-0.004, 0.004, below); // soft surface edge
+  // A smooth 0..1 value from the warped field, drifting with time.
+  float f = 0.5 + 0.5 * sin(field * 1.3 + u_time * 0.2);
+  half3 col = oceanPalette(f);
 
-  // Water gradient: 0 at the surface (lighter) → 1 at the bottom (deeper).
-  float depth = clamp(below / max(waterline, 0.001), 0.0, 1.0);
-  half3 shallow = half3(0.10, 0.45, 0.55);
-  half3 deep = half3(0.02, 0.12, 0.22);
-  half3 water = mix(shallow, deep, depth);
-
-  half3 sky = half3(0.03, 0.04, 0.07);
-  half3 col = mix(sky, water, mask);
-
-  // A faint crest highlight right at the waterline.
-  float crest = smoothstep(0.012, 0.0, abs(below));
-  col += half3(0.15, 0.25, 0.30) * crest * 0.5;
+  // Tiny dither to hide the banding 8-bit screens show on smooth gradients.
+  float dither = fract(sin(dot(fragcoord, float2(12.9898, 78.233))) * 43758.5453);
+  col += half3((dither - 0.5) / 255.0);
 
   return half4(col, 1.0);
 }

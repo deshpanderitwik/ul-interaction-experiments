@@ -57,7 +57,7 @@ export const experiments: Experiment[] = [
       {
         id: 'waves',
         title: 'Waves',
-        blurb: 'Building an ocean-like layered gradient — step 1: a single animated wave.',
+        blurb: 'A full-screen gradient that undulates like fluid (domain-warped flow).',
         load: () => import('./fence/waves'),
       },
     ],

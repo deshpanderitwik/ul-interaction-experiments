@@ -3,6 +3,8 @@ import { useEffect, useRef } from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS, useDerivedValue, useSharedValue } from 'react-native-reanimated';
+import { NoteSynth } from '../../modules/note-synth';
+import { getScale, scaleFrequencies } from '../scale';
 
 // Fence · Waves — a full-screen gradient that UNDULATES (domain warping), with
 // TAP-TO-RIPPLE. The ripple adds no new geometry: each tap sends an expanding
@@ -133,11 +135,27 @@ export default function FenceWaves() {
   const holdPos = useRef({ x: 0, y: 0 });
   const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Push one ripple (position, time, and a random seed) into the ring buffer.
+  // Ascending scale ladder (two octaves from the root) and a climbing index, so
+  // each ripple sounds the next note up; it wraps back to the bottom at the top.
+  const ladderRef = useRef<number[]>([]);
+  if (ladderRef.current.length === 0) {
+    const s = getScale();
+    ladderRef.current = scaleFrequencies(s, 48 + s.root, 48 + s.root + 24);
+  }
+  const arpIndex = useRef(0);
+
+  // Push one ripple (position, time, and a random seed) into the ring buffer,
+  // and trigger its note — the ripple and the sound share this one moment.
   const spawn = (x: number, y: number) => {
     const list = taps.value.slice(-(N - 1));
     list.push({ x, y, t: clock.value / 1000, seed: Math.random() });
     taps.value = list;
+
+    const ladder = ladderRef.current;
+    if (ladder.length > 0) {
+      NoteSynth?.pluck(ladder[arpIndex.current % ladder.length], 0.5, 0.4).catch(() => {});
+      arpIndex.current = (arpIndex.current + 1) % ladder.length;
+    }
   };
   // While held, re-emit on a jittered interval so the rhythm feels organic, and
   // nudge the position a touch so the stream doesn't stack on one exact point.

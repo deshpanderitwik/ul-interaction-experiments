@@ -54,6 +54,12 @@ export const experiments: Experiment[] = [
         blurb: 'A gradient sphere whose colors flow over time — the clock uniform.',
         load: () => import('./fence/time'),
       },
+      {
+        id: 'waves',
+        title: 'Waves',
+        blurb: 'Building an ocean-like layered gradient — step 1: a single animated wave.',
+        load: () => import('./fence/waves'),
+      },
     ],
   },
   {

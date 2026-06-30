@@ -50,16 +50,18 @@ float2 rippleDisplacement(float2 fragcoord) {
 
     // Deform each ripple uniquely: a lobed, non-circular wavefront whose lobe
     // count and phase come from the seed (so no two ripples are the same ring).
+    // A gentle wobble keeps them similar but not identical.
     float ang = atan(d.y, d.x);
     float lobes = 2.0 + floor(seed * 4.0);           // 2..5 lobes
-    float wob = 1.0 + 0.18 * sin(ang * lobes + seed * 6.2831);
+    float wob = 1.0 + 0.08 * sin(ang * lobes + seed * 6.2831);
     float dist = len * wob;
 
-    // Per-ripple speed / width / ring frequency / amplitude, all from the seed.
-    float speed = 360.0 + seed * 180.0;
-    float width = 46.0 + seed * 28.0;
-    float ringFreq = 5.0 + fract(seed * 9.0) * 4.0;
-    float amp = 34.0 + seed * 26.0;
+    // Per-ripple speed / width / ring frequency / amplitude, kept in tighter
+    // ranges so the ripples vary subtly; slower travel for a calmer radiation.
+    float speed = 200.0 + seed * 80.0;
+    float width = 52.0 + seed * 16.0;
+    float ringFreq = 5.5 + fract(seed * 9.0) * 2.5;
+    float amp = 38.0 + seed * 16.0;
 
     float band = (dist - age * speed) / width;
     float env = exp(-band * band);

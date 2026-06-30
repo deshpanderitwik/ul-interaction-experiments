@@ -8,7 +8,7 @@ import { runOnJS, useDerivedValue, useSharedValue } from 'react-native-reanimate
 // TAP-TO-RIPPLE. The ripple adds no new geometry: each tap sends an expanding
 // ring that radially displaces the *sampling coordinate* near its wavefront, so
 // the gradient itself warps outward like the surface of water.
-const N = 12; // max concurrent ripples (a held finger emits a stream)
+const N = 16; // max concurrent ripples (a held finger emits a stream)
 
 const source = Skia.RuntimeEffect.Make(`
 uniform float2 u_resolution;
@@ -41,7 +41,7 @@ float2 rippleDisplacement(float2 fragcoord) {
   float2 disp = float2(0.0);
   for (int i = 0; i < ${N}; i++) {
     float age = u_time - u_tapTimes[i];
-    if (age < 0.0 || age > 2.0) { continue; }        // empty or expired
+    if (age < 0.0 || age > 2.6) { continue; }        // empty or expired
     float seed = u_tapSeed[i];
 
     float2 d = fragcoord - u_taps[i];
@@ -55,16 +55,16 @@ float2 rippleDisplacement(float2 fragcoord) {
     float bump = flow(d * 0.012 + float2(seed * 21.0, seed * 13.0), u_time * 0.15).x;
     float dist = len * (1.0 + 0.07 * bump);
 
-    // Per-ripple speed / width / ring frequency / amplitude, kept in tighter
-    // ranges so the ripples vary subtly; slower travel for a calmer radiation.
-    float speed = 200.0 + seed * 80.0;
-    float width = 52.0 + seed * 16.0;
+    // Per-ripple speed / width / ring frequency / amplitude. Slow travel for a
+    // calm radiation, but wider rings and a bigger amplitude → larger, stronger.
+    float speed = 210.0 + seed * 90.0;
+    float width = 84.0 + seed * 28.0;
     float ringFreq = 5.5 + fract(seed * 9.0) * 2.5;
-    float amp = 38.0 + seed * 16.0;
+    float amp = 62.0 + seed * 26.0;
 
     float band = (dist - age * speed) / width;
     float env = exp(-band * band);
-    float decay = max(0.0, 1.0 - age / 2.0);
+    float decay = max(0.0, 1.0 - age / 2.6);
     disp += dir * sin(band * ringFreq) * env * decay * amp;
   }
   return disp;

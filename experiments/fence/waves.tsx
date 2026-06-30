@@ -15,6 +15,7 @@ uniform float2 u_resolution;
 uniform float u_time;
 uniform float2 u_taps[${N}];     // tap positions (px); unused slots far away
 uniform float u_tapTimes[${N}];  // tap start times (s); -100 = empty slot
+uniform float u_tapSeed[${N}];   // per-ripple random seed → unique shape
 
 // A smooth flow field. Lower frequencies + smaller amplitude → large, soft,
 // gently-moving features.
@@ -40,14 +41,30 @@ float2 rippleDisplacement(float2 fragcoord) {
   float2 disp = float2(0.0);
   for (int i = 0; i < ${N}; i++) {
     float age = u_time - u_tapTimes[i];
-    if (age < 0.0 || age > 2.0) { continue; }       // empty or expired
+    if (age < 0.0 || age > 2.0) { continue; }        // empty or expired
+    float seed = u_tapSeed[i];
+
     float2 d = fragcoord - u_taps[i];
-    float dist = length(d);
-    float2 dir = dist > 0.001 ? d / dist : float2(0.0);
-    float band = (dist - age * 420.0) / 55.0;        // distance from the expanding wavefront
-    float env = exp(-band * band);                   // localize to the ring
-    float decay = max(0.0, 1.0 - age / 2.0);         // fade over the ripple's ~2s life
-    disp += dir * sin(band * 6.0) * env * decay * 46.0; // a few concentric rings
+    float len = length(d);
+    float2 dir = len > 0.001 ? d / len : float2(0.0);
+
+    // Deform each ripple uniquely: a lobed, non-circular wavefront whose lobe
+    // count and phase come from the seed (so no two ripples are the same ring).
+    float ang = atan(d.y, d.x);
+    float lobes = 2.0 + floor(seed * 4.0);           // 2..5 lobes
+    float wob = 1.0 + 0.18 * sin(ang * lobes + seed * 6.2831);
+    float dist = len * wob;
+
+    // Per-ripple speed / width / ring frequency / amplitude, all from the seed.
+    float speed = 360.0 + seed * 180.0;
+    float width = 46.0 + seed * 28.0;
+    float ringFreq = 5.0 + fract(seed * 9.0) * 4.0;
+    float amp = 34.0 + seed * 26.0;
+
+    float band = (dist - age * speed) / width;
+    float env = exp(-band * band);
+    float decay = max(0.0, 1.0 - age / 2.0);
+    disp += dir * sin(band * ringFreq) * env * decay * amp;
   }
   return disp;
 }
@@ -84,36 +101,47 @@ half4 main(float2 fragcoord) {
 }
 `)!;
 
-type Tap = { x: number; y: number; t: number };
+type Tap = { x: number; y: number; t: number; seed: number };
 
 export default function FenceWaves() {
   const { width, height } = useWindowDimensions();
   const clock = useClock();
   const taps = useSharedValue<Tap[]>([]);
   const holdPos = useRef({ x: 0, y: 0 });
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Push one ripple (position + the time it happened) into the ring buffer.
+  // Push one ripple (position, time, and a random seed) into the ring buffer.
   const spawn = (x: number, y: number) => {
     const list = taps.value.slice(-(N - 1));
-    list.push({ x, y, t: clock.value / 1000 });
+    list.push({ x, y, t: clock.value / 1000, seed: Math.random() });
     taps.value = list;
+  };
+  // While held, re-emit on a jittered interval so the rhythm feels organic, and
+  // nudge the position a touch so the stream doesn't stack on one exact point.
+  const scheduleNext = () => {
+    const delay = 90 + Math.random() * 140; // ~90..230ms
+    intervalRef.current = setTimeout(() => {
+      const j = 16;
+      spawn(
+        holdPos.current.x + (Math.random() - 0.5) * j,
+        holdPos.current.y + (Math.random() - 0.5) * j
+      );
+      scheduleNext();
+    }, delay);
   };
   // Touch down: ripple now, then keep emitting at the finger while it's held.
   const startHold = (x: number, y: number) => {
     holdPos.current = { x, y };
     spawn(x, y);
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    intervalRef.current = setInterval(() => {
-      spawn(holdPos.current.x, holdPos.current.y);
-    }, 130);
+    if (intervalRef.current) clearTimeout(intervalRef.current);
+    scheduleNext();
   };
   const moveHold = (x: number, y: number) => {
     holdPos.current = { x, y };
   };
   const stopHold = () => {
     if (intervalRef.current) {
-      clearInterval(intervalRef.current);
+      clearTimeout(intervalRef.current);
       intervalRef.current = null;
     }
   };
@@ -134,15 +162,18 @@ export default function FenceWaves() {
   const uniforms = useDerivedValue(() => {
     const pos: number[] = [];
     const times: number[] = [];
+    const seeds: number[] = [];
     const ts = taps.value;
     for (let i = 0; i < N; i++) {
       const tp = ts[i];
       if (tp) {
         pos.push(tp.x, tp.y);
         times.push(tp.t);
+        seeds.push(tp.seed);
       } else {
         pos.push(0, 0);
         times.push(-100); // empty slot: forever ago → no ripple
+        seeds.push(0);
       }
     }
     return {
@@ -150,6 +181,7 @@ export default function FenceWaves() {
       u_time: clock.value / 1000,
       u_taps: pos,
       u_tapTimes: times,
+      u_tapSeed: seeds,
     };
   });
 

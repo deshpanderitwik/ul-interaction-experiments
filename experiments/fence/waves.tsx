@@ -26,6 +26,15 @@ float2 flow(float2 p, float time) {
   );
 }
 
+// The undulating surface as a single scalar "height" — same warp the color uses.
+// Sampling it at small offsets gives the slope, hence a normal we can light.
+float heightAt(float2 uv) {
+  float2 q = uv * 1.7;
+  float2 w1 = flow(q, u_time);
+  float2 w2 = flow(q + 0.35 * w1, u_time * 1.05);
+  return w2.x + w2.y;
+}
+
 // Base palette: deep indigo→blue, darker, so the green-cyan layer reads distinct.
 half3 oceanPalette(float f) {
   half3 deep  = half3(0.02, 0.04, 0.16);
@@ -74,15 +83,12 @@ half4 main(float2 fragcoord) {
   // Distort the sampling coordinate by the ripples — this is the whole effect.
   float2 uv = (fragcoord + rippleDisplacement(fragcoord)) / u_resolution;
   uv.x *= u_resolution.x / u_resolution.y; // aspect-correct
-  float2 q = uv * 1.7;
 
-  // Warp, then warp the warp — gentle, subtle undulation.
-  float2 w1 = flow(q, u_time);
-  float2 w2 = flow(q + 0.35 * w1, u_time * 1.05);
-  float field = w2.x + w2.y;
+  // Treat the warped flow as a height field — used for color AND for light.
+  float hC = heightAt(uv);
 
   // BASE layer.
-  float f = 0.5 + 0.5 * sin(field * 0.9 + u_time * 0.12);
+  float f = 0.5 + 0.5 * sin(hC * 0.9 + u_time * 0.12);
   half3 base = oceanPalette(f);
 
   // SECOND color layer: an independent slower flow, screen-blended over the base.
@@ -93,6 +99,16 @@ half4 main(float2 fragcoord) {
   half3 accent = half3(0.30, 0.95, 0.62);                 // vivid green-cyan
   half3 layer = accent * smoothstep(0.30, 1.0, g) * 0.95;
   half3 col = 1.0 - (1.0 - base) * (1.0 - layer);         // screen blend
+
+  // LIGHT: specular glints. Finite-difference the height field for a normal,
+  // then a tight Blinn-Phong highlight against a fixed light → moving sparkle.
+  float e = 0.0016;
+  float2 grad = float2(heightAt(uv + float2(e, 0.0)) - hC,
+                       heightAt(uv + float2(0.0, e)) - hC) / e;
+  float3 n = normalize(float3(-grad * 0.12, 1.0));
+  float3 H = normalize(float3(0.45, 0.6, 0.7) + float3(0.0, 0.0, 1.0)); // light + view
+  float spec = pow(max(dot(n, H), 0.0), 42.0);
+  col += half3(0.75, 0.88, 1.0) * spec * 0.55;
 
   // Tiny dither to hide banding on the smooth gradient.
   float dither = fract(sin(dot(fragcoord, float2(12.9898, 78.233))) * 43758.5453);

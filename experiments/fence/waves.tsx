@@ -20,14 +20,15 @@ float2 flow(float2 p, float time) {
   );
 }
 
-// Ocean-ish palette, kept low-contrast so the undulation reads as a soft wash
-// rather than sharp bands. Wide smoothstep ranges = gentle, blurred transitions.
+// Base palette: deep indigo→blue. Kept on the blue side of the spectrum and
+// darker, so the green-cyan second layer reads as a distinct color over it.
+// Smoothstep stays wide so transitions remain soft/blurred.
 half3 oceanPalette(float f) {
-  half3 deep  = half3(0.04, 0.13, 0.24);
-  half3 mid   = half3(0.07, 0.30, 0.42);
-  half3 crest = half3(0.30, 0.55, 0.62);
-  half3 c = mix(deep, mid, smoothstep(0.08, 0.85, f));
-  c = mix(c, crest, smoothstep(0.78, 1.0, f));
+  half3 deep  = half3(0.02, 0.04, 0.16);
+  half3 mid   = half3(0.04, 0.18, 0.40);
+  half3 crest = half3(0.08, 0.40, 0.58);
+  half3 c = mix(deep, mid, smoothstep(0.05, 0.82, f));
+  c = mix(c, crest, smoothstep(0.76, 1.0, f));
   return c;
 }
 
@@ -53,8 +54,8 @@ half4 main(float2 fragcoord) {
   float2 v1 = flow(q2, u_time * 0.8);
   float2 v2 = flow(q2 + 0.35 * v1, u_time * 0.85);
   float g = 0.5 + 0.5 * sin((v2.x + v2.y) * 0.8 - u_time * 0.10);
-  half3 accent = half3(0.16, 0.46, 0.52);                // luminous aqua
-  half3 layer = accent * smoothstep(0.35, 1.0, g) * 0.8; // translucent presence
+  half3 accent = half3(0.30, 0.95, 0.62);                // vivid green-cyan (distinct hue)
+  half3 layer = accent * smoothstep(0.30, 1.0, g) * 0.95; // stronger, wider presence
   half3 col = 1.0 - (1.0 - base) * (1.0 - layer);        // screen blend
 
   // Tiny dither to hide the banding 8-bit screens show on smooth gradients.

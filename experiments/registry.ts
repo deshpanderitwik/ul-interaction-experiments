@@ -47,6 +47,14 @@ export const experiments: Experiment[] = [
     blurb: 'A study in shaders — drag to move a glow across a live UV field.',
     accent: '#9b8cff',
     load: () => import('./fence'),
+    variations: [
+      {
+        id: 'time',
+        title: 'Rung 1 · Time',
+        blurb: 'A gradient sphere whose colors flow over time — the clock uniform.',
+        load: () => import('./fence/time'),
+      },
+    ],
   },
   {
     id: 'duet',

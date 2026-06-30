@@ -41,9 +41,21 @@ half4 main(float2 fragcoord) {
   float2 w2 = flow(q + 0.35 * w1, u_time * 1.05);
   float field = w2.x + w2.y;
 
-  // A smooth 0..1 value from the warped field, drifting slowly with time.
+  // BASE layer: the undulating ocean gradient.
   float f = 0.5 + 0.5 * sin(field * 0.9 + u_time * 0.12);
-  half3 col = oceanPalette(f);
+  half3 base = oceanPalette(f);
+
+  // SECOND color layer: an independent, slower flow at a different scale and a
+  // domain offset, so it drifts on its own. We give it ONE luminous color and a
+  // soft undulating presence, then SCREEN-blend it over the base — where the two
+  // overlap the color builds up (translucent layering, not a hard paint).
+  float2 q2 = uv * 2.2 + 7.0;
+  float2 v1 = flow(q2, u_time * 0.8);
+  float2 v2 = flow(q2 + 0.35 * v1, u_time * 0.85);
+  float g = 0.5 + 0.5 * sin((v2.x + v2.y) * 0.8 - u_time * 0.10);
+  half3 accent = half3(0.16, 0.46, 0.52);                // luminous aqua
+  half3 layer = accent * smoothstep(0.35, 1.0, g) * 0.8; // translucent presence
+  half3 col = 1.0 - (1.0 - base) * (1.0 - layer);        // screen blend
 
   // Tiny dither to hide the banding 8-bit screens show on smooth gradients.
   float dither = fract(sin(dot(fragcoord, float2(12.9898, 78.233))) * 43758.5453);

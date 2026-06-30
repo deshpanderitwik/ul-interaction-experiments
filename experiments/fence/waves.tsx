@@ -113,8 +113,8 @@ half4 main(float2 fragcoord) {
   // A second, warmer light: a broad, low-exponent reddish-pink sheen from the
   // opposite side, so it gently catches the wave slopes facing it as they move.
   float3 Hp = normalize(float3(-0.55, -0.25, 0.55) + float3(0.0, 0.0, 1.0));
-  float pinkLit = pow(max(dot(n, Hp), 0.0), 6.0);
-  col += half3(0.95, 0.38, 0.46) * pinkLit * 0.26;
+  float pinkLit = pow(max(dot(n, Hp), 0.0), 5.0);
+  col += half3(1.0, 0.34, 0.44) * pinkLit * 0.62;
 
   // Tiny dither to hide banding on the smooth gradient.
   float dither = fract(sin(dot(fragcoord, float2(12.9898, 78.233))) * 43758.5453);

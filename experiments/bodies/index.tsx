@@ -75,15 +75,14 @@ half4 main(float2 fragcoord) {
     float bump = flow(d * 0.012 + float2(seed * 21.0, seed * 13.0), u_time * 0.15).x;
     float dist = len * (1.0 + 0.06 * bump);
 
-    // expanding wavefront + a short train of concentric sub-rings inside it
+    // a single expanding wavefront — one clean ring per note
     float speed = 200.0 + seed * 70.0;
-    float width = 22.0 + seed * 8.0;
+    float width = 16.0 + seed * 6.0;
     float r = age * speed;
     float band = (dist - r) / width;
     float env = exp(-band * band);
     float decay = max(0.0, 1.0 - age / ${LIFE});
-    float rings = 0.72 + 0.34 * sin(band * 6.0);
-    light += env * decay * rings;
+    light += env * decay;
   }
 
   light = clamp(light, 0.0, 1.0);

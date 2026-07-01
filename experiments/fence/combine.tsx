@@ -93,6 +93,7 @@ export default function FenceCombine() {
   const centerX = useSharedValue(0);
   const centerY = useSharedValue(0);
   const selected = useSharedValue(-1);
+  const radialActive = useSharedValue(0); // 1 only after the hold opens the radial
 
   // Mirror the chain into a shared value for the shader uniforms.
   const chainSV = useSharedValue<{ tool: number; param: number }[]>([]);
@@ -161,17 +162,24 @@ export default function FenceCombine() {
   };
 
   // ---- gestures ----
-  const pan = Gesture.Pan()
-    .activateAfterLongPress(220)
+  // Press & hold opens the radial; releasing closes it. A plain tap never
+  // activates the long press, so it does nothing. Drag-to-select uses raw touch
+  // moves (maxDistance is large so dragging out to the ring doesn't cancel it).
+  const longPress = Gesture.LongPress()
+    .minDuration(240)
+    .maxDistance(2000)
     .onStart((e) => {
       centerX.value = e.x;
       centerY.value = e.y;
       selected.value = -1;
+      radialActive.value = 1;
       runOnJS(showRadial)(e.x, e.y);
     })
-    .onUpdate((e) => {
-      const dx = e.x - centerX.value;
-      const dy = e.y - centerY.value;
+    .onTouchesMove((e) => {
+      if (radialActive.value < 1 || e.allTouches.length === 0) return;
+      const t = e.allTouches[0];
+      const dx = t.x - centerX.value;
+      const dy = t.y - centerY.value;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < DEADZONE) {
         selected.value = -1;
@@ -195,6 +203,7 @@ export default function FenceCombine() {
       runOnJS(commitRadial)(selected.value);
     })
     .onFinalize(() => {
+      radialActive.value = 0;
       selected.value = -1;
       runOnJS(hideRadial)();
     });
@@ -206,7 +215,7 @@ export default function FenceCombine() {
       runOnJS(onDoubleTap)(e.x, e.y);
     });
 
-  const gesture = Gesture.Exclusive(doubleTap, pan);
+  const gesture = Gesture.Exclusive(doubleTap, longPress);
 
   const editing = settingsIdx != null ? chain[settingsIdx] : null;
 
@@ -214,12 +223,15 @@ export default function FenceCombine() {
     <View style={styles.fill}>
       <GestureDetector gesture={gesture}>
         <View style={StyleSheet.absoluteFill}>
-          <Canvas style={StyleSheet.absoluteFill}>
-            <Fill>
-              <Shader source={source} uniforms={uniforms} />
-            </Fill>
-            <Path path={linePath} style="stroke" strokeWidth={2} color="rgba(255,255,255,0.5)" />
-          </Canvas>
+          {/* Blank until the first node exists; the visual builds up as tools are added. */}
+          {chain.length > 0 ? (
+            <Canvas style={StyleSheet.absoluteFill}>
+              <Fill>
+                <Shader source={source} uniforms={uniforms} />
+              </Fill>
+              <Path path={linePath} style="stroke" strokeWidth={2} color="rgba(255,255,255,0.5)" />
+            </Canvas>
+          ) : null}
 
           {/* chain chips (visual only) */}
           {chain.map((c, i) => (

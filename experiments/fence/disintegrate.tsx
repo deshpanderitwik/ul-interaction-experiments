@@ -14,15 +14,17 @@ import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSharedValue } from 'react-native-reanimated';
 
-// Fence · Disintegrating Circle — a solid WHITE disc made of ~thousands of tiny
-// particles. Hold anywhere and the particles at that spot DISENGAGE from their
-// home and flutter/orbit around your finger; release and they spring back home,
-// reassembling the circle. Each particle is a spring-damper pulled toward a
-// target that blends between its home (at rest) and an orbit around the nearest
-// held finger (while excited). Rendered with Skia's instanced Atlas so the whole
-// swarm is one GPU draw. Multitouch; drag to carry the swarm along.
+// Fence · Disintegrating Circle — a solid WHITE disc made of many thousands of
+// tiny particles laid out in concentric rings (uniform density + an exact round
+// edge, so at rest it reads as a perfect solid circle). Hold anywhere and the
+// particles at that spot DISENGAGE from their home and flutter/orbit around your
+// finger; release and they spring back home, reassembling the circle. Each
+// particle is a spring-damper pulled toward a target that blends between its
+// home (at rest) and an orbit around the nearest held finger (while excited).
+// Rendered with Skia's instanced Atlas so the whole swarm is one GPU draw.
+// Multitouch; drag to carry the swarm along.
 
-const S = 24; // sprite source size (px)
+const S = 10; // sprite source size (px) — small so tiny dots stay crisp
 const R_GRAB = 130; // how near the finger a particle must be to get captured
 const STIFF = 120; // spring stiffness toward the target
 const DAMP = 14; // velocity damping (under-critical → lively flutter)
@@ -46,17 +48,20 @@ type Sim = {
 function buildSim(width: number, height: number, radius: number): Sim {
   const cx = width / 2;
   const cy = height / 2;
-  const spacing = Math.max(6, radius / 26); // denser on bigger screens
+  // Ring spacing sets both density and dot size. Small for tiny particles;
+  // eased up a touch on very large screens to keep the particle count sane.
+  const dr = Math.max(1.7, radius / 72);
   const hx: number[] = [];
   const hy: number[] = [];
-  for (let y = cy - radius; y <= cy + radius; y += spacing) {
-    for (let x = cx - radius; x <= cx + radius; x += spacing) {
-      const jx = x + (Math.random() - 0.5) * spacing * 0.6;
-      const jy = y + (Math.random() - 0.5) * spacing * 0.6;
-      if (Math.hypot(jx - cx, jy - cy) <= radius - 1) {
-        hx.push(jx);
-        hy.push(jy);
-      }
+  hx.push(cx); // center point
+  hy.push(cy);
+  for (let r = dr; r <= radius; r += dr) {
+    const n = Math.max(6, Math.round((2 * Math.PI * r) / dr));
+    const off = Math.random() * Math.PI * 2; // rotate each ring so it's not spoked
+    for (let k = 0; k < n; k++) {
+      const a = off + (k / n) * Math.PI * 2;
+      hx.push(cx + Math.cos(a) * r);
+      hy.push(cy + Math.sin(a) * r);
     }
   }
   const count = hx.length;
@@ -72,7 +77,7 @@ function buildSim(width: number, height: number, radius: number): Sim {
   }
   return {
     count,
-    baseScale: (spacing * 1.8) / S, // dot diameter ~1.8× spacing → reads solid
+    baseScale: (dr * 1.45) / S, // dot diameter ~1.45× ring spacing → seamless fill
     hx,
     hy,
     px: hx.slice(),
@@ -100,8 +105,8 @@ export default function FenceDisintegrate() {
   // A soft-edged white dot sprite, baked to a texture on the UI thread (where a
   // GPU context exists — MakeOffscreen returns null on the JS thread).
   const spriteImage = useTexture(
-    <Circle cx={S / 2} cy={S / 2} r={S / 2 - 3} color="white">
-      <BlurMask blur={1.6} style="normal" />
+    <Circle cx={S / 2} cy={S / 2} r={S / 2 - 1} color="white">
+      <BlurMask blur={0.6} style="normal" />
     </Circle>,
     { width: S, height: S }
   );

@@ -162,8 +162,7 @@ export default function FenceCombine() {
 
   // ---- gestures ----
   const pan = Gesture.Pan()
-    .activateAfterLongPress(200)
-    .minDistance(0)
+    .activateAfterLongPress(220)
     .onStart((e) => {
       centerX.value = e.x;
       centerY.value = e.y;

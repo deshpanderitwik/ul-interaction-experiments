@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS, useDerivedValue, useSharedValue } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Fence · Rung 2 — Combine.
 // A modular synth for shaping functions. Double-tap opens a radial of tools;
@@ -119,6 +120,7 @@ type Target = { kind: 'node' | 'op'; idx: number };
 
 export default function FenceCombine() {
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const clock = useClock();
 
   const [chain, setChain] = useState<Node[]>([]);
@@ -250,6 +252,14 @@ export default function FenceCombine() {
     setChain((prev) => prev.filter((_, i) => i !== idx));
     setSettingsTarget(null);
   };
+  // Wipe the whole network back to a blank canvas.
+  const clearAll = () => {
+    setChain([]);
+    setSettingsTarget(null);
+    setRadialShown(false);
+    replaceRef.current = null;
+    draggingRef.current = null;
+  };
 
   // ---- drag a node ----
   const draggingRef = useRef<{ idx: number; dx: number; dy: number } | null>(null);
@@ -376,6 +386,17 @@ export default function FenceCombine() {
         <Text style={styles.hint} pointerEvents="none">
           double-tap to add a tool
         </Text>
+      ) : null}
+
+      {/* clear the whole network */}
+      {chain.length > 0 ? (
+        <Pressable
+          style={[styles.clear, { bottom: insets.bottom + 20 }]}
+          hitSlop={10}
+          onPress={clearAll}
+        >
+          <Text style={styles.clearText}>Clear</Text>
+        </Pressable>
       ) : null}
 
       {/* gear: switch background rendering */}
@@ -540,6 +561,19 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.25)',
   },
   gearIcon: { color: '#fff', fontSize: 18 },
+  clear: {
+    position: 'absolute',
+    alignSelf: 'center',
+    paddingHorizontal: 24,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(20,20,26,0.92)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  clearText: { color: '#fff', fontSize: 15, fontWeight: '600', letterSpacing: 0.3 },
   menu: {
     position: 'absolute',
     top: 102,

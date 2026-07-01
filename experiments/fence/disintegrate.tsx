@@ -25,8 +25,11 @@ import { useSharedValue } from 'react-native-reanimated';
 // at home — sleeping particles are skipped entirely (no math, no native
 // transform write) until a finger comes within reach and wakes them. Fingers
 // are snapshotted once per frame, and all per-particle state lives in flat
-// Float32Arrays. So the per-frame cost tracks the number of *active* particles,
-// not the total.
+// Float32Arrays. The active hot loop is fully trig-free: the orbit direction is
+// advanced by a small-angle rotation (a few multiplies) and the distance
+// falloff uses squared distance, so the only transcendental per frame is one
+// shared sin for the whole swarm's breathing. Per-frame cost tracks the number
+// of *active* particles, not the total.
 const S = 10; // sprite source size (px) — small so tiny dots stay crisp
 const R_GRAB = 130; // how near the finger a particle must be to get captured
 const R_GRAB2 = R_GRAB * R_GRAB;
@@ -45,13 +48,14 @@ type Sim = {
   vy: Float32Array;
   ex: Float32Array; // excitation 0..1 (0 = home, 1 = orbiting finger)
   active: Float32Array; // 1 = simulate this frame, 0 = sleeping at home
-  sa: Float32Array; // per-particle seeds: base angle
-  sw: Float32Array; // angular speed
+  sw: Float32Array; // angular speed (orbit spin rate + direction)
   sr: Float32Array; // orbit radius
-  sf: Float32Array; // flutter frequency
+  ocx: Float32Array; // orbit direction vector (unit-ish), rotated incrementally
+  ocy: Float32Array;
   fx: Float32Array; // per-frame finger snapshot (x)
   fy: Float32Array; // per-frame finger snapshot (y)
   nf: Float32Array; // [0] = number of fingers this frame
+  gwob: Float32Array; // [0] = global orbit-radius wobble (one sin per frame)
 };
 
 function buildSim(width: number, height: number, radius: number): Sim {
@@ -76,15 +80,16 @@ function buildSim(width: number, height: number, radius: number): Sim {
   const count = hxA.length;
   const hx = Float32Array.from(hxA);
   const hy = Float32Array.from(hyA);
-  const sa = new Float32Array(count);
   const sw = new Float32Array(count);
   const sr = new Float32Array(count);
-  const sf = new Float32Array(count);
+  const ocx = new Float32Array(count);
+  const ocy = new Float32Array(count);
   for (let i = 0; i < count; i++) {
-    sa[i] = Math.random() * Math.PI * 2;
+    const a = Math.random() * Math.PI * 2;
     sw[i] = (Math.random() * 2 - 1) * 2.0; // spin direction + speed
     sr[i] = 28 + Math.random() * 80; // orbit radius around the finger
-    sf[i] = 0.6 + Math.random() * 2.2; // flutter frequency
+    ocx[i] = Math.cos(a); // starting orbit direction (rotated each frame, no trig)
+    ocy[i] = Math.sin(a);
   }
   return {
     count,
@@ -97,13 +102,14 @@ function buildSim(width: number, height: number, radius: number): Sim {
     vy: new Float32Array(count),
     ex: new Float32Array(count),
     active: new Float32Array(count).fill(1), // everyone writes home on frame 1
-    sa,
     sw,
     sr,
-    sf,
+    ocx,
+    ocy,
     fx: new Float32Array(MAX_FINGERS),
     fy: new Float32Array(MAX_FINGERS),
     nf: new Float32Array(1),
+    gwob: new Float32Array(1).fill(1),
   };
 }
 
@@ -137,7 +143,6 @@ export default function FenceDisintegrate() {
   // Per-frame delta, computed once (at i === 0) and reused for every particle.
   const lastClock = useSharedValue(0);
   const dtSV = useSharedValue(0.016);
-  const tSV = useSharedValue(0);
 
   const transforms = useRSXformBuffer(count, (val, i) => {
     'worklet';
@@ -152,7 +157,7 @@ export default function FenceDisintegrate() {
       if (dt <= 0 || dt > 0.05) dt = 0.016;
       dtSV.value = dt;
       lastClock.value = c;
-      tSV.value = c / 1000;
+      s.gwob[0] = 0.85 + 0.15 * Math.sin((c / 1000) * 3.0); // one sin for the whole swarm
       const F = fingers.value;
       const n = F.length < MAX_FINGERS ? F.length : MAX_FINGERS;
       s.nf[0] = n;
@@ -189,15 +194,12 @@ export default function FenceDisintegrate() {
     const hx = s.hx[i];
     const hy = s.hy[i];
     const dt = dtSV.value;
-    const t = tSV.value;
 
-    // Excitation target: 1 right at the finger, 0 beyond R_GRAB.
+    // Excitation target from *squared* distance (no sqrt): smoothstep(1 − d²/R²).
     let exT = 0;
     if (near) {
-      const bd = Math.sqrt(bestD2);
-      let u = (R_GRAB - bd) / R_GRAB;
+      let u = 1 - bestD2 / R_GRAB2;
       if (u < 0) u = 0;
-      if (u > 1) u = 1;
       exT = u * u * (3 - 2 * u);
     }
     let ex = s.ex[i];
@@ -205,14 +207,25 @@ export default function FenceDisintegrate() {
     ex += (exT - ex) * Math.min(1, rate * dt);
     s.ex[i] = ex;
 
-    // Desired position: home ↔ orbit-around-finger, blended by excitation.
+    // Desired position: home ↔ orbit-around-finger, blended by excitation. The
+    // orbit direction is advanced by a small-angle rotation (no trig): rotate
+    // (ocx, ocy) by θ = sw·dt using cos θ ≈ 1 − θ²/2, sin θ ≈ θ.
     let dx = hx;
     let dy = hy;
+    let ocx = s.ocx[i];
+    let ocy = s.ocy[i];
     if (ex > 0.001 && nf > 0) {
-      const ang = s.sa[i] + t * s.sw[i];
-      const orr = s.sr[i] * (0.72 + 0.28 * Math.sin(t * s.sf[i] + s.sa[i]));
-      dx = hx + (fx + Math.cos(ang) * orr - hx) * ex + Math.sin(t * 4.0 + s.sa[i] * 13.0) * 5.0 * ex;
-      dy = hy + (fy + Math.sin(ang) * orr - hy) * ex + Math.cos(t * 3.3 + s.sa[i] * 7.0) * 5.0 * ex;
+      const th = s.sw[i] * dt;
+      const cs = 1 - 0.5 * th * th;
+      const nx = ocx * cs - ocy * th;
+      const ny = ocx * th + ocy * cs;
+      ocx = nx;
+      ocy = ny;
+      s.ocx[i] = ocx;
+      s.ocy[i] = ocy;
+      const orr = s.sr[i] * s.gwob[0];
+      dx = hx + (fx + ocx * orr - hx) * ex;
+      dy = hy + (fy + ocy * orr - hy) * ex;
     }
 
     // Spring-damper integration.

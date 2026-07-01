@@ -2,14 +2,7 @@ import { Canvas, Fill, Path, Shader, Skia, useClock } from '@shopify/react-nativ
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, {
-  runOnJS,
-  useAnimatedStyle,
-  useDerivedValue,
-  useSharedValue,
-  withTiming,
-  type SharedValue,
-} from 'react-native-reanimated';
+import { runOnJS, useDerivedValue, useSharedValue } from 'react-native-reanimated';
 
 // Fence · Rung 2 — Combine.
 // A modular synth for shaping functions. Press & hold anywhere to open a radial
@@ -20,7 +13,6 @@ import Animated, {
 const TOOLS = ['Linear', 'Step', 'Smooth', 'Fract', 'Sin', 'Pow', 'Abs'];
 const MAX = 8;
 const RADIAL_R = 96;
-const DEADZONE = 26;
 
 function angleFor(i: number): number {
   return -Math.PI / 2 + (i * 2 * Math.PI) / TOOLS.length;
@@ -90,11 +82,6 @@ export default function FenceCombine() {
   const chainRef = useRef<Node[]>([]);
   chainRef.current = chain;
 
-  const centerX = useSharedValue(0);
-  const centerY = useSharedValue(0);
-  const selected = useSharedValue(-1);
-  const radialActive = useSharedValue(0); // 1 only after the hold opens the radial
-
   // Mirror the chain into a shared value for the shader uniforms.
   const chainSV = useSharedValue<{ tool: number; param: number }[]>([]);
   useEffect(() => {
@@ -140,13 +127,16 @@ export default function FenceCombine() {
     setRadialShown(true);
   };
   const hideRadial = () => setRadialShown(false);
-  const commitRadial = (sel: number) => {
-    if (sel >= 0 && sel < TOOLS.length && chainRef.current.length < MAX) {
+  // Tap a tool in the (persistent) radial → add it at the radial's center.
+  const pickTool = (tool: number) => {
+    if (chainRef.current.length < MAX) {
       const { x, y } = radialRef.current;
-      setChain((prev) => [...prev, { id: nextId.current++, tool: sel, param: 0.5, x, y }]);
+      setChain((prev) => [...prev, { id: nextId.current++, tool, param: 0.5, x, y }]);
     }
+    setRadialShown(false);
   };
-  const onDoubleTap = (x: number, y: number) => {
+  // Long-press on a node → open its settings.
+  const openNodeSettings = (x: number, y: number) => {
     let hit = -1;
     chainRef.current.forEach((c, i) => {
       if (Math.hypot(x - c.x, y - c.y) <= 44) hit = i;
@@ -183,57 +173,19 @@ export default function FenceCombine() {
   };
 
   // ---- gestures ----
-  // Press & hold opens the radial; releasing closes it. A plain tap never
-  // activates the long press, so it does nothing. Drag-to-select uses raw touch
-  // moves (maxDistance is large so dragging out to the ring doesn't cancel it).
-  const longPress = Gesture.LongPress()
-    .minDuration(240)
-    .maxDistance(2000)
-    .onStart((e) => {
-      centerX.value = e.x;
-      centerY.value = e.y;
-      selected.value = -1;
-      radialActive.value = 1;
-      runOnJS(showRadial)(e.x, e.y);
-    })
-    .onTouchesMove((e) => {
-      if (radialActive.value < 1 || e.allTouches.length === 0) return;
-      const t = e.allTouches[0];
-      const dx = t.x - centerX.value;
-      const dy = t.y - centerY.value;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < DEADZONE) {
-        selected.value = -1;
-        return;
-      }
-      const ang = Math.atan2(dy, dx);
-      let best = -1;
-      let bestDiff = 10;
-      for (let i = 0; i < TOOLS.length; i++) {
-        const theta = -Math.PI / 2 + (i * 2 * Math.PI) / TOOLS.length;
-        let d = ang - theta;
-        d = Math.abs(Math.atan2(Math.sin(d), Math.cos(d)));
-        if (d < bestDiff) {
-          bestDiff = d;
-          best = i;
-        }
-      }
-      selected.value = best;
-    })
-    .onEnd(() => {
-      runOnJS(commitRadial)(selected.value);
-    })
-    .onFinalize(() => {
-      radialActive.value = 0;
-      selected.value = -1;
-      runOnJS(hideRadial)();
-    });
-
+  // Double-tap anywhere → open the (persistent) radial there.
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
     .maxDuration(300)
     .onEnd((e) => {
-      runOnJS(onDoubleTap)(e.x, e.y);
+      runOnJS(showRadial)(e.x, e.y);
+    });
+
+  // Long-press on a node → open its settings.
+  const longPress = Gesture.LongPress()
+    .minDuration(300)
+    .onStart((e) => {
+      runOnJS(openNodeSettings)(e.x, e.y);
     });
 
   // Drag a node: grabs whichever node the touch started on, then follows.
@@ -249,7 +201,7 @@ export default function FenceCombine() {
       runOnJS(endDrag)();
     });
 
-  // Movement (a node drag) beats the still-hold radial; a double-tap beats both.
+  // Movement (a node drag) beats the long-press; a double-tap is its own thing.
   const gesture = Gesture.Race(doubleTap, dragPan, longPress);
 
   const editing = settingsIdx != null ? chain[settingsIdx] : null;
@@ -280,31 +232,38 @@ export default function FenceCombine() {
             </View>
           ))}
 
-          {/* radial tool picker */}
-          {radialShown ? (
-            <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-              {TOOLS.map((label, i) => {
-                const theta = angleFor(i);
-                return (
-                  <RingTool
-                    key={i}
-                    index={i}
-                    x={radialCenter.x + RADIAL_R * Math.cos(theta) - 30}
-                    y={radialCenter.y + RADIAL_R * Math.sin(theta) - 22}
-                    label={label}
-                    selected={selected}
-                  />
-                );
-              })}
-            </View>
-          ) : null}
         </View>
       </GestureDetector>
 
       {chain.length === 0 && !radialShown ? (
         <Text style={styles.hint} pointerEvents="none">
-          press &amp; hold to add a tool
+          double-tap to add a tool
         </Text>
+      ) : null}
+
+      {/* radial tool picker: tap a tool to add it, tap outside to dismiss */}
+      {radialShown ? (
+        <>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setRadialShown(false)} />
+          {TOOLS.map((label, i) => {
+            const theta = angleFor(i);
+            return (
+              <Pressable
+                key={i}
+                onPress={() => pickTool(i)}
+                style={[
+                  styles.ringTool,
+                  {
+                    left: radialCenter.x + RADIAL_R * Math.cos(theta) - 30,
+                    top: radialCenter.y + RADIAL_R * Math.sin(theta) - 22,
+                  },
+                ]}
+              >
+                <Text style={styles.ringToolText}>{label}</Text>
+              </Pressable>
+            );
+          })}
+        </>
       ) : null}
 
       {/* settings popover (interactive, above the gesture layer) */}
@@ -321,34 +280,6 @@ export default function FenceCombine() {
         </>
       ) : null}
     </View>
-  );
-}
-
-function RingTool({
-  index,
-  x,
-  y,
-  label,
-  selected,
-}: {
-  index: number;
-  x: number;
-  y: number;
-  label: string;
-  selected: SharedValue<number>;
-}) {
-  const style = useAnimatedStyle(() => {
-    const on = selected.value === index;
-    return {
-      backgroundColor: on ? '#9b8cff' : 'rgba(16,16,22,0.92)',
-      borderColor: on ? '#ffffff' : 'rgba(255,255,255,0.3)',
-      transform: [{ scale: withTiming(on ? 1.22 : 1, { duration: 90 }) }],
-    };
-  });
-  return (
-    <Animated.View style={[styles.ringTool, { left: x, top: y }, style]}>
-      <Text style={styles.ringToolText}>{label}</Text>
-    </Animated.View>
   );
 }
 
@@ -436,6 +367,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
+    backgroundColor: 'rgba(16,16,22,0.95)',
+    borderColor: 'rgba(255,255,255,0.4)',
   },
   ringToolText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   panel: {

@@ -9,10 +9,18 @@ import {
   useTexture,
 } from '@shopify/react-native-skia';
 import type { SkRSXform } from '@shopify/react-native-skia';
-import { useMemo } from 'react';
-import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import { useMemo, useState } from 'react';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { useFrameCallback, useSharedValue } from 'react-native-reanimated';
+import type { SharedValue } from 'react-native-reanimated';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useFrameCallback,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Fence · Disintegrating Circle — at rest it's ONE continuous solid disc (a
 // shader, not dots), so the break is a surprise. Holding doesn't cut a hole: the
@@ -50,6 +58,8 @@ uniform float2 u_center;
 uniform float u_radius;
 uniform float2 u_holePos[${MAX_FINGERS}];
 uniform float u_holeM[${MAX_FINGERS}];
+uniform float u_grain; // noise frequency (grain size)
+uniform float u_band;  // crumble softness
 
 float hash21(float2 p) {
   p = fract(p * float2(123.34, 345.45));
@@ -84,8 +94,8 @@ half4 main(float2 fc) {
   }
   // Grainy erosion: this grain is gone once excitation passes its noise
   // threshold. Solid everywhere at rest (exc = 0 → dissolved = 0).
-  float n = vnoise(fc * 0.28);
-  float dissolved = smoothstep(n, n + 0.18, exc);
+  float n = vnoise(fc * u_grain);
+  float dissolved = smoothstep(n, n + u_band, exc);
   float a = disc * (1.0 - dissolved);
   return half4(a, a, a, a); // premultiplied white
 }
@@ -156,11 +166,11 @@ function buildSim(width: number, height: number, radius: number): Sim {
   const ocy = new Float32Array(count);
   for (let i = 0; i < count; i++) {
     const a = Math.random() * Math.PI * 2;
-    const mag = 12 + Math.random() * 34; // how far this grain drifts once loose
+    const f = 0.35 + Math.random() * 0.95; // per-grain drift factor (× dispersal slider)
     thr[i] = Math.random(); // grain releases when local excitation exceeds this
     sw[i] = (Math.random() * 2 - 1) * 0.9; // slow drift of the scatter direction
-    ocx[i] = Math.cos(a) * mag;
-    ocy[i] = Math.sin(a) * mag;
+    ocx[i] = Math.cos(a) * f;
+    ocy[i] = Math.sin(a) * f;
   }
 
   // Static spatial grid over home positions (counting sort → CSR).
@@ -229,9 +239,19 @@ function buildSim(width: number, height: number, radius: number): Sim {
   };
 }
 
+// Tunable defaults (also the slider start values).
+const GRAIN0 = 0.28; // noise frequency — grain size
+const BAND0 = 0.18; // crumble softness
+const DISP0 = 34; // dispersal distance (px)
+
 export default function FenceDisintegrate() {
   const { width, height } = useWindowDimensions();
   const radius = Math.min(width, height) * 0.32;
+
+  // Live-tunable knobs, driven by the bottom-sheet sliders.
+  const grainSV = useSharedValue(GRAIN0);
+  const bandSV = useSharedValue(BAND0);
+  const dispersalSV = useSharedValue(DISP0);
 
   const sim = useMemo(() => buildSim(width, height, radius), [width, height, radius]);
   const simSV = useSharedValue<Sim>(sim);
@@ -270,6 +290,8 @@ export default function FenceDisintegrate() {
       u_radius: radius,
       u_holePos: new Array(MAX_FINGERS * 2).fill(0),
       u_holeM: new Array(MAX_FINGERS).fill(0),
+      u_grain: GRAIN0,
+      u_band: BAND0,
     }),
     [width, height, radius]
   );
@@ -288,7 +310,8 @@ export default function FenceDisintegrate() {
 
     let dt = (info.timeSincePreviousFrame ?? 16) / 1000;
     if (dt <= 0 || dt > 0.05) dt = 0.016;
-    s.gwob[0] = 0.85 + 0.15 * Math.sin((info.timeSinceFirstFrame / 1000) * 3.0);
+    const band = bandSV.value < 0.02 ? 0.02 : bandSV.value; // guard /0
+    const dispersal = dispersalSV.value;
 
     // Snapshot fingers.
     const F = fingers.value;
@@ -384,7 +407,6 @@ export default function FenceDisintegrate() {
     }
 
     // SIMULATE the active list, writing transforms and compacting out sleepers.
-    const gwob = s.gwob[0];
     let w = 0;
     for (let r = 0; r < ac; r++) {
       const p = al[r];
@@ -412,8 +434,8 @@ export default function FenceDisintegrate() {
       s.ex[p] = ex;
 
       // Grain release: this grain only detaches once excitation passes its own
-      // threshold (smoothstep(thr, thr+0.18, ex)) — grainy, matching the disc.
-      let rr = (ex - s.thr[p]) / 0.18;
+      // threshold (smoothstep(thr, thr+band, ex)) — grainy, matching the disc.
+      let rr = (ex - s.thr[p]) / band;
       if (rr < 0) rr = 0;
       else if (rr > 1) rr = 1;
       rr = rr * rr * (3 - 2 * rr);
@@ -435,8 +457,8 @@ export default function FenceDisintegrate() {
         ocy = ny;
         s.ocx[p] = ocx;
         s.ocy[p] = ocy;
-        dx = hx + ocx * gwob * rr;
-        dy = hy + ocy * gwob * rr;
+        dx = hx + ocx * dispersal * rr;
+        dy = hy + ocy * dispersal * rr;
       }
 
       // Spring-damper integration.
@@ -490,6 +512,8 @@ export default function FenceDisintegrate() {
         u_radius: radius,
         u_holePos: hp,
         u_holeM: hm,
+        u_grain: grainSV.value,
+        u_band: bandSV.value,
       };
     }
   });
@@ -534,20 +558,191 @@ export default function FenceDisintegrate() {
     });
 
   return (
-    <GestureDetector gesture={gesture}>
-      <View style={styles.fill}>
-        <Canvas style={StyleSheet.absoluteFill}>
-          <Fill color="#000" />
-          <Fill>
-            <Shader source={baseSource} uniforms={baseUni} />
-          </Fill>
-          <Atlas image={spriteImage} sprites={sprites} transforms={transforms} />
-        </Canvas>
+    <View style={styles.fill}>
+      <GestureDetector gesture={gesture}>
+        <View style={StyleSheet.absoluteFill}>
+          <Canvas style={StyleSheet.absoluteFill}>
+            <Fill color="#000" />
+            <Fill>
+              <Shader source={baseSource} uniforms={baseUni} />
+            </Fill>
+            <Atlas image={spriteImage} sprites={sprites} transforms={transforms} />
+          </Canvas>
+        </View>
+      </GestureDetector>
+      <TuningSheet grain={grainSV} band={bandSV} dispersal={dispersalSV} />
+    </View>
+  );
+}
+
+function TuningSheet({
+  grain,
+  band,
+  dispersal,
+}: {
+  grain: SharedValue<number>;
+  band: SharedValue<number>;
+  dispersal: SharedValue<number>;
+}) {
+  const insets = useSafeAreaInsets();
+  const PEEK = 46;
+  const H = 292 + insets.bottom;
+  const closedY = H - PEEK;
+  const ty = useSharedValue(closedY);
+  const startY = useSharedValue(closedY);
+  const isOpen = useSharedValue(0);
+
+  const snap = (open: boolean) => {
+    'worklet';
+    ty.value = withTiming(open ? 0 : closedY, { duration: 220 });
+    isOpen.value = open ? 1 : 0;
+  };
+  const drag = Gesture.Pan()
+    .onBegin(() => {
+      startY.value = ty.value;
+    })
+    .onUpdate((e) => {
+      let y = startY.value + e.translationY;
+      if (y < 0) y = 0;
+      else if (y > closedY) y = closedY;
+      ty.value = y;
+    })
+    .onEnd((e) => {
+      snap(ty.value < closedY / 2 || e.velocityY < -450);
+    });
+  const tap = Gesture.Tap().onEnd(() => snap(isOpen.value < 0.5));
+  const handleGesture = Gesture.Exclusive(tap, drag);
+
+  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: ty.value }] }));
+
+  return (
+    <Animated.View style={[styles.sheet, { height: H }, sheetStyle]}>
+      <GestureDetector gesture={handleGesture}>
+        <View style={styles.handleArea}>
+          <View style={styles.handleBar} />
+          <Text style={styles.sheetTitle}>Disintegration</Text>
+        </View>
+      </GestureDetector>
+      <View style={[styles.sheetBody, { paddingBottom: insets.bottom + 16 }]}>
+        <Slider
+          label="Grain — coarse ↔ fine"
+          min={0.08}
+          max={0.6}
+          initial={GRAIN0}
+          onChange={(v) => (grain.value = v)}
+          fmt={(v) => v.toFixed(2)}
+        />
+        <Slider
+          label="Edge softness"
+          min={0.02}
+          max={0.5}
+          initial={BAND0}
+          onChange={(v) => (band.value = v)}
+          fmt={(v) => v.toFixed(2)}
+        />
+        <Slider
+          label="Dispersal"
+          min={5}
+          max={120}
+          initial={DISP0}
+          onChange={(v) => (dispersal.value = v)}
+          fmt={(v) => `${Math.round(v)} px`}
+        />
       </View>
-    </GestureDetector>
+    </Animated.View>
+  );
+}
+
+function Slider({
+  label,
+  min,
+  max,
+  initial,
+  onChange,
+  fmt,
+}: {
+  label: string;
+  min: number;
+  max: number;
+  initial: number;
+  onChange: (v: number) => void;
+  fmt: (v: number) => string;
+}) {
+  const [w, setW] = useState(0);
+  const [val, setVal] = useState(initial);
+  const apply = (x: number) => {
+    if (w <= 0) return;
+    let t = x / w;
+    if (t < 0) t = 0;
+    else if (t > 1) t = 1;
+    const nv = min + t * (max - min);
+    setVal(nv);
+    onChange(nv);
+  };
+  const pan = Gesture.Pan()
+    .minDistance(0)
+    .onBegin((e) => runOnJS(apply)(e.x))
+    .onUpdate((e) => runOnJS(apply)(e.x));
+  const t = (val - min) / (max - min);
+  const pct = `${Math.max(0, Math.min(1, t)) * 100}%` as const;
+
+  return (
+    <View style={styles.sliderRow}>
+      <View style={styles.sliderHead}>
+        <Text style={styles.sliderLabel}>{label}</Text>
+        <Text style={styles.sliderVal}>{fmt(val)}</Text>
+      </View>
+      <GestureDetector gesture={pan}>
+        <View
+          style={styles.sliderTrackWrap}
+          onLayout={(e) => setW(e.nativeEvent.layout.width)}
+        >
+          <View style={styles.sliderTrack} />
+          <View style={[styles.sliderFill, { width: pct }]} />
+          <View style={[styles.sliderThumb, { left: pct }]} />
+        </View>
+      </GestureDetector>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
+  sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(18,18,24,0.98)',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  handleArea: { alignItems: 'center', paddingTop: 10, paddingBottom: 8 },
+  handleBar: { width: 40, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.3)' },
+  sheetTitle: {
+    color: '#e6e6ee',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    marginTop: 8,
+    textTransform: 'uppercase',
+  },
+  sheetBody: { paddingHorizontal: 22, paddingTop: 6, gap: 20 },
+  sliderRow: { gap: 9 },
+  sliderHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  sliderLabel: { color: '#cfd0e6', fontSize: 14, fontWeight: '600' },
+  sliderVal: { color: '#9b8cff', fontSize: 13, fontWeight: '700' },
+  sliderTrackWrap: { height: 30, justifyContent: 'center' },
+  sliderTrack: { height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.16)' },
+  sliderFill: { position: 'absolute', height: 4, borderRadius: 2, backgroundColor: '#9b8cff' },
+  sliderThumb: {
+    position: 'absolute',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    marginLeft: -10,
+    backgroundColor: '#fff',
+  },
 });

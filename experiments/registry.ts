@@ -69,6 +69,12 @@ export const experiments: Experiment[] = [
         audio: true,
         load: () => import('./fence/raindrops'),
       },
+      {
+        id: 'toolbox',
+        title: 'Rung 2 · Toolbox',
+        blurb: 'Shaping functions: the screen tints by f(x) with its curve plotted; chips swap the tool.',
+        load: () => import('./fence/toolbox'),
+      },
     ],
   },
   {

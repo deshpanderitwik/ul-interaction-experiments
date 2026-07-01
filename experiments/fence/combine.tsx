@@ -24,6 +24,7 @@ uniform float u_time;
 uniform float u_count;
 uniform float u_tools[${MAX}];
 uniform float u_params[${MAX}];
+uniform float u_mode;   // 0 = field, 1 = sphere
 
 float applyTool(float x, float tool, float p, float time) {
   if (tool < 0.5) {
@@ -45,19 +46,21 @@ float applyTool(float x, float tool, float p, float time) {
   }
 }
 
-// Shade one sample point (in pixels). Chains the tools, tints by f(x), and
-// overlays the plotted curve + faint axes.
-half3 shade(float2 fc) {
-  float2 uv = fc / u_resolution;
-  float y = 1.0 - uv.y;
-
-  float v = uv.x;
+// Run x through the whole tool chain, in order.
+float chainValue(float x) {
+  float v = x;
   for (int i = 0; i < ${MAX}; i++) {
     if (float(i) >= u_count) { break; }
     v = applyTool(v, u_tools[i], u_params[i], u_time);
   }
-  float fx = clamp(v, 0.0, 1.0);
+  return clamp(v, 0.0, 1.0);
+}
 
+// Mode 0: full-screen field tinted by f(x) with the plotted curve + axes.
+half3 shadeField(float2 fc) {
+  float2 uv = fc / u_resolution;
+  float y = 1.0 - uv.y;
+  float fx = chainValue(uv.x);
   half3 col = mix(half3(0.04, 0.06, 0.11), half3(0.30, 0.66, 0.92), fx);
   float axes = smoothstep(0.004, 0.0, abs(uv.x - 0.5)) + smoothstep(0.004, 0.0, abs(y - 0.5));
   col += half3(0.05, 0.06, 0.09) * axes;
@@ -66,13 +69,30 @@ half3 shade(float2 fc) {
   return col;
 }
 
+// Mode 1: the same chain drives a gradient painted across a shaded sphere.
+half3 shadeSphere(float2 fc) {
+  float2 uv = (fc - 0.5 * u_resolution) / u_resolution.y;
+  float r = length(uv);
+  float radius = 0.34;
+  float mask = smoothstep(radius, radius - 0.006, r);
+  float sph = sqrt(max(0.0, 1.0 - (r / radius) * (r / radius)));
+  float sx = clamp(uv.x / radius * 0.5 + 0.5, 0.0, 1.0); // horizontal coord across the ball
+  float fx = chainValue(sx);
+  half3 grad = mix(half3(0.04, 0.06, 0.11), half3(0.30, 0.66, 0.92), fx) * (0.55 + 0.45 * sph);
+  return mix(half3(0.02, 0.03, 0.05), grad, mask);
+}
+
+half3 shadeAt(float2 fc) {
+  if (u_mode < 0.5) { return shadeField(fc); }
+  return shadeSphere(fc);
+}
+
 half4 main(float2 fragcoord) {
-  // 4x rotated-grid supersampling: anti-aliases bunched-up bands and steep
-  // curves that would otherwise turn into stair-steps.
-  half3 c = shade(fragcoord + float2(0.125, 0.375));
-  c += shade(fragcoord + float2(0.375, -0.125));
-  c += shade(fragcoord + float2(-0.125, -0.375));
-  c += shade(fragcoord + float2(-0.375, 0.125));
+  // 4x rotated-grid supersampling to anti-alias bunched bands / steep curves.
+  half3 c = shadeAt(fragcoord + float2(0.125, 0.375));
+  c += shadeAt(fragcoord + float2(0.375, -0.125));
+  c += shadeAt(fragcoord + float2(-0.125, -0.375));
+  c += shadeAt(fragcoord + float2(-0.375, 0.125));
   return half4(c * 0.25, 1.0);
 }
 `)!;
@@ -87,6 +107,14 @@ export default function FenceCombine() {
   const [settingsIdx, setSettingsIdx] = useState<number | null>(null);
   const [radialShown, setRadialShown] = useState(false);
   const [radialCenter, setRadialCenter] = useState({ x: 0, y: 0 });
+  const [renderMode, setRenderMode] = useState(0); // 0 = field, 1 = sphere
+  const [menuOpen, setMenuOpen] = useState(false);
+  const modeSV = useSharedValue(0);
+  const selectMode = (i: number) => {
+    setRenderMode(i);
+    modeSV.value = i;
+    setMenuOpen(false);
+  };
 
   const nextId = useRef(1);
   const radialRef = useRef({ x: 0, y: 0 });
@@ -119,6 +147,7 @@ export default function FenceCombine() {
       u_count: Math.min(c.length, MAX),
       u_tools: tools,
       u_params: params,
+      u_mode: modeSV.value,
     };
   });
 
@@ -269,6 +298,31 @@ export default function FenceCombine() {
         </Text>
       ) : null}
 
+      {/* gear: switch background rendering */}
+      <Pressable style={styles.gear} hitSlop={10} onPress={() => setMenuOpen((o) => !o)}>
+        <Text style={styles.gearIcon}>⚙</Text>
+      </Pressable>
+      {menuOpen ? (
+        <>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setMenuOpen(false)} />
+          <View style={styles.menu}>
+            <Text style={styles.menuHeader}>Background</Text>
+            {['Field', 'Sphere'].map((label, i) => {
+              const on = renderMode === i;
+              return (
+                <Pressable
+                  key={label}
+                  onPress={() => selectMode(i)}
+                  style={[styles.menuItem, on && styles.menuItemOn]}
+                >
+                  <Text style={[styles.menuText, on && styles.menuTextOn]}>{label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </>
+      ) : null}
+
       {/* radial tool picker: tap a tool to add it, tap outside to dismiss */}
       {radialShown ? (
         <>
@@ -384,6 +438,45 @@ const styles = StyleSheet.create({
     fontSize: 15,
     letterSpacing: 0.5,
   },
+  gear: {
+    position: 'absolute',
+    top: 56,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  gearIcon: { color: '#fff', fontSize: 18 },
+  menu: {
+    position: 'absolute',
+    top: 102,
+    right: 20,
+    minWidth: 150,
+    borderRadius: 12,
+    backgroundColor: 'rgba(24,24,30,0.98)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+    padding: 6,
+  },
+  menuHeader: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    paddingHorizontal: 10,
+    paddingTop: 4,
+    paddingBottom: 6,
+    textTransform: 'uppercase',
+  },
+  menuItem: { paddingVertical: 10, paddingHorizontal: 10, borderRadius: 8 },
+  menuItemOn: { backgroundColor: '#9b8cff' },
+  menuText: { color: '#e6e6ee', fontSize: 15, fontWeight: '600' },
+  menuTextOn: { color: '#0b0b14' },
   chip: {
     position: 'absolute',
     width: 52,

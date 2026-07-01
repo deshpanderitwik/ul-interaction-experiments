@@ -20,6 +20,7 @@ uniform float u_time;
 uniform float2 u_taps[${N}];
 uniform float u_tapTimes[${N}];
 uniform float u_tapSeed[${N}];
+uniform float u_tapSpeed[${N}]; // per-drop emanation-speed multiplier (from finger x)
 
 // --- shared substrate (identical to Waves) ---
 float2 flow(float2 p, float time) {
@@ -64,8 +65,9 @@ half4 main(float2 fragcoord) {
     float dentEnv = exp(-(len * len) / (23.0 * 23.0));
     float dent = -dentEnv * exp(-age * 8.0) * 26.0;
 
-    // 2) RIPPLES emanating from that point: small, tight, quick rings.
-    float speed = 165.0 + seed * 55.0;
+    // 2) RIPPLES emanating from that point: small, tight, quick rings. Their
+    //    speed is baked per-drop from the finger's x, so it matches the arp rate.
+    float speed = (165.0 + seed * 55.0) * u_tapSpeed[i];
     float width = 20.0 + seed * 8.0;
     float r = age * speed;
     float band = (dist - r) / width;
@@ -113,7 +115,7 @@ half4 main(float2 fragcoord) {
 }
 `)!;
 
-type Drop = { x: number; y: number; t: number; seed: number };
+type Drop = { x: number; y: number; t: number; seed: number; spd: number };
 
 export default function FenceRaindrops() {
   const { width, height } = useWindowDimensions();
@@ -121,6 +123,9 @@ export default function FenceRaindrops() {
   const taps = useSharedValue<Drop[]>([]);
   const holdPos = useRef({ x: 0, y: 0 });
   const streamRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dimsRef = useRef({ width, height });
+  dimsRef.current = { width, height };
+  const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
   // Ascending scale ladder + climbing index — each droplet plinks the next note.
   const scale = useScale();
@@ -134,31 +139,41 @@ export default function FenceRaindrops() {
     arpIndex.current = 0;
   }
 
-  // A droplet: push to the ring buffer and plink its note.
+  // A droplet: push to the ring buffer and plink its note. The drop's x sets its
+  // emanation speed; its y sets how high the arp climbs (the ceiling note).
   const spawn = (x: number, y: number) => {
+    const { width: W, height: Hh } = dimsRef.current;
+    const fx = clamp01(x / W); // 0 = left, 1 = right
+    const fy = clamp01(1 - y / Hh); // 0 = bottom, 1 = top
+    const spd = 0.6 + fx * 1.8; // faster emanation to the right
+
     const list = taps.value.slice(-(N - 1));
-    list.push({ x, y, t: clock.value / 1000, seed: Math.random() });
+    list.push({ x, y, t: clock.value / 1000, seed: Math.random(), spd });
     taps.value = list;
 
     const ladder = ladderRef.current;
     if (ladder.length > 0) {
-      const freq = ladder[arpIndex.current % ladder.length];
+      // Higher finger → taller arp (climbs to a higher ceiling before wrapping).
+      const top = Math.max(3, Math.round(3 + fy * (ladder.length - 3)));
+      const freq = ladder[arpIndex.current % top];
       recordNote(freq, 0.5);
       NoteSynth?.pluck(freq, 0.45, 0.5).catch(() => {});
-      arpIndex.current = (arpIndex.current + 1) % ladder.length;
+      arpIndex.current = (arpIndex.current + 1) % top;
     }
   };
 
-  // Touch/hold: a stream of drops where you touch (with a little scatter).
+  // Touch/hold: a stream of drops around the finger. The interval (arp rate)
+  // shortens as the finger moves right, matching the faster emanation.
   const scheduleStream = () => {
+    const fx = clamp01(holdPos.current.x / dimsRef.current.width);
+    const base = 300 - fx * 210; // ~300ms (left, slow) .. ~90ms (right, fast)
     streamRef.current = setTimeout(() => {
-      // Drops land scattered AROUND the finger, not on it.
       spawn(
         holdPos.current.x + (Math.random() - 0.5) * 90,
         holdPos.current.y + (Math.random() - 0.5) * 90
       );
       scheduleStream();
-    }, 70 + Math.random() * 130);
+    }, base * (0.85 + Math.random() * 0.3));
   };
   const startHold = (x: number, y: number) => {
     holdPos.current = { x, y };
@@ -193,6 +208,7 @@ export default function FenceRaindrops() {
     const pos: number[] = [];
     const times: number[] = [];
     const seeds: number[] = [];
+    const spds: number[] = [];
     const ts = taps.value;
     for (let i = 0; i < N; i++) {
       const tp = ts[i];
@@ -200,10 +216,12 @@ export default function FenceRaindrops() {
         pos.push(tp.x, tp.y);
         times.push(tp.t);
         seeds.push(tp.seed);
+        spds.push(tp.spd);
       } else {
         pos.push(0, 0);
         times.push(-100);
         seeds.push(0);
+        spds.push(1);
       }
     }
     return {
@@ -212,6 +230,7 @@ export default function FenceRaindrops() {
       u_taps: pos,
       u_tapTimes: times,
       u_tapSeed: seeds,
+      u_tapSpeed: spds,
     };
   });
 

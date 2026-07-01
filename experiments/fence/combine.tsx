@@ -45,11 +45,12 @@ float applyTool(float x, float tool, float p, float time) {
   }
 }
 
-half4 main(float2 fragcoord) {
-  float2 uv = fragcoord / u_resolution;
+// Shade one sample point (in pixels). Chains the tools, tints by f(x), and
+// overlays the plotted curve + faint axes.
+half3 shade(float2 fc) {
+  float2 uv = fc / u_resolution;
   float y = 1.0 - uv.y;
 
-  // Chain the tools in order: each one's output is the next one's input.
   float v = uv.x;
   for (int i = 0; i < ${MAX}; i++) {
     if (float(i) >= u_count) { break; }
@@ -62,7 +63,17 @@ half4 main(float2 fragcoord) {
   col += half3(0.05, 0.06, 0.09) * axes;
   float line = smoothstep(0.016, 0.0, abs(y - fx));
   col = mix(col, half3(1.0, 0.94, 0.6), line);
-  return half4(col, 1.0);
+  return col;
+}
+
+half4 main(float2 fragcoord) {
+  // 4x rotated-grid supersampling: anti-aliases bunched-up bands and steep
+  // curves that would otherwise turn into stair-steps.
+  half3 c = shade(fragcoord + float2(0.125, 0.375));
+  c += shade(fragcoord + float2(0.375, -0.125));
+  c += shade(fragcoord + float2(-0.125, -0.375));
+  c += shade(fragcoord + float2(-0.375, 0.125));
+  return half4(c * 0.25, 1.0);
 }
 `)!;
 

@@ -15,7 +15,7 @@ import { runOnJS, useDerivedValue, useSharedValue } from 'react-native-reanimate
 const TOOLS = ['Linear', 'Step', 'Smooth', 'Fract', 'Sin', 'Pow', 'Abs'];
 const OPERATORS = ['Chain', 'Add', 'Mult', 'Min', 'Max', 'Mix'];
 const OP_SHORT = ['∘', '+', '×', 'mn', 'mx', '~'];
-const MAX = 8;
+const MAX = 16;
 const RADIAL_R = 96;
 
 function angleFor(i: number, count: number): number {

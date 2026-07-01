@@ -1,12 +1,13 @@
 import {
   Atlas,
-  Fill,
+  BlurMask,
   Canvas,
+  Circle,
+  Fill,
   Skia,
-  TileMode,
   useClock,
   useRSXformBuffer,
-  vec,
+  useTexture,
 } from '@shopify/react-native-skia';
 import { useMemo } from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
@@ -96,26 +97,14 @@ export default function FenceDisintegrate() {
   simSV.value = sim;
   const count = sim.count;
 
-  // A soft-edged white dot sprite (solid core, feathered rim) baked once.
-  const spriteImage = useMemo(() => {
-    const surface = Skia.Surface.MakeOffscreen(S, S);
-    if (!surface) return null;
-    const canvas = surface.getCanvas();
-    const paint = Skia.Paint();
-    paint.setAntiAlias(true);
-    paint.setShader(
-      Skia.Shader.MakeRadialGradient(
-        vec(S / 2, S / 2),
-        S / 2,
-        [Skia.Color('white'), Skia.Color('white'), Skia.Color('rgba(255,255,255,0)')],
-        [0, 0.62, 1],
-        TileMode.Clamp
-      )
-    );
-    canvas.drawCircle(S / 2, S / 2, S / 2, paint);
-    surface.flush();
-    return surface.makeImageSnapshot();
-  }, []);
+  // A soft-edged white dot sprite, baked to a texture on the UI thread (where a
+  // GPU context exists — MakeOffscreen returns null on the JS thread).
+  const spriteImage = useTexture(
+    <Circle cx={S / 2} cy={S / 2} r={S / 2 - 3} color="white">
+      <BlurMask blur={1.6} style="normal" />
+    </Circle>,
+    { width: S, height: S }
+  );
 
   const sprites = useMemo(
     () => new Array(count).fill(0).map(() => Skia.XYWHRect(0, 0, S, S)),
@@ -258,9 +247,7 @@ export default function FenceDisintegrate() {
       <View style={styles.fill}>
         <Canvas style={StyleSheet.absoluteFill}>
           <Fill color="#000" />
-          {spriteImage ? (
-            <Atlas image={spriteImage} sprites={sprites} transforms={transforms} />
-          ) : null}
+          <Atlas image={spriteImage} sprites={sprites} transforms={transforms} />
         </Canvas>
       </View>
     </GestureDetector>

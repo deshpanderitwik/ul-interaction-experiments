@@ -221,24 +221,26 @@ export default function FenceCombine() {
     replaceRef.current = null;
     setRadialShown(false);
   };
+  // Long-press a node → its settings panel.
   const openSettings = (x: number, y: number) => {
     const c = chainRef.current;
     let node = -1;
     c.forEach((n, i) => {
       if (Math.hypot(x - n.x, y - n.y) <= 44) node = i;
     });
-    if (node >= 0) {
-      setSettingsTarget({ kind: 'node', idx: node });
-      return;
-    }
-    let op = -1;
+    if (node >= 0) setSettingsTarget({ kind: 'node', idx: node });
+  };
+  // Single-tap an operator point → open its radial directly.
+  const onSingleTap = (x: number, y: number) => {
+    const c = chainRef.current;
     for (let i = 1; i < c.length; i++) {
       const mx = (c[i - 1].x + c[i].x) / 2;
       const my = (c[i - 1].y + c[i].y) / 2;
-      if (Math.hypot(x - mx, y - my) <= 28) op = i;
+      if (Math.hypot(x - mx, y - my) <= 28) {
+        openReplace({ kind: 'op', idx: i });
+        return;
+      }
     }
-    // An operator only has one thing to change, so open its radial directly.
-    if (op >= 1) openReplace({ kind: 'op', idx: op });
   };
   const openReplace = (target: Target) => {
     const c = chainRef.current;
@@ -289,6 +291,13 @@ export default function FenceCombine() {
     .onEnd((e) => {
       runOnJS(startAdd)(e.x, e.y);
     });
+  // Single tap only acts on operator points; loses to double-tap.
+  const singleTap = Gesture.Tap()
+    .numberOfTaps(1)
+    .maxDuration(250)
+    .onEnd((e) => {
+      runOnJS(onSingleTap)(e.x, e.y);
+    });
   const longPress = Gesture.LongPress()
     .minDuration(300)
     .onStart((e) => {
@@ -305,7 +314,7 @@ export default function FenceCombine() {
     .onFinalize(() => {
       runOnJS(endDrag)();
     });
-  const gesture = Gesture.Race(doubleTap, dragPan, longPress);
+  const gesture = Gesture.Race(dragPan, longPress, Gesture.Exclusive(doubleTap, singleTap));
 
   const ringItems = radialKind === 'op' ? OPERATORS : TOOLS;
 

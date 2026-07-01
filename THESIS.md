@@ -36,6 +36,26 @@ _Working draft — wording not locked:_
 - **The video is itself a provocation.** Its job is to argue the serious
   instrument is possible and worth wanting — not to be one yet.
 
+## The three levels of solo composition
+
+The problem decomposes into a hierarchy. A composition is made of scenes; a scene
+is made of expressive voices. Each level is a design problem of its own.
+
+1. **Compose a scene** — how a gesture becomes a persistent, looping *body*, and
+   how several bodies come to coexist and be arranged in one living groove.
+   _(the meso unit — the moment)_
+2. **Maximum expressiveness within a scene** — how deeply you can shape a single
+   body after it's alive: pitch, dynamics, timbre, density, articulation. This is
+   the skill ceiling — where "instrument" is won or lost. _(the micro unit)_
+3. **Link scenes into a composition** — how scenes connect into an arc: sequenced,
+   launched, travelled-between, or morphed. Structure without a timeline.
+   _(the macro unit — the arc)_
+
+**Build order (proposed):** get the *atom* right first — one living, expressive
+body you can keep reshaping (1 ∩ 2 at n=1). A scene of dead loops is just a loop
+pile; if one body isn't alive, multiplying them won't save it. Then multiply into
+a scene (1), then link scenes (3).
+
 ## Facets (the corners to sketch — solo composition)
 
 - **Coupling** — sound and image as a single event. _(have several)_

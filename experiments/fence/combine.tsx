@@ -237,7 +237,8 @@ export default function FenceCombine() {
       const my = (c[i - 1].y + c[i].y) / 2;
       if (Math.hypot(x - mx, y - my) <= 28) op = i;
     }
-    if (op >= 1) setSettingsTarget({ kind: 'op', idx: op });
+    // An operator only has one thing to change, so open its radial directly.
+    if (op >= 1) openReplace({ kind: 'op', idx: op });
   };
   const openReplace = (target: Target) => {
     const c = chainRef.current;

@@ -84,7 +84,7 @@ export const experiments: Experiment[] = [
       {
         id: 'disintegrate',
         title: 'Disintegrating Circle',
-        blurb: 'A white disc of particles; hold and they disengage to flutter around your finger, release to reassemble.',
+        blurb: 'A solid white disc; hold and that spot shatters into particles that flutter around your finger, release to reform.',
         load: () => import('./fence/disintegrate'),
       },
     ],

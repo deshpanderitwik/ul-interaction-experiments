@@ -4,6 +4,7 @@ import {
   Canvas,
   Circle,
   Fill,
+  Shader,
   Skia,
   useTexture,
 } from '@shopify/react-native-skia';
@@ -13,11 +14,13 @@ import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useFrameCallback, useSharedValue } from 'react-native-reanimated';
 
-// Fence · Disintegrating Circle — a solid WHITE disc made of many thousands of
-// tiny particles laid out in concentric rings (uniform density + an exact round
-// edge, so at rest it reads as a perfect solid circle). Hold anywhere and the
-// particles whose HOME is near your finger disengage and flutter/orbit around
-// it; release (or move away) and they spring back home, reassembling the circle.
+// Fence · Disintegrating Circle — at rest it's ONE continuous solid disc (a
+// shader, not dots), so the break is a surprise. The particles are invisible
+// until they're excited: holding carves a soft HOLE in the disc where you touch
+// while the particles there materialize and flutter/orbit your finger; release
+// (or move away) and the hole closes as they spring home. The hole and the
+// particle visibility are driven by the SAME excitation field (same R_GRAB, same
+// smoothstep falloff), so they stay in lockstep.
 //
 // Perf: the sim is driven by a hand-rolled transform buffer + an ACTIVE-INDEX
 // LIST, so per-frame work is O(active particles), never O(total). Sleeping
@@ -34,6 +37,35 @@ const STIFF = 120; // spring stiffness toward the target
 const DAMP = 14; // velocity damping (under-critical → lively flutter)
 const MAX_FINGERS = 8;
 const CELL = 45; // spatial-grid cell size (px)
+
+// The resting body: one continuous white disc, with soft holes carved at each
+// active melt center. The hole falloff mirrors the particles' excitation exactly
+// (smoothstep of 1 − d²/R_GRAB²), so the disc's gap tracks where particles left.
+const baseSource = Skia.RuntimeEffect.Make(`
+uniform float2 u_resolution;
+uniform float2 u_center;
+uniform float u_radius;
+uniform float2 u_holePos[${MAX_FINGERS}];
+uniform float u_holeM[${MAX_FINGERS}];
+
+half4 main(float2 fc) {
+  float d = length(fc - u_center);
+  float disc = smoothstep(u_radius, u_radius - 1.5, d);
+  if (disc <= 0.0) { return half4(0.0); }
+  float open = 0.0;
+  for (int i = 0; i < ${MAX_FINGERS}; i++) {
+    float m = u_holeM[i];
+    if (m <= 0.0) { continue; }
+    float2 h = fc - u_holePos[i];
+    float u = 1.0 - dot(h, h) / float(${R_GRAB2});
+    if (u < 0.0) { u = 0.0; }
+    float s = u * u * (3.0 - 2.0 * u);
+    open = max(open, m * s);
+  }
+  float a = disc * (1.0 - open);
+  return half4(a, a, a, a); // premultiplied white
+}
+`)!;
 
 type Sim = {
   count: number;
@@ -64,6 +96,12 @@ type Sim = {
   fx: Float32Array; // finger snapshot (x)
   fy: Float32Array; // finger snapshot (y)
   gwob: Float32Array; // [0] = global orbit-radius wobble (one sin per frame)
+  // disc-hole state (one slot per finger id; persists through release to fade)
+  holeId: Float32Array; // bound finger id, or -1 when free
+  holeX: Float32Array;
+  holeY: Float32Array;
+  holeM: Float32Array; // 0..1 openness (ramps up held, down on release)
+  holeTgt: Float32Array; // per-frame target openness
 };
 
 function buildSim(width: number, height: number, radius: number): Sim {
@@ -158,6 +196,11 @@ function buildSim(width: number, height: number, radius: number): Sim {
     fx: new Float32Array(MAX_FINGERS),
     fy: new Float32Array(MAX_FINGERS),
     gwob: new Float32Array(1).fill(1),
+    holeId: new Float32Array(MAX_FINGERS).fill(-1),
+    holeX: new Float32Array(MAX_FINGERS),
+    holeY: new Float32Array(MAX_FINGERS),
+    holeM: new Float32Array(MAX_FINGERS),
+    holeTgt: new Float32Array(MAX_FINGERS),
   };
 }
 
@@ -184,19 +227,29 @@ export default function FenceDisintegrate() {
   );
 
   // Our own transform buffer (pooled RSXform host objects, mutated in place).
-  // Seed it at the home layout so the solid circle is correct on the very first
-  // frame, before the frame callback runs.
+  // Particles start INVISIBLE (scale 0) — the base disc is the resting body;
+  // particles only appear as they're excited and fly.
   const initialTransforms = useMemo<SkRSXform[]>(() => {
-    const half = S / 2;
-    const b = sim.baseScale;
     const arr = new Array<SkRSXform>(count);
-    for (let i = 0; i < count; i++) {
-      arr[i] = Skia.RSXform(b, 0, sim.hx[i] - half * b, sim.hy[i] - half * b);
-    }
+    for (let i = 0; i < count; i++) arr[i] = Skia.RSXform(0, 0, sim.hx[i], sim.hy[i]);
     return arr;
   }, [sim, count]);
   const transforms = useSharedValue<SkRSXform[]>(initialTransforms);
   if (transforms.value.length !== count) transforms.value = initialTransforms; // resize
+
+  // Uniforms for the base disc (holes update from the frame callback).
+  const baseInit = useMemo(
+    () => ({
+      u_resolution: [width, height],
+      u_center: [width / 2, height / 2],
+      u_radius: radius,
+      u_holePos: new Array(MAX_FINGERS * 2).fill(0),
+      u_holeM: new Array(MAX_FINGERS).fill(0),
+    }),
+    [width, height, radius]
+  );
+  const baseUni = useSharedValue(baseInit);
+  if (baseUni.value.u_radius !== radius) baseUni.value = baseInit; // dimension change
 
   // Live finger positions (UI-thread shared state, keyed by touch id).
   const fingers = useSharedValue<{ id: number; x: number; y: number }[]>([]);
@@ -218,6 +271,45 @@ export default function FenceDisintegrate() {
     for (let k = 0; k < nf; k++) {
       s.fx[k] = F[k].x;
       s.fy[k] = F[k].y;
+    }
+
+    // Disc-hole slots: bind each live finger to a slot (persisting through
+    // release so the hole fades out). Reset targets, then reaffirm live fingers.
+    for (let j = 0; j < MAX_FINGERS; j++) s.holeTgt[j] = 0;
+    for (let k = 0; k < nf; k++) {
+      const id = F[k].id;
+      let slot = -1;
+      for (let j = 0; j < MAX_FINGERS; j++) {
+        if (s.holeId[j] === id) {
+          slot = j;
+          break;
+        }
+      }
+      if (slot < 0) {
+        for (let j = 0; j < MAX_FINGERS; j++) {
+          if (s.holeId[j] < 0) {
+            slot = j;
+            break;
+          }
+        }
+      }
+      if (slot >= 0) {
+        s.holeId[slot] = id;
+        s.holeX[slot] = F[k].x;
+        s.holeY[slot] = F[k].y;
+        s.holeTgt[slot] = 1;
+      }
+    }
+    let anyHole = false;
+    for (let j = 0; j < MAX_FINGERS; j++) {
+      const tgt = s.holeTgt[j];
+      const hrate = tgt > s.holeM[j] ? 11 : 2.4; // open fast, close slow (mirrors ex)
+      s.holeM[j] += (tgt - s.holeM[j]) * Math.min(1, hrate * dt);
+      if (s.holeM[j] < 0.004 && tgt === 0) {
+        s.holeM[j] = 0;
+        s.holeId[j] = -1;
+      }
+      if (s.holeM[j] > 0.001) anyHole = true;
     }
 
     const af = s.af;
@@ -339,13 +431,15 @@ export default function FenceDisintegrate() {
         s.vy[p] = 0;
         s.ex[p] = 0;
         af[p] = 0;
-        T[p].set(base, 0, hx - half * base, hy - half * base);
+        T[p].set(0, 0, hx, hy); // asleep → invisible (the base disc fills here)
       } else {
         s.px[p] = px;
         s.py[p] = py;
         s.vx[p] = vx;
         s.vy[p] = vy;
-        const sc = base * (1 - 0.3 * ex); // shrink while flying → flakes
+        let vis = ex * 4; // fade in with excitation (invisible at rest)
+        if (vis > 1) vis = 1;
+        const sc = base * vis;
         T[p].set(sc, 0, px - half * sc, py - half * sc);
         al[w] = p;
         w++;
@@ -357,6 +451,22 @@ export default function FenceDisintegrate() {
     if (ac > 0) {
       // @ts-ignore reanimated Mutable internal — mirrors Skia's notifyChange()
       transforms._value = T;
+    }
+    // Update the disc's holes whenever any are open (or particles are flying).
+    if (ac > 0 || anyHole) {
+      const hp: number[] = [];
+      const hm: number[] = [];
+      for (let j = 0; j < MAX_FINGERS; j++) {
+        hp.push(s.holeX[j], s.holeY[j]);
+        hm.push(s.holeM[j]);
+      }
+      baseUni.value = {
+        u_resolution: [width, height],
+        u_center: [width / 2, height / 2],
+        u_radius: radius,
+        u_holePos: hp,
+        u_holeM: hm,
+      };
     }
   });
 
@@ -404,6 +514,9 @@ export default function FenceDisintegrate() {
       <View style={styles.fill}>
         <Canvas style={StyleSheet.absoluteFill}>
           <Fill color="#000" />
+          <Fill>
+            <Shader source={baseSource} uniforms={baseUni} />
+          </Fill>
           <Atlas image={spriteImage} sprites={sprites} transforms={transforms} />
         </Canvas>
       </View>

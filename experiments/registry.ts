@@ -44,6 +44,14 @@ export type Experiment = {
 
 export const experiments: Experiment[] = [
   {
+    id: 'bodies',
+    title: 'Bodies',
+    blurb: 'Plant sounding bodies in a scene: double-tap to add, tap to play/pause, drag to arrange, hold to tune. The atom of composition.',
+    accent: '#54f2b0',
+    audio: true,
+    load: () => import('./bodies'),
+  },
+  {
     id: 'fence',
     title: 'Fence',
     blurb: 'A study in shaders — drag to move a glow across a live UV field.',

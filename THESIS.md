@@ -69,6 +69,7 @@ a scene (1), then link scenes (3).
 
 | Experiment | Facet | Reads on camera? |
 |---|---|---|
+| **bodies** | **Compose a scene** (Persistence · Layering · Coherence) | tbd — first cut |
 | duet | Coupling | strong |
 | raindrops | Coupling | strong |
 | notesketch | Coupling (hint of persistence) | ? |

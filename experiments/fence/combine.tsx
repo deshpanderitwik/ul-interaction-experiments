@@ -90,6 +90,7 @@ export default function FenceCombine() {
 
   const nextId = useRef(1);
   const radialRef = useRef({ x: 0, y: 0 });
+  const replaceIdxRef = useRef<number | null>(null); // set → radial replaces this node
   const chainRef = useRef<Node[]>([]);
   chainRef.current = chain;
 
@@ -137,14 +138,30 @@ export default function FenceCombine() {
     setRadialCenter({ x, y });
     setRadialShown(true);
   };
-  const hideRadial = () => setRadialShown(false);
-  // Tap a tool in the (persistent) radial → add it at the radial's center.
+  const dismissRadial = () => {
+    replaceIdxRef.current = null;
+    setRadialShown(false);
+  };
+  // Tap a tool in the (persistent) radial → replace the target node's tool, or
+  // add a new node at the radial's center.
   const pickTool = (tool: number) => {
-    if (chainRef.current.length < MAX) {
+    if (replaceIdxRef.current != null) {
+      const idx = replaceIdxRef.current;
+      setChain((prev) => prev.map((c, i) => (i === idx ? { ...c, tool, param: 0.5 } : c)));
+      replaceIdxRef.current = null;
+    } else if (chainRef.current.length < MAX) {
       const { x, y } = radialRef.current;
       setChain((prev) => [...prev, { id: nextId.current++, tool, param: 0.5, x, y }]);
     }
     setRadialShown(false);
+  };
+  // Swap: reopen the radial over the node so the next pick replaces it.
+  const openReplace = (idx: number) => {
+    const node = chainRef.current[idx];
+    if (!node) return;
+    replaceIdxRef.current = idx;
+    setSettingsIdx(null);
+    showRadial(node.x, node.y);
   };
   // Long-press on a node → open its settings.
   const openNodeSettings = (x: number, y: number) => {
@@ -255,7 +272,7 @@ export default function FenceCombine() {
       {/* radial tool picker: tap a tool to add it, tap outside to dismiss */}
       {radialShown ? (
         <>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setRadialShown(false)} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={dismissRadial} />
           {TOOLS.map((label, i) => {
             const theta = angleFor(i);
             return (
@@ -286,6 +303,7 @@ export default function FenceCombine() {
             index={settingsIdx as number}
             screenW={width}
             onParam={(p) => setParam(settingsIdx as number, p)}
+            onSwap={() => openReplace(settingsIdx as number)}
             onDelete={() => deleteTool(settingsIdx as number)}
           />
         </>
@@ -301,12 +319,14 @@ function Settings({
   index,
   screenW,
   onParam,
+  onSwap,
   onDelete,
 }: {
   node: Node;
   index: number;
   screenW: number;
   onParam: (p: number) => void;
+  onSwap: () => void;
   onDelete: () => void;
 }) {
   const PANEL_W = 232;
@@ -326,9 +346,18 @@ function Settings({
         <Text style={styles.panelTitle}>
           {index + 1}. {TOOLS[node.tool]}
         </Text>
-        <Pressable onPress={onDelete} hitSlop={8} style={styles.del}>
-          <Text style={styles.delText}>Delete</Text>
-        </Pressable>
+        <View style={styles.headBtns}>
+          <Pressable onPress={onSwap} hitSlop={6} style={styles.iconBtn}>
+            <Text style={styles.swapIcon}>⇄</Text>
+          </Pressable>
+          <Pressable onPress={onDelete} hitSlop={6} style={[styles.iconBtn, styles.iconBtnDanger]}>
+            <View style={styles.trash}>
+              <View style={styles.trashHandle} />
+              <View style={styles.trashLid} />
+              <View style={styles.trashBody} />
+            </View>
+          </Pressable>
+        </View>
       </View>
       {hasParam ? (
         <GestureDetector gesture={track}>
@@ -397,13 +426,32 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   panelTitle: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  del: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    backgroundColor: 'rgba(204,59,59,0.9)',
+  headBtns: { flexDirection: 'row', gap: 8 },
+  iconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
-  delText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  iconBtnDanger: { backgroundColor: 'rgba(204,59,59,0.9)', borderColor: 'transparent' },
+  swapIcon: { color: '#fff', fontSize: 18, fontWeight: '600', marginTop: -1 },
+  trash: { alignItems: 'center' },
+  trashHandle: { width: 6, height: 1.5, borderRadius: 1, backgroundColor: '#fff', marginBottom: 1 },
+  trashLid: { width: 14, height: 2, borderRadius: 1, backgroundColor: '#fff' },
+  trashBody: {
+    width: 10,
+    height: 9,
+    marginTop: 1.5,
+    borderWidth: 1.5,
+    borderTopWidth: 0,
+    borderColor: '#fff',
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 2,
+  },
   trackWrap: { height: 24, justifyContent: 'center' },
   track: { height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.18)' },
   trackFill: {

@@ -230,18 +230,6 @@ export default function FenceCombine() {
     });
     if (node >= 0) setSettingsTarget({ kind: 'node', idx: node });
   };
-  // Single-tap an operator point → open its radial directly.
-  const onSingleTap = (x: number, y: number) => {
-    const c = chainRef.current;
-    for (let i = 1; i < c.length; i++) {
-      const mx = (c[i - 1].x + c[i].x) / 2;
-      const my = (c[i - 1].y + c[i].y) / 2;
-      if (Math.hypot(x - mx, y - my) <= 28) {
-        openReplace({ kind: 'op', idx: i });
-        return;
-      }
-    }
-  };
   const openReplace = (target: Target) => {
     const c = chainRef.current;
     replaceRef.current = target;
@@ -291,13 +279,6 @@ export default function FenceCombine() {
     .onEnd((e) => {
       runOnJS(startAdd)(e.x, e.y);
     });
-  // Single tap only acts on operator points; loses to double-tap.
-  const singleTap = Gesture.Tap()
-    .numberOfTaps(1)
-    .maxDuration(250)
-    .onEnd((e) => {
-      runOnJS(onSingleTap)(e.x, e.y);
-    });
   const longPress = Gesture.LongPress()
     .minDuration(300)
     .onStart((e) => {
@@ -314,7 +295,7 @@ export default function FenceCombine() {
     .onFinalize(() => {
       runOnJS(endDrag)();
     });
-  const gesture = Gesture.Race(dragPan, longPress, Gesture.Exclusive(doubleTap, singleTap));
+  const gesture = Gesture.Race(dragPan, longPress, doubleTap);
 
   const ringItems = radialKind === 'op' ? OPERATORS : TOOLS;
 
@@ -355,12 +336,13 @@ export default function FenceCombine() {
             </Canvas>
           ) : null}
 
-          {/* operator points (between nodes) */}
+          {/* operator points (between nodes) — tap one to open its radial */}
           {chain.map((c, i) =>
             i === 0 ? null : (
-              <View
+              <Pressable
                 key={`op-${c.id}`}
-                pointerEvents="none"
+                hitSlop={10}
+                onPress={() => openReplace({ kind: 'op', idx: i })}
                 style={[
                   styles.op,
                   { left: opPos(i).x - 15, top: opPos(i).y - 15 },
@@ -368,7 +350,7 @@ export default function FenceCombine() {
                 ]}
               >
                 <Text style={styles.opText}>{OP_SHORT[c.op]}</Text>
-              </View>
+              </Pressable>
             )
           )}
 

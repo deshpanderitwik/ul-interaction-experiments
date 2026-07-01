@@ -106,16 +106,8 @@ half4 main(float2 fragcoord) {
   float pinkLit = pow(max(dot(n, Hp), 0.0), 5.0);
   col += half3(1.0, 0.34, 0.44) * pinkLit * 0.62;
 
-  // Adaptive ring contrast: over DARK background the ring lightens; over BRIGHT
-  // background it DARKENS instead — so wherever a ripple crosses a bright glint,
-  // that part goes dark and stays legible. Driven by local background luminance.
-  float lum = dot(col, half3(0.299, 0.587, 0.114));
-  float darkenMix = smoothstep(0.35, 0.62, lum); // 0 = dark bg → lighten, 1 = bright bg → darken
-  // Over bright background, dim the LOCAL color a little (a soft shadow, hue kept)
-  // instead of crushing to black.
-  half3 ringTarget = mix(half3(0.6, 0.78, 1.0), col * 0.6, darkenMix);
-  float rl = min(1.0, ringLight * 0.85);
-  col = mix(col, ringTarget, rl);
+  // Raindrop ring highlight on the surface (always lightens).
+  col += half3(0.55, 0.75, 1.0) * ringLight * 0.22;
 
   float dither = fract(sin(dot(fragcoord, float2(12.9898, 78.233))) * 43758.5453);
   col += half3((dither - 0.5) / 255.0);

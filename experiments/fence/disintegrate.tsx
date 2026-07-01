@@ -15,12 +15,12 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useFrameCallback, useSharedValue } from 'react-native-reanimated';
 
 // Fence · Disintegrating Circle — at rest it's ONE continuous solid disc (a
-// shader, not dots), so the break is a surprise. The particles are invisible
-// until they're excited: holding carves a soft HOLE in the disc where you touch
-// while the particles there materialize and flutter/orbit your finger; release
-// (or move away) and the hole closes as they spring home. The hole and the
-// particle visibility are driven by the SAME excitation field (same R_GRAB, same
-// smoothstep falloff), so they stay in lockstep.
+// shader, not dots), so the break is a surprise. Holding doesn't cut a hole: the
+// disc DISINTEGRATES grain by grain. At each point the local excitation is
+// thresholded against static value-noise, so the solid erodes with a crumbling
+// edge; each particle carries its own matching threshold, so the grains that
+// lift off are exactly the material the disc is losing. Loosed grains disperse
+// in place from their home (floating dust), then reassemble when you release.
 //
 // Perf: the sim is driven by a hand-rolled transform buffer + an ACTIVE-INDEX
 // LIST, so per-frame work is O(active particles), never O(total). Sleeping
@@ -38,9 +38,12 @@ const DAMP = 14; // velocity damping (under-critical → lively flutter)
 const MAX_FINGERS = 8;
 const CELL = 45; // spatial-grid cell size (px)
 
-// The resting body: one continuous white disc, with soft holes carved at each
-// active melt center. The hole falloff mirrors the particles' excitation exactly
-// (smoothstep of 1 − d²/R_GRAB²), so the disc's gap tracks where particles left.
+// The resting body: one continuous white disc. Under a finger it doesn't take a
+// clean bite — it DISSOLVES grain by grain: at each pixel the local excitation
+// is compared against a static value-noise threshold, so the material erodes
+// with a crumbling edge exactly like it's disintegrating. The particles use the
+// same excitation with per-grain thresholds, so the bits that lift off are the
+// bits the disc is losing.
 const baseSource = Skia.RuntimeEffect.Make(`
 uniform float2 u_resolution;
 uniform float2 u_center;
@@ -48,11 +51,28 @@ uniform float u_radius;
 uniform float2 u_holePos[${MAX_FINGERS}];
 uniform float u_holeM[${MAX_FINGERS}];
 
+float hash21(float2 p) {
+  p = fract(p * float2(123.34, 345.45));
+  p += dot(p, p + 34.345);
+  return fract(p.x * p.y);
+}
+float vnoise(float2 p) {
+  float2 i = floor(p);
+  float2 f = fract(p);
+  float2 u = f * f * (3.0 - 2.0 * f);
+  float a = hash21(i);
+  float b = hash21(i + float2(1.0, 0.0));
+  float c = hash21(i + float2(0.0, 1.0));
+  float d = hash21(i + float2(1.0, 1.0));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
 half4 main(float2 fc) {
-  float d = length(fc - u_center);
-  float disc = smoothstep(u_radius, u_radius - 1.5, d);
+  float dd = length(fc - u_center);
+  float disc = smoothstep(u_radius, u_radius - 1.5, dd);
   if (disc <= 0.0) { return half4(0.0); }
-  float open = 0.0;
+  // Aggregate excitation at this pixel (max over the melt centers).
+  float exc = 0.0;
   for (int i = 0; i < ${MAX_FINGERS}; i++) {
     float m = u_holeM[i];
     if (m <= 0.0) { continue; }
@@ -60,9 +80,13 @@ half4 main(float2 fc) {
     float u = 1.0 - dot(h, h) / float(${R_GRAB2});
     if (u < 0.0) { u = 0.0; }
     float s = u * u * (3.0 - 2.0 * u);
-    open = max(open, m * s);
+    exc = max(exc, m * s);
   }
-  float a = disc * (1.0 - open);
+  // Grainy erosion: this grain is gone once excitation passes its noise
+  // threshold. Solid everywhere at rest (exc = 0 → dissolved = 0).
+  float n = vnoise(fc * 0.28);
+  float dissolved = smoothstep(n, n + 0.18, exc);
+  float a = disc * (1.0 - dissolved);
   return half4(a, a, a, a); // premultiplied white
 }
 `)!;
@@ -76,10 +100,10 @@ type Sim = {
   py: Float32Array;
   vx: Float32Array; // velocities
   vy: Float32Array;
-  ex: Float32Array; // excitation 0..1 (0 = home, 1 = orbiting finger)
-  sw: Float32Array; // angular speed (orbit spin rate + direction)
-  sr: Float32Array; // orbit radius
-  ocx: Float32Array; // orbit direction vector, rotated incrementally (no trig)
+  ex: Float32Array; // excitation 0..1 (0 = home, 1 = fully melted here)
+  thr: Float32Array; // per-grain release threshold (grainy disintegration)
+  sw: Float32Array; // drift spin rate + direction
+  ocx: Float32Array; // scatter offset vector (home → dispersed spot), drifts
   ocy: Float32Array;
   // active-index list (compacted each frame) + membership flags
   al: Int32Array;
@@ -126,16 +150,17 @@ function buildSim(width: number, height: number, radius: number): Sim {
   const count = hxA.length;
   const hx = Float32Array.from(hxA);
   const hy = Float32Array.from(hyA);
+  const thr = new Float32Array(count);
   const sw = new Float32Array(count);
-  const sr = new Float32Array(count);
   const ocx = new Float32Array(count);
   const ocy = new Float32Array(count);
   for (let i = 0; i < count; i++) {
     const a = Math.random() * Math.PI * 2;
-    sw[i] = (Math.random() * 2 - 1) * 2.0; // spin direction + speed
-    sr[i] = 22 + Math.random() * 48; // orbit radius (kept < R_GRAB → tidy)
-    ocx[i] = Math.cos(a);
-    ocy[i] = Math.sin(a);
+    const mag = 12 + Math.random() * 34; // how far this grain drifts once loose
+    thr[i] = Math.random(); // grain releases when local excitation exceeds this
+    sw[i] = (Math.random() * 2 - 1) * 0.9; // slow drift of the scatter direction
+    ocx[i] = Math.cos(a) * mag;
+    ocy[i] = Math.sin(a) * mag;
   }
 
   // Static spatial grid over home positions (counting sort → CSR).
@@ -180,8 +205,8 @@ function buildSim(width: number, height: number, radius: number): Sim {
     vx: new Float32Array(count),
     vy: new Float32Array(count),
     ex: new Float32Array(count),
+    thr,
     sw,
-    sr,
     ocx,
     ocy,
     al,
@@ -366,19 +391,13 @@ export default function FenceDisintegrate() {
       const hx = s.hx[p];
       const hy = s.hy[p];
 
-      // Excitation from HOME→finger distance (so orbits don't de-excite).
+      // Excitation from HOME→finger distance (melt strength at this grain).
       let bestD2 = 1e18;
-      let fgx = 0;
-      let fgy = 0;
       for (let k = 0; k < nf; k++) {
         const ddx = hx - s.fx[k];
         const ddy = hy - s.fy[k];
         const d2 = ddx * ddx + ddy * ddy;
-        if (d2 < bestD2) {
-          bestD2 = d2;
-          fgx = s.fx[k];
-          fgy = s.fy[k];
-        }
+        if (d2 < bestD2) bestD2 = d2;
       }
       const nearHome = nf > 0 && bestD2 < R_GRAB2;
       let exT = 0;
@@ -388,16 +407,24 @@ export default function FenceDisintegrate() {
         exT = u * u * (3 - 2 * u);
       }
       let ex = s.ex[p];
-      const rate = exT > ex ? 11 : 2.4; // grab fast, release slow
+      const rate = exT > ex ? 11 : 2.4; // melt fast, reform slow
       ex += (exT - ex) * Math.min(1, rate * dt);
       s.ex[p] = ex;
+
+      // Grain release: this grain only detaches once excitation passes its own
+      // threshold (smoothstep(thr, thr+0.18, ex)) — grainy, matching the disc.
+      let rr = (ex - s.thr[p]) / 0.18;
+      if (rr < 0) rr = 0;
+      else if (rr > 1) rr = 1;
+      rr = rr * rr * (3 - 2 * rr);
 
       let px = s.px[p];
       let py = s.py[p];
       let dx = hx;
       let dy = hy;
-      if (ex > 0.001 && nf > 0) {
-        // Advance orbit direction by θ = sw·dt via small-angle rotation (no trig).
+      if (rr > 0.001) {
+        // Drift the scatter offset (slow rotation, no trig) and disperse the
+        // grain from its HOME by that offset — the material breaks up in place.
         let ocx = s.ocx[p];
         let ocy = s.ocy[p];
         const th = s.sw[p] * dt;
@@ -408,9 +435,8 @@ export default function FenceDisintegrate() {
         ocy = ny;
         s.ocx[p] = ocx;
         s.ocy[p] = ocy;
-        const orr = s.sr[p] * gwob;
-        dx = hx + (fgx + ocx * orr - hx) * ex;
-        dy = hy + (fgy + ocy * orr - hy) * ex;
+        dx = hx + ocx * gwob * rr;
+        dy = hy + ocy * gwob * rr;
       }
 
       // Spring-damper integration.
@@ -437,9 +463,7 @@ export default function FenceDisintegrate() {
         s.py[p] = py;
         s.vx[p] = vx;
         s.vy[p] = vy;
-        let vis = ex * 4; // fade in with excitation (invisible at rest)
-        if (vis > 1) vis = 1;
-        const sc = base * vis;
+        const sc = base * rr; // visible only once released (grainy)
         T[p].set(sc, 0, px - half * sc, py - half * sc);
         al[w] = p;
         w++;

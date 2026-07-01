@@ -161,6 +161,27 @@ export default function FenceCombine() {
     setSettingsIdx(null);
   };
 
+  // ---- drag a node to reposition it ----
+  const draggingRef = useRef<{ idx: number; dx: number; dy: number } | null>(null);
+  const startDrag = (x: number, y: number) => {
+    let hit = -1;
+    chainRef.current.forEach((c, i) => {
+      if (Math.hypot(x - c.x, y - c.y) <= 44) hit = i;
+    });
+    draggingRef.current =
+      hit >= 0 ? { idx: hit, dx: x - chainRef.current[hit].x, dy: y - chainRef.current[hit].y } : null;
+  };
+  const dragMove = (x: number, y: number) => {
+    const d = draggingRef.current;
+    if (!d) return;
+    const nx = Math.max(30, Math.min(width - 30, x - d.dx));
+    const ny = Math.max(44, Math.min(height - 44, y - d.dy));
+    setChain((prev) => prev.map((c, i) => (i === d.idx ? { ...c, x: nx, y: ny } : c)));
+  };
+  const endDrag = () => {
+    draggingRef.current = null;
+  };
+
   // ---- gestures ----
   // Press & hold opens the radial; releasing closes it. A plain tap never
   // activates the long press, so it does nothing. Drag-to-select uses raw touch
@@ -215,7 +236,21 @@ export default function FenceCombine() {
       runOnJS(onDoubleTap)(e.x, e.y);
     });
 
-  const gesture = Gesture.Exclusive(doubleTap, longPress);
+  // Drag a node: grabs whichever node the touch started on, then follows.
+  const dragPan = Gesture.Pan()
+    .minDistance(6)
+    .onBegin((e) => {
+      runOnJS(startDrag)(e.x, e.y);
+    })
+    .onUpdate((e) => {
+      runOnJS(dragMove)(e.x, e.y);
+    })
+    .onFinalize(() => {
+      runOnJS(endDrag)();
+    });
+
+  // Movement (a node drag) beats the still-hold radial; a double-tap beats both.
+  const gesture = Gesture.Race(doubleTap, dragPan, longPress);
 
   const editing = settingsIdx != null ? chain[settingsIdx] : null;
 

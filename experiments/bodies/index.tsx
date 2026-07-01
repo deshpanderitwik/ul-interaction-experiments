@@ -1,6 +1,6 @@
-import { Blur, Canvas, Circle, Group } from '@shopify/react-native-skia';
+import { Blur, Canvas, Circle, Fill, Group, Shader, Skia, useClock } from '@shopify/react-native-skia';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import {
   Easing,
@@ -20,7 +20,6 @@ import {
   HIT_R,
   MAX_BODIES,
   SUBDIVISIONS,
-  bodyColor,
   nearestIndex,
   periodMs,
   scaleMidiLadder,
@@ -28,26 +27,83 @@ import {
 } from './shared';
 import { playSine } from './voice';
 
-// Bodies — the first "compose a scene" atom (see THESIS.md).
+// Bodies — the "compose a scene" atom (see THESIS.md), stark monochrome cut.
 //   double-tap  → plant a body at that point (starts playing, on the scale)
 //   single-tap  → play / pause that body
 //   long-press  → open its properties (subdivision, note, delete)
 //   drag        → move it around the scene
-// Each playing body plucks a sine on its subdivision, pulsing and shedding a
-// ripple on every note. Audio is scheduled off per-body setInterval timers,
-// reconciled from state; visuals are driven by per-body shared values so note
-// firing never re-renders React.
+// Bodies are plain white circles. Each time a playing body plucks its sine it
+// sheds a ripple — the same domain-warped ring shader as Fence · Raindrops, but
+// monochrome (white rings on black) and emanating from the body's position.
 
 // The note picker (and new-body defaults) span this range of the shared scale.
-const LADDER_MIN = 48; // C3
-const LADDER_MAX = 72; // C5
+const LADDER_MIN = 36; // C2
+const LADDER_MAX = 60; // C4
 
-type Fx = { pulse: SharedValue<number>; ripple: SharedValue<number> };
+const PULSES = 24; // max concurrent ripples across the whole scene
+const LIFE = 1.6; // ripple lifetime, seconds
+
+// Monochrome raindrop ripple: for each pulse, an organically-wobbled expanding
+// ring of white light on black. Lifted from Fence · Raindrops' ring math with
+// the ocean substrate removed.
+const source = Skia.RuntimeEffect.Make(`
+uniform float2 u_resolution;
+uniform float u_time;
+uniform float2 u_pulses[${PULSES}];
+uniform float u_pulseTimes[${PULSES}];
+uniform float u_pulseSeed[${PULSES}];
+
+// domain-warp field, same trick as Waves/Raindrops — gives the rings an organic,
+// non-perfect-circle wobble.
+float2 flow(float2 p, float time) {
+  return float2(
+    0.7 * sin(p.y * 1.5 + time * 0.35) + 0.22 * sin(p.y * 3.0 - time * 0.5),
+    0.7 * sin(p.x * 1.3 + time * 0.3) + 0.22 * sin(p.x * 2.6 + time * 0.45)
+  );
+}
+
+half4 main(float2 fragcoord) {
+  float light = 0.0;
+  for (int i = 0; i < ${PULSES}; i++) {
+    float age = u_time - u_pulseTimes[i];
+    if (age < 0.0 || age > ${LIFE}) { continue; }
+    float seed = u_pulseSeed[i];
+    float2 d = fragcoord - u_pulses[i];
+    float len = length(d);
+
+    // organic radius perturbation
+    float bump = flow(d * 0.012 + float2(seed * 21.0, seed * 13.0), u_time * 0.15).x;
+    float dist = len * (1.0 + 0.06 * bump);
+
+    // expanding wavefront + a short train of concentric sub-rings inside it
+    float speed = 200.0 + seed * 70.0;
+    float width = 22.0 + seed * 8.0;
+    float r = age * speed;
+    float band = (dist - r) / width;
+    float env = exp(-band * band);
+    float decay = max(0.0, 1.0 - age / ${LIFE});
+    float rings = 0.72 + 0.34 * sin(band * 6.0);
+    light += env * decay * rings;
+  }
+
+  light = clamp(light, 0.0, 1.0);
+  half3 col = half3(light);
+  // subtle dither to keep the soft rings from banding
+  float dither = fract(sin(dot(fragcoord, float2(12.9898, 78.233))) * 43758.5453);
+  col += half3((dither - 0.5) / 255.0);
+  return half4(col, 1.0);
+}
+`)!;
+
+type Fx = { pulse: SharedValue<number> };
+type Pulse = { x: number; y: number; t: number; seed: number };
 
 export default function Bodies() {
   const live = useExperimentActive();
   const scale = useScale();
   const tempo = useTempo();
+  const { width, height } = useWindowDimensions();
+  const clock = useClock();
 
   const ladder = useMemo(() => scaleMidiLadder(scale, LADDER_MIN, LADDER_MAX), [scale]);
   const ladderRef = useRef(ladder);
@@ -63,7 +119,10 @@ export default function Bodies() {
   const idRef = useRef(0);
   const draggingRef = useRef<number | null>(null);
 
-  // Per-body visual channels, registered by each BodyView on mount.
+  // Ring buffer of recent note-fires, fed to the ripple shader as uniforms.
+  const pulses = useSharedValue<Pulse[]>([]);
+
+  // Per-body pop channel, registered by each BodyView on mount.
   const fxRef = useRef<Map<number, Fx>>(new Map());
   const registerFx = useCallback((id: number, fx: Fx) => {
     fxRef.current.set(id, fx);
@@ -78,19 +137,24 @@ export default function Bodies() {
     new Map()
   );
 
-  // Fire a body: sound + kick its pulse/ripple channels.
-  const fire = useCallback((b: Body) => {
-    playSine(midiToFreq(b.midi));
-    const fx = fxRef.current.get(b.id);
-    if (!fx) return;
-    fx.pulse.value = 0;
-    fx.pulse.value = withSequence(
-      withTiming(1, { duration: 70, easing: Easing.out(Easing.quad) }),
-      withTiming(0, { duration: 320, easing: Easing.out(Easing.quad) })
-    );
-    fx.ripple.value = 0;
-    fx.ripple.value = withTiming(1, { duration: 900, easing: Easing.out(Easing.cubic) });
-  }, []);
+  // Fire a body: sound, pop the body, and shed a ripple from its position.
+  const fire = useCallback(
+    (b: Body) => {
+      playSine(midiToFreq(b.midi));
+      const fx = fxRef.current.get(b.id);
+      if (fx) {
+        fx.pulse.value = 0;
+        fx.pulse.value = withSequence(
+          withTiming(1, { duration: 70, easing: Easing.out(Easing.quad) }),
+          withTiming(0, { duration: 320, easing: Easing.out(Easing.quad) })
+        );
+      }
+      const list = pulses.value.slice(-(PULSES - 1));
+      list.push({ x: b.x, y: b.y, t: clock.value / 1000, seed: Math.random() });
+      pulses.value = list;
+    },
+    [pulses, clock]
+  );
 
   // Reconcile timers to the current scene: (re)start a body's interval when its
   // subdivision or the tempo changes, and clear timers for paused/removed bodies.
@@ -147,7 +211,7 @@ export default function Bodies() {
     setBodies((prev) => {
       if (prev.length >= MAX_BODIES) return prev;
       const l = ladderRef.current;
-      const midi = l.length ? l[prev.length % l.length] : 60;
+      const midi = l.length ? l[prev.length % l.length] : 48;
       return [...prev, { id: idRef.current++, x, y, midi, subdivision: 4, playing: true }];
     });
   };
@@ -214,11 +278,40 @@ export default function Bodies() {
     setEditing(null);
   };
 
+  const uniforms = useDerivedValue(() => {
+    const pos: number[] = [];
+    const times: number[] = [];
+    const seeds: number[] = [];
+    const ps = pulses.value;
+    for (let i = 0; i < PULSES; i++) {
+      const p = ps[i];
+      if (p) {
+        pos.push(p.x, p.y);
+        times.push(p.t);
+        seeds.push(p.seed);
+      } else {
+        pos.push(0, 0);
+        times.push(-100);
+        seeds.push(0);
+      }
+    }
+    return {
+      u_resolution: [width, height],
+      u_time: clock.value / 1000,
+      u_pulses: pos,
+      u_pulseTimes: times,
+      u_pulseSeed: seeds,
+    };
+  });
+
   return (
     <View style={styles.fill}>
       <GestureDetector gesture={gesture}>
         <View style={styles.fill}>
           <Canvas style={StyleSheet.absoluteFill}>
+            <Fill>
+              <Shader source={source} uniforms={uniforms} />
+            </Fill>
             {bodies.map((b) => (
               <BodyView key={b.id} body={b} register={registerFx} unregister={unregisterFx} />
             ))}
@@ -249,9 +342,9 @@ export default function Bodies() {
   );
 }
 
-// A single body: a blooming core that brightens when playing and pops on each
-// note, a ring outline, and an expanding ripple shed on every pluck. All motion
-// rides shared values kicked from the audio tick, so notes don't re-render React.
+// A single body: a plain white circle — solid when playing, a hollow ring when
+// paused — with a soft bloom and a scale pop kicked on each note. The ripple it
+// sheds lives in the full-screen shader, not here.
 function BodyView({
   body,
   register,
@@ -261,48 +354,31 @@ function BodyView({
   register: (id: number, fx: Fx) => void;
   unregister: (id: number) => void;
 }) {
-  const pulse = useSharedValue(0); // 0→1→0 per note
-  const ripple = useSharedValue(1); // 0→1 per note; rests at 1 (done, invisible)
+  const pulse = useSharedValue(0);
 
   useEffect(() => {
-    register(body.id, { pulse, ripple });
+    register(body.id, { pulse });
     return () => unregister(body.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [body.id]);
 
-  const color = bodyColor(body.midi);
-
-  const transform = useDerivedValue(() => [{ scale: 1 + 0.12 * pulse.value }]);
-  const coreOpacity = useDerivedValue(
-    () => (body.playing ? 0.42 : 0.13) + 0.5 * pulse.value,
+  const transform = useDerivedValue(() => [{ scale: 1 + 0.14 * pulse.value }]);
+  const glowOpacity = useDerivedValue(
+    () => (body.playing ? 0.2 : 0.0) + 0.45 * pulse.value,
     [body.playing]
   );
-  const ringR = useDerivedValue(() => BODY_R * (1 + ripple.value * 2.2));
-  const ringOpacity = useDerivedValue(() => {
-    const p = ripple.value;
-    return (1 - p) * (1 - p) * 0.55;
-  });
 
   return (
     <Group transform={transform} origin={{ x: body.x, y: body.y }}>
-      {/* ripple ring shed on each note */}
-      <Circle cx={body.x} cy={body.y} r={ringR} style="stroke" strokeWidth={2.5} color={color} opacity={ringOpacity}>
-        <Blur blur={5} />
+      {/* soft bloom */}
+      <Circle cx={body.x} cy={body.y} r={BODY_R * 1.1} color="white" opacity={glowOpacity}>
+        <Blur blur={BODY_R * 0.5} />
       </Circle>
-      {/* blooming core */}
-      <Circle cx={body.x} cy={body.y} r={BODY_R * 0.8} color={color} opacity={coreOpacity}>
-        <Blur blur={BODY_R * 0.34} />
-      </Circle>
-      {/* ring outline — solid when playing, faint when paused */}
-      <Circle
-        cx={body.x}
-        cy={body.y}
-        r={BODY_R}
-        style="stroke"
-        strokeWidth={2}
-        color={color}
-        opacity={body.playing ? 0.85 : 0.3}
-      />
+      {body.playing ? (
+        <Circle cx={body.x} cy={body.y} r={BODY_R} color="white" />
+      ) : (
+        <Circle cx={body.x} cy={body.y} r={BODY_R} style="stroke" strokeWidth={2} color="white" opacity={0.5} />
+      )}
     </Group>
   );
 }
@@ -323,14 +399,13 @@ function PropertiesPanel({
   onDelete: () => void;
   onClose: () => void;
 }) {
-  const color = bodyColor(body.midi);
   const idx = nearestIndex(ladder, body.midi);
 
   return (
     <View style={StyleSheet.absoluteFill}>
       <Pressable style={styles.backdrop} onPress={onClose} />
       <View style={styles.panel} pointerEvents="box-none">
-        <Text style={[styles.panelTitle, { color }]}>{noteName(body.midi)}</Text>
+        <Text style={styles.panelTitle}>{noteName(body.midi)}</Text>
 
         <Text style={styles.panelLabel}>subdivision</Text>
         <View style={styles.row}>
@@ -343,7 +418,7 @@ function PropertiesPanel({
                 style={[
                   styles.subBtn,
                   on
-                    ? { backgroundColor: color, borderColor: color }
+                    ? { backgroundColor: '#fff', borderColor: '#fff' }
                     : { borderColor: 'rgba(255,255,255,0.28)' },
                 ]}
               >
@@ -361,7 +436,7 @@ function PropertiesPanel({
             maximumValue={Math.max(0, ladder.length - 1)}
             step={1}
             onValueChange={(v) => onMidi(ladder[Math.round(v)] ?? body.midi)}
-            fillColor={color}
+            fillColor="#ffffff"
             thumbColor="#ffffff"
           />
         </View>
@@ -399,7 +474,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.14)',
   },
-  panelTitle: { fontSize: 20, fontWeight: '700', letterSpacing: 0.5, marginBottom: 16 },
+  panelTitle: { color: '#fff', fontSize: 20, fontWeight: '700', letterSpacing: 0.5, marginBottom: 16 },
   panelLabel: {
     color: 'rgba(255,255,255,0.5)',
     fontSize: 12,

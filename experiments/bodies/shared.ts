@@ -64,14 +64,3 @@ export function nearestIndex(ladder: number[], midi: number): number {
   }
   return best;
 }
-
-// Pitch-class → color, so a scene reads as a little constellation of hues and you
-// can tell voices apart at a glance. Twelve hand-picked stops around the wheel.
-const PITCH_COLORS = [
-  '#ff6b6b', '#ff8e5e', '#ffb454', '#ffd24a', '#c8e14a', '#7ae06b',
-  '#54f2b0', '#4fe0e0', '#54b4ff', '#7a8cff', '#b47aff', '#ff6bd0',
-];
-
-export function bodyColor(midi: number): string {
-  return PITCH_COLORS[(((midi % 12) + 12) % 12)];
-}

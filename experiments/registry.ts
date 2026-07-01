@@ -75,6 +75,12 @@ export const experiments: Experiment[] = [
         blurb: 'Shaping functions: the screen tints by f(x) with its curve plotted; chips swap the tool.',
         load: () => import('./fence/toolbox'),
       },
+      {
+        id: 'combine',
+        title: 'Rung 2 · Combine',
+        blurb: 'Chain shaping functions: hold to add a tool from a radial; double-tap to tune or delete.',
+        load: () => import('./fence/combine'),
+      },
     ],
   },
   {

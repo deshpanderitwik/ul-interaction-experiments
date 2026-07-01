@@ -5,17 +5,21 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS, useDerivedValue, useSharedValue } from 'react-native-reanimated';
 
 // Fence · Rung 2 — Combine.
-// A modular synth for shaping functions. Press & hold anywhere to open a radial
-// of tools; release on one to drop it into the chain at that spot. Tools are
-// CHAINED in add-order (each feeds the next), and lines are drawn between the
-// chips to show the order. Double-tap a chip to open its settings (a parameter
-// slider + Delete). The combined result is the live shader in the background.
+// A modular synth for shaping functions. Double-tap opens a radial of tools;
+// tap one to drop it into the chain. Between consecutive nodes sits an OPERATOR
+// (a small point on the line) that decides how the next node joins: Chain (the
+// default — compose, feeding the running value into the next tool) or an
+// arithmetic merge (Add/Mult/Min/Max/Mix, which branch the next tool off the
+// original x and combine). Long-press a node OR an operator to open it; swap to
+// change its type; nodes can also be deleted and tuned. Drag nodes to arrange.
 const TOOLS = ['Linear', 'Step', 'Smooth', 'Fract', 'Sin', 'Pow', 'Abs'];
+const OPERATORS = ['Chain', 'Add', 'Mult', 'Min', 'Max', 'Mix'];
+const OP_SHORT = ['∘', '+', '×', 'mn', 'mx', '~'];
 const MAX = 8;
 const RADIAL_R = 96;
 
-function angleFor(i: number): number {
-  return -Math.PI / 2 + (i * 2 * Math.PI) / TOOLS.length;
+function angleFor(i: number, count: number): number {
+  return -Math.PI / 2 + (i * 2 * Math.PI) / count;
 }
 
 const source = Skia.RuntimeEffect.Make(`
@@ -24,7 +28,8 @@ uniform float u_time;
 uniform float u_count;
 uniform float u_tools[${MAX}];
 uniform float u_params[${MAX}];
-uniform float u_mode;   // 0 = field, 1 = sphere
+uniform float u_ops[${MAX}];   // op joining node i to the running value (i>=1)
+uniform float u_mode;          // 0 = field, 1 = sphere
 
 float applyTool(float x, float tool, float p, float time) {
   if (tool < 0.5) {
@@ -46,17 +51,31 @@ float applyTool(float x, float tool, float p, float time) {
   }
 }
 
-// Run x through the whole tool chain, in order.
+// Run x through the chain. The first node composes on x; each later node joins
+// the running value via its operator.
 float chainValue(float x) {
   float v = x;
   for (int i = 0; i < ${MAX}; i++) {
     if (float(i) >= u_count) { break; }
-    v = applyTool(v, u_tools[i], u_params[i], u_time);
+    if (i == 0) {
+      v = applyTool(v, u_tools[i], u_params[i], u_time);
+    } else {
+      float op = u_ops[i];
+      if (op < 0.5) {
+        v = applyTool(v, u_tools[i], u_params[i], u_time); // chain (compose)
+      } else {
+        float b = applyTool(x, u_tools[i], u_params[i], u_time); // branch off x
+        if (op < 1.5) { v = clamp(v + b, 0.0, 1.0); }  // add
+        else if (op < 2.5) { v = v * b; }               // mult
+        else if (op < 3.5) { v = min(v, b); }           // min
+        else if (op < 4.5) { v = max(v, b); }           // max
+        else { v = mix(v, b, 0.5); }                    // mix
+      }
+    }
   }
   return clamp(v, 0.0, 1.0);
 }
 
-// Mode 0: full-screen field tinted by f(x) with the plotted curve + axes.
 half3 shadeField(float2 fc) {
   float2 uv = fc / u_resolution;
   float y = 1.0 - uv.y;
@@ -69,14 +88,13 @@ half3 shadeField(float2 fc) {
   return col;
 }
 
-// Mode 1: the same chain drives a gradient painted across a shaded sphere.
 half3 shadeSphere(float2 fc) {
   float2 uv = (fc - 0.5 * u_resolution) / u_resolution.y;
   float r = length(uv);
   float radius = 0.34;
   float mask = smoothstep(radius, radius - 0.006, r);
   float sph = sqrt(max(0.0, 1.0 - (r / radius) * (r / radius)));
-  float sx = clamp(uv.x / radius * 0.5 + 0.5, 0.0, 1.0); // horizontal coord across the ball
+  float sx = clamp(uv.x / radius * 0.5 + 0.5, 0.0, 1.0);
   float fx = chainValue(sx);
   half3 grad = mix(half3(0.04, 0.06, 0.11), half3(0.30, 0.66, 0.92), fx) * (0.55 + 0.45 * sph);
   return mix(half3(0.02, 0.03, 0.05), grad, mask);
@@ -88,7 +106,6 @@ half3 shadeAt(float2 fc) {
 }
 
 half4 main(float2 fragcoord) {
-  // 4x rotated-grid supersampling to anti-alias bunched bands / steep curves.
   half3 c = shadeAt(fragcoord + float2(0.125, 0.375));
   c += shadeAt(fragcoord + float2(0.375, -0.125));
   c += shadeAt(fragcoord + float2(-0.125, -0.375));
@@ -97,17 +114,19 @@ half4 main(float2 fragcoord) {
 }
 `)!;
 
-type Node = { id: number; tool: number; param: number; x: number; y: number };
+type Node = { id: number; tool: number; param: number; x: number; y: number; op: number };
+type Target = { kind: 'node' | 'op'; idx: number };
 
 export default function FenceCombine() {
   const { width, height } = useWindowDimensions();
   const clock = useClock();
 
   const [chain, setChain] = useState<Node[]>([]);
-  const [settingsIdx, setSettingsIdx] = useState<number | null>(null);
+  const [settingsTarget, setSettingsTarget] = useState<Target | null>(null);
   const [radialShown, setRadialShown] = useState(false);
   const [radialCenter, setRadialCenter] = useState({ x: 0, y: 0 });
-  const [renderMode, setRenderMode] = useState(0); // 0 = field, 1 = sphere
+  const [radialKind, setRadialKind] = useState<'tool' | 'op'>('tool');
+  const [renderMode, setRenderMode] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const modeSV = useSharedValue(0);
   const selectMode = (i: number) => {
@@ -118,27 +137,36 @@ export default function FenceCombine() {
 
   const nextId = useRef(1);
   const radialRef = useRef({ x: 0, y: 0 });
-  const replaceIdxRef = useRef<number | null>(null); // set → radial replaces this node
+  const radialKindRef = useRef<'tool' | 'op'>('tool');
+  const replaceRef = useRef<Target | null>(null);
   const chainRef = useRef<Node[]>([]);
   chainRef.current = chain;
 
-  // Mirror the chain into a shared value for the shader uniforms.
-  const chainSV = useSharedValue<{ tool: number; param: number }[]>([]);
+  // Midpoint of the connector before node i (the operator's position).
+  const opPos = (i: number) => ({
+    x: (chain[i - 1].x + chain[i].x) / 2,
+    y: (chain[i - 1].y + chain[i].y) / 2,
+  });
+
+  const chainSV = useSharedValue<{ tool: number; param: number; op: number }[]>([]);
   useEffect(() => {
-    chainSV.value = chain.map((c) => ({ tool: c.tool, param: c.param }));
+    chainSV.value = chain.map((c) => ({ tool: c.tool, param: c.param, op: c.op }));
   }, [chain, chainSV]);
 
   const uniforms = useDerivedValue(() => {
     const c = chainSV.value;
     const tools: number[] = [];
     const params: number[] = [];
+    const ops: number[] = [];
     for (let i = 0; i < MAX; i++) {
       if (i < c.length) {
         tools.push(c[i].tool);
         params.push(c[i].param);
+        ops.push(c[i].op);
       } else {
         tools.push(0);
         params.push(0);
+        ops.push(0);
       }
     }
     return {
@@ -147,11 +175,11 @@ export default function FenceCombine() {
       u_count: Math.min(c.length, MAX),
       u_tools: tools,
       u_params: params,
+      u_ops: ops,
       u_mode: modeSV.value,
     };
   });
 
-  // Lines connecting the chips in chain order.
   const linePath = useMemo(() => {
     const p = Skia.Path.Make();
     if (chain.length > 0) {
@@ -161,54 +189,78 @@ export default function FenceCombine() {
     return p;
   }, [chain]);
 
-  // ---- actions (JS thread) ----
-  const showRadial = (x: number, y: number) => {
+  // ---- actions ----
+  const showRadial = (kind: 'tool' | 'op', x: number, y: number) => {
+    radialKindRef.current = kind;
+    setRadialKind(kind);
     radialRef.current = { x, y };
     setRadialCenter({ x, y });
     setRadialShown(true);
   };
   const dismissRadial = () => {
-    replaceIdxRef.current = null;
+    replaceRef.current = null;
     setRadialShown(false);
   };
-  // Tap a tool in the (persistent) radial → replace the target node's tool, or
-  // add a new node at the radial's center.
-  const pickTool = (tool: number) => {
-    if (replaceIdxRef.current != null) {
-      const idx = replaceIdxRef.current;
-      setChain((prev) => prev.map((c, i) => (i === idx ? { ...c, tool, param: 0.5 } : c)));
-      replaceIdxRef.current = null;
+  const startAdd = (x: number, y: number) => {
+    replaceRef.current = null;
+    showRadial('tool', x, y);
+  };
+  // Tap a ring item: add/replace a tool, or set an operator, depending on kind.
+  const pick = (i: number) => {
+    const rep = replaceRef.current;
+    if (radialKindRef.current === 'op') {
+      if (rep && rep.kind === 'op') {
+        setChain((prev) => prev.map((c, j) => (j === rep.idx ? { ...c, op: i } : c)));
+      }
+    } else if (rep && rep.kind === 'node') {
+      setChain((prev) => prev.map((c, j) => (j === rep.idx ? { ...c, tool: i, param: 0.5 } : c)));
     } else if (chainRef.current.length < MAX) {
       const { x, y } = radialRef.current;
-      setChain((prev) => [...prev, { id: nextId.current++, tool, param: 0.5, x, y }]);
+      setChain((prev) => [...prev, { id: nextId.current++, tool: i, param: 0.5, x, y, op: 0 }]);
     }
+    replaceRef.current = null;
     setRadialShown(false);
   };
-  // Swap: reopen the radial over the node so the next pick replaces it.
-  const openReplace = (idx: number) => {
-    const node = chainRef.current[idx];
-    if (!node) return;
-    replaceIdxRef.current = idx;
-    setSettingsIdx(null);
-    showRadial(node.x, node.y);
-  };
-  // Long-press on a node → open its settings.
-  const openNodeSettings = (x: number, y: number) => {
-    let hit = -1;
-    chainRef.current.forEach((c, i) => {
-      if (Math.hypot(x - c.x, y - c.y) <= 44) hit = i;
+  const openSettings = (x: number, y: number) => {
+    const c = chainRef.current;
+    let node = -1;
+    c.forEach((n, i) => {
+      if (Math.hypot(x - n.x, y - n.y) <= 44) node = i;
     });
-    if (hit >= 0) setSettingsIdx(hit);
+    if (node >= 0) {
+      setSettingsTarget({ kind: 'node', idx: node });
+      return;
+    }
+    let op = -1;
+    for (let i = 1; i < c.length; i++) {
+      const mx = (c[i - 1].x + c[i].x) / 2;
+      const my = (c[i - 1].y + c[i].y) / 2;
+      if (Math.hypot(x - mx, y - my) <= 28) op = i;
+    }
+    if (op >= 1) setSettingsTarget({ kind: 'op', idx: op });
+  };
+  const openReplace = (target: Target) => {
+    const c = chainRef.current;
+    replaceRef.current = target;
+    setSettingsTarget(null);
+    if (target.kind === 'node') {
+      const n = c[target.idx];
+      showRadial('tool', n.x, n.y);
+    } else {
+      const mx = (c[target.idx - 1].x + c[target.idx].x) / 2;
+      const my = (c[target.idx - 1].y + c[target.idx].y) / 2;
+      showRadial('op', mx, my);
+    }
   };
   const setParam = (idx: number, p: number) => {
     setChain((prev) => prev.map((c, i) => (i === idx ? { ...c, param: p } : c)));
   };
-  const deleteTool = (idx: number) => {
+  const deleteNode = (idx: number) => {
     setChain((prev) => prev.filter((_, i) => i !== idx));
-    setSettingsIdx(null);
+    setSettingsTarget(null);
   };
 
-  // ---- drag a node to reposition it ----
+  // ---- drag a node ----
   const draggingRef = useRef<{ idx: number; dx: number; dy: number } | null>(null);
   const startDrag = (x: number, y: number) => {
     let hit = -1;
@@ -230,22 +282,17 @@ export default function FenceCombine() {
   };
 
   // ---- gestures ----
-  // Double-tap anywhere → open the (persistent) radial there.
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
     .maxDuration(300)
     .onEnd((e) => {
-      runOnJS(showRadial)(e.x, e.y);
+      runOnJS(startAdd)(e.x, e.y);
     });
-
-  // Long-press on a node → open its settings.
   const longPress = Gesture.LongPress()
     .minDuration(300)
     .onStart((e) => {
-      runOnJS(openNodeSettings)(e.x, e.y);
+      runOnJS(openSettings)(e.x, e.y);
     });
-
-  // Drag a node: grabs whichever node the touch started on, then follows.
   const dragPan = Gesture.Pan()
     .minDistance(6)
     .onBegin((e) => {
@@ -257,17 +304,38 @@ export default function FenceCombine() {
     .onFinalize(() => {
       runOnJS(endDrag)();
     });
-
-  // Movement (a node drag) beats the long-press; a double-tap is its own thing.
   const gesture = Gesture.Race(doubleTap, dragPan, longPress);
 
-  const editing = settingsIdx != null ? chain[settingsIdx] : null;
+  const ringItems = radialKind === 'op' ? OPERATORS : TOOLS;
+
+  // Settings panel data for the current target.
+  let panel: null | {
+    title: string;
+    x: number;
+    hasParam: boolean;
+    param: number;
+    onDelete?: () => void;
+  } = null;
+  if (settingsTarget) {
+    const n = chain[settingsTarget.idx];
+    if (n && settingsTarget.kind === 'node') {
+      panel = {
+        title: `${settingsTarget.idx + 1}. ${TOOLS[n.tool]}`,
+        x: n.x,
+        hasParam: n.tool !== 0 && n.tool !== 6,
+        param: n.param,
+        onDelete: () => deleteNode(settingsTarget.idx),
+      };
+    } else if (n && settingsTarget.kind === 'op') {
+      const p = opPos(settingsTarget.idx);
+      panel = { title: `operator · ${OPERATORS[n.op]}`, x: p.x, hasParam: false, param: 0 };
+    }
+  }
 
   return (
     <View style={styles.fill}>
       <GestureDetector gesture={gesture}>
         <View style={StyleSheet.absoluteFill}>
-          {/* Blank until the first node exists; the visual builds up as tools are added. */}
           {chain.length > 0 ? (
             <Canvas style={StyleSheet.absoluteFill}>
               <Fill>
@@ -277,18 +345,38 @@ export default function FenceCombine() {
             </Canvas>
           ) : null}
 
-          {/* chain chips (visual only) */}
+          {/* operator points (between nodes) */}
+          {chain.map((c, i) =>
+            i === 0 ? null : (
+              <View
+                key={`op-${c.id}`}
+                pointerEvents="none"
+                style={[
+                  styles.op,
+                  { left: opPos(i).x - 15, top: opPos(i).y - 15 },
+                  settingsTarget?.kind === 'op' && settingsTarget.idx === i && styles.opActive,
+                ]}
+              >
+                <Text style={styles.opText}>{OP_SHORT[c.op]}</Text>
+              </View>
+            )
+          )}
+
+          {/* node chips */}
           {chain.map((c, i) => (
             <View
               key={c.id}
               pointerEvents="none"
-              style={[styles.chip, { left: c.x - 26, top: c.y - 20 }, settingsIdx === i && styles.chipActive]}
+              style={[
+                styles.chip,
+                { left: c.x - 26, top: c.y - 20 },
+                settingsTarget?.kind === 'node' && settingsTarget.idx === i && styles.chipActive,
+              ]}
             >
               <Text style={styles.chipIndex}>{i + 1}</Text>
               <Text style={styles.chipLabel}>{TOOLS[c.tool]}</Text>
             </View>
           ))}
-
         </View>
       </GestureDetector>
 
@@ -323,16 +411,16 @@ export default function FenceCombine() {
         </>
       ) : null}
 
-      {/* radial tool picker: tap a tool to add it, tap outside to dismiss */}
+      {/* radial picker (tools or operators) */}
       {radialShown ? (
         <>
           <Pressable style={StyleSheet.absoluteFill} onPress={dismissRadial} />
-          {TOOLS.map((label, i) => {
-            const theta = angleFor(i);
+          {ringItems.map((label, i) => {
+            const theta = angleFor(i, ringItems.length);
             return (
               <Pressable
-                key={i}
-                onPress={() => pickTool(i)}
+                key={label}
+                onPress={() => pick(i)}
                 style={[
                   styles.ringTool,
                   {
@@ -348,17 +436,20 @@ export default function FenceCombine() {
         </>
       ) : null}
 
-      {/* settings popover (interactive, above the gesture layer) */}
-      {editing ? (
+      {/* settings panel (node or operator) */}
+      {panel ? (
         <>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setSettingsIdx(null)} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setSettingsTarget(null)} />
           <Settings
-            node={editing}
-            index={settingsIdx as number}
+            title={panel.title}
+            nodeX={panel.x}
+            nodeY={settingsTarget ? (settingsTarget.kind === 'node' ? chain[settingsTarget.idx].y : opPos(settingsTarget.idx).y) : 0}
             screenW={width}
-            onParam={(p) => setParam(settingsIdx as number, p)}
-            onSwap={() => openReplace(settingsIdx as number)}
-            onDelete={() => deleteTool(settingsIdx as number)}
+            hasParam={panel.hasParam}
+            param={panel.param}
+            onParam={(p) => settingsTarget && setParam(settingsTarget.idx, p)}
+            onSwap={() => settingsTarget && openReplace(settingsTarget)}
+            onDelete={panel.onDelete}
           />
         </>
       ) : null}
@@ -369,24 +460,29 @@ export default function FenceCombine() {
 const TRACK_W = 190;
 
 function Settings({
-  node,
-  index,
+  title,
+  nodeX,
+  nodeY,
   screenW,
+  hasParam,
+  param,
   onParam,
   onSwap,
   onDelete,
 }: {
-  node: Node;
-  index: number;
+  title: string;
+  nodeX: number;
+  nodeY: number;
   screenW: number;
+  hasParam: boolean;
+  param: number;
   onParam: (p: number) => void;
   onSwap: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
 }) {
-  const PANEL_W = 232;
-  const left = Math.max(12, Math.min(screenW - PANEL_W - 12, node.x - PANEL_W / 2));
-  const top = Math.max(80, node.y + 34);
-  const hasParam = node.tool !== 0 && node.tool !== 6; // linear & abs have none
+  const PANEL_W = 240;
+  const left = Math.max(12, Math.min(screenW - PANEL_W - 12, nodeX - PANEL_W / 2));
+  const top = Math.max(80, nodeY + 34);
 
   const setFromX = (x: number) => onParam(Math.max(0, Math.min(1, x / TRACK_W)));
   const track = Gesture.Pan()
@@ -397,32 +493,32 @@ function Settings({
   return (
     <View style={[styles.panel, { left, top, width: PANEL_W }]}>
       <View style={styles.panelHead}>
-        <Text style={styles.panelTitle}>
-          {index + 1}. {TOOLS[node.tool]}
-        </Text>
+        <Text style={styles.panelTitle}>{title}</Text>
         <View style={styles.headBtns}>
           <Pressable onPress={onSwap} hitSlop={6} style={styles.iconBtn}>
             <Text style={styles.swapIcon}>⇄</Text>
           </Pressable>
-          <Pressable onPress={onDelete} hitSlop={6} style={[styles.iconBtn, styles.iconBtnDanger]}>
-            <View style={styles.trash}>
-              <View style={styles.trashHandle} />
-              <View style={styles.trashLid} />
-              <View style={styles.trashBody} />
-            </View>
-          </Pressable>
+          {onDelete ? (
+            <Pressable onPress={onDelete} hitSlop={6} style={[styles.iconBtn, styles.iconBtnDanger]}>
+              <View style={styles.trash}>
+                <View style={styles.trashHandle} />
+                <View style={styles.trashLid} />
+                <View style={styles.trashBody} />
+              </View>
+            </Pressable>
+          ) : null}
         </View>
       </View>
       {hasParam ? (
         <GestureDetector gesture={track}>
           <View style={styles.trackWrap}>
             <View style={styles.track} />
-            <View style={[styles.trackFill, { width: node.param * TRACK_W }]} />
-            <View style={[styles.thumb, { left: node.param * TRACK_W - 9 }]} />
+            <View style={[styles.trackFill, { width: param * TRACK_W }]} />
+            <View style={[styles.thumb, { left: param * TRACK_W - 9 }]} />
           </View>
         </GestureDetector>
       ) : (
-        <Text style={styles.noParam}>no parameter</Text>
+        <Text style={styles.noParam}>swap to change · tap outside to close</Text>
       )}
     </View>
   );
@@ -492,6 +588,19 @@ const styles = StyleSheet.create({
   chipActive: { borderColor: '#9b8cff', borderWidth: 1.5 },
   chipIndex: { color: '#9b8cff', fontSize: 10, fontWeight: '700' },
   chipLabel: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  op: {
+    position: 'absolute',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(40,34,60,0.95)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(155,140,255,0.6)',
+  },
+  opActive: { borderColor: '#9b8cff', borderWidth: 1.5 },
+  opText: { color: '#cdbcff', fontSize: 12, fontWeight: '700' },
   ringTool: {
     position: 'absolute',
     width: 60,
@@ -547,18 +656,7 @@ const styles = StyleSheet.create({
   },
   trackWrap: { height: 24, justifyContent: 'center' },
   track: { height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.18)' },
-  trackFill: {
-    position: 'absolute',
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#9b8cff',
-  },
-  thumb: {
-    position: 'absolute',
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#fff',
-  },
-  noParam: { color: 'rgba(255,255,255,0.5)', fontSize: 13, fontStyle: 'italic' },
+  trackFill: { position: 'absolute', height: 4, borderRadius: 2, backgroundColor: '#9b8cff' },
+  thumb: { position: 'absolute', width: 18, height: 18, borderRadius: 9, backgroundColor: '#fff' },
+  noParam: { color: 'rgba(255,255,255,0.5)', fontSize: 12, fontStyle: 'italic' },
 });

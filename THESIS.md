@@ -7,23 +7,53 @@
 
 ## The statement (one line)
 
-_TBD — the sentence a viewer should feel in the first seconds._
+_Working draft — wording not locked:_
 
-## What we're actually claiming
+> Phone music tools inherited the button/pad/slider grid from hardware. There's a
+> different instrument latent in the glass: **continuous gestures where sound and
+> image are one material — and that accumulate into whole compositions**, not just
+> one-off patterns.
 
-_TBD._
+## What we're arguing
 
-## Facets (the corners of the idea)
+- **Buttons/pads/sliders aren't the enemy.** They're legible because they're
+  *discrete and labeled* — a thing at a place that does one thing. You learn them
+  in seconds and you can aim. They also plug into the machinery (sequencers,
+  loopers, DAWs) that lets gestures **accumulate** into songs. We honor that.
+- **What we're going beyond** is the unquestioned *port of hardware affordances
+  onto glass* — a pad grid is a photograph of an MPC. The phone is continuous,
+  multitouch, and its surface *is* the display; it affords a different instrument.
+- **Toy vs. instrument, the axis that matters: do gestures accumulate?**
+  Present-tense coupling (touch → sound+light → gone) = toy or provocation.
+  Accumulation into structure = instrument.
+- **Solo composition first** (jamming comes later). So the bar: gestures must
+  **persist, layer, arrange, and be revisitable** into a cohesive whole.
+- **The real frontier isn't input or looping.** Expressive coupled input we have;
+  loopers already exist. The unclaimed problem is giving **structure and revision**
+  the same living, coupled, gestural quality — so the whole composition is a
+  *material you shape*, not a timeline you assemble. (Otherwise we just move the
+  grid up one layer into a piano roll.)
+- **The video is itself a provocation.** Its job is to argue the serious
+  instrument is possible and worth wanting — not to be one yet.
 
-Each sketch explores one corner. As we name facets here, tag experiments with them.
+## Facets (the corners to sketch — solo composition)
 
-- _TBD_
+- **Coupling** — sound and image as a single event. _(have several)_
+- **Persistence** — a gesture leaves a living, looping trace.
+- **Layering** — persistent voices coexist and visibly relate.
+- **Structure** — sections / build-release / arrangement without a timeline. ← _frontier_
+- **Revision** — reach into a committed loop and reshape it as material. ← _frontier_
+- **Coherence** — scale / quantize so accumulation stays musical, not mud.
 
 ## Experiment → facet map
 
 | Experiment | Facet | Reads on camera? |
 |---|---|---|
-| _TBD_ | | |
+| duet | Coupling | strong |
+| raindrops | Coupling | strong |
+| notesketch | Coupling (hint of persistence) | ? |
+| note-radial | Coupling / Coherence | ? |
+| fence/* | (visual substrate, no audio) | strong |
 
 ## The video
 
@@ -34,4 +64,9 @@ Each sketch explores one corner. As we name facets here, tag experiments with th
 
 ## Open questions
 
-- _TBD_
+- **What's the unit of accumulation?** A loop? a voice? a gesture-trace you can grab?
+- **How does structure work without a timeline / piano roll** — else we've just
+  moved the grid up a layer?
+- **How do you edit a committed gesture** without delete-and-redo?
+- **Where's the "legibility without discreteness" win** that beats the button at
+  its own game?

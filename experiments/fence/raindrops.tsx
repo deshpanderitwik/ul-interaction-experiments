@@ -111,7 +111,9 @@ half4 main(float2 fragcoord) {
   // that part goes dark and stays legible. Driven by local background luminance.
   float lum = dot(col, half3(0.299, 0.587, 0.114));
   float darkenMix = smoothstep(0.35, 0.62, lum); // 0 = dark bg → lighten, 1 = bright bg → darken
-  half3 ringTarget = mix(half3(0.6, 0.78, 1.0), half3(0.0, 0.02, 0.05), darkenMix);
+  // Over bright background, dim the LOCAL color a little (a soft shadow, hue kept)
+  // instead of crushing to black.
+  half3 ringTarget = mix(half3(0.6, 0.78, 1.0), col * 0.6, darkenMix);
   float rl = min(1.0, ringLight * 0.85);
   col = mix(col, ringTarget, rl);
 

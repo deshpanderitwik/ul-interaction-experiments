@@ -81,6 +81,12 @@ export const experiments: Experiment[] = [
         blurb: 'Chain shaping functions: hold to add a tool from a radial; double-tap to tune or delete.',
         load: () => import('./fence/combine'),
       },
+      {
+        id: 'disintegrate',
+        title: 'Disintegrating Circle',
+        blurb: 'Hold anywhere on the disc and it melts away grain by grain; release and it reassembles.',
+        load: () => import('./fence/disintegrate'),
+      },
     ],
   },
   {

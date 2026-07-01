@@ -50,7 +50,7 @@ half4 main(float2 fragcoord) {
   float ringLight = 0.0;
   for (int i = 0; i < ${N}; i++) {
     float age = u_time - u_tapTimes[i];
-    if (age < 0.0 || age > 2.0) { continue; }
+    if (age < 0.0 || age > 1.6) { continue; }
     float seed = u_tapSeed[i];
     float2 d = fragcoord - u_taps[i];
     float len = length(d);
@@ -59,15 +59,22 @@ half4 main(float2 fragcoord) {
     float bump = flow(d * 0.012 + float2(seed * 21.0, seed * 13.0), u_time * 0.15).x;
     float dist = len * (1.0 + 0.06 * bump);
 
-    float speed = 250.0 + seed * 90.0;  // faster than Waves
-    float width = 40.0 + seed * 16.0;   // tighter rings
+    // 1) IMPACT DENT: a quick inward pinch localized right at the landing point,
+    //    strongest at age 0 and gone within ~0.3s.
+    float dentEnv = exp(-(len * len) / (23.0 * 23.0));
+    float dent = -dentEnv * exp(-age * 8.0) * 26.0;
+
+    // 2) RIPPLES emanating from that point: small, tight, quick rings.
+    float speed = 165.0 + seed * 55.0;
+    float width = 20.0 + seed * 8.0;
     float r = age * speed;
     float band = (dist - r) / width;
     float env = exp(-band * band);
-    float decay = max(0.0, 1.0 - age / 2.0);
+    float decay = max(0.0, 1.0 - age / 1.6);
+    float ring = sin(band * 6.0) * env * decay * 17.0;
 
-    disp += dir * sin(band * 6.0) * env * decay * 34.0;
-    ringLight += env * decay;
+    disp += dir * (dent + ring);
+    ringLight += (env * decay + dentEnv * exp(-age * 8.0) * 0.6);
   }
 
   float2 uv = (fragcoord + disp) / u_resolution;
@@ -145,12 +152,13 @@ export default function FenceRaindrops() {
   // Touch/hold: a stream of drops where you touch (with a little scatter).
   const scheduleStream = () => {
     streamRef.current = setTimeout(() => {
+      // Drops land scattered AROUND the finger, not on it.
       spawn(
-        holdPos.current.x + (Math.random() - 0.5) * 28,
-        holdPos.current.y + (Math.random() - 0.5) * 28
+        holdPos.current.x + (Math.random() - 0.5) * 90,
+        holdPos.current.y + (Math.random() - 0.5) * 90
       );
       scheduleStream();
-    }, 80 + Math.random() * 140);
+    }, 70 + Math.random() * 130);
   };
   const startHold = (x: number, y: number) => {
     holdPos.current = { x, y };

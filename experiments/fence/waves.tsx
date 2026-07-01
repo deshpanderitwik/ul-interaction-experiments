@@ -5,7 +5,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS, useDerivedValue, useSharedValue } from 'react-native-reanimated';
 import { NoteSynth } from '../../modules/note-synth';
 import { recordNote } from '../recorder/recorder';
-import { scaleFrequencies, useScale } from '../scale';
+import { midiToFreq, scaleFrequencies, useScale } from '../scale';
 
 // Fence · Waves — a full-screen gradient that UNDULATES (domain warping), with
 // TAP-TO-RIPPLE. The ripple adds no new geometry: each tap sends an expanding
@@ -136,33 +136,64 @@ export default function FenceWaves() {
   const holdPos = useRef({ x: 0, y: 0 });
   const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Ascending scale ladder (two octaves from the root) and a climbing index, so
-  // each ripple sounds the next note up; it wraps back to the bottom at the top.
-  // Rebuilt when the global scale (settings picker) changes; the climb restarts.
+  // Sound is one sustained sine (the synth's legato bend voice), not a pluck per
+  // ripple: we hold a single tone and continuously modulate its pitch — a slow
+  // LFO for the undulation, plus a target that climbs the scale a step per ripple
+  // and is reached by a smooth glide (legato). The scale ladder (in MIDI) rebuilds
+  // when the global scale (settings picker) changes.
   const scale = useScale();
+  const midiLadderRef = useRef<number[]>([]);
   const arpIndex = useRef(0);
-  const ladderRef = useRef<number[]>([]);
   const scaleKey = `${scale.root}-${scale.type}`;
   const prevScaleKey = useRef('');
   if (prevScaleKey.current !== scaleKey) {
     prevScaleKey.current = scaleKey;
-    ladderRef.current = scaleFrequencies(scale, 48 + scale.root, 48 + scale.root + 24);
+    midiLadderRef.current = scaleFrequencies(scale, 48 + scale.root, 48 + scale.root + 24).map(
+      (f) => Math.round(69 + 12 * Math.log2(f / 440))
+    );
     arpIndex.current = 0;
   }
+  const curMidi = useRef(53); // the pitch actually sounding (eases toward target)
+  const targetMidi = useRef(53); // where the climb wants it
+  const modTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Push one ripple (position, time, and a random seed) into the ring buffer,
-  // and trigger its note — the ripple and the sound share this one moment.
+  // Start the held voice and the pitch-modulation loop.
+  const startVoice = () => {
+    const ladder = midiLadderRef.current;
+    const startMidi = ladder.length ? ladder[0] : 48 + scale.root;
+    arpIndex.current = 0;
+    curMidi.current = startMidi;
+    targetMidi.current = startMidi;
+    NoteSynth?.bendStart?.(midiToFreq(startMidi), 0.5)?.catch?.(() => {});
+    if (modTimerRef.current) clearInterval(modTimerRef.current);
+    const t0 = clock.value / 1000;
+    modTimerRef.current = setInterval(() => {
+      const t = clock.value / 1000 - t0;
+      const lfo = 0.6 * Math.sin(t * 1.1) + 0.35 * Math.sin(t * 0.63 + 1.0); // ~±1 semitone undulation
+      curMidi.current += (targetMidi.current - curMidi.current) * 0.16; // legato glide
+      NoteSynth?.bendSet?.(midiToFreq(curMidi.current + lfo))?.catch?.(() => {});
+    }, 40);
+  };
+  const stopVoice = () => {
+    if (modTimerRef.current) {
+      clearInterval(modTimerRef.current);
+      modTimerRef.current = null;
+    }
+    NoteSynth?.bendStop?.(0.35)?.catch?.(() => {});
+  };
+
+  // Push one ripple into the ring buffer; each ripple nudges the pitch target up
+  // the scale (reached by the glide above → legato, not a re-pluck).
   const spawn = (x: number, y: number) => {
     const list = taps.value.slice(-(N - 1));
     list.push({ x, y, t: clock.value / 1000, seed: Math.random() });
     taps.value = list;
 
-    const ladder = ladderRef.current;
+    const ladder = midiLadderRef.current;
     if (ladder.length > 0) {
-      const freq = ladder[arpIndex.current % ladder.length];
-      recordNote(freq, 0.5); // so the REC control captures the arp
-      NoteSynth?.pluck(freq, 0.5, 0.4).catch(() => {});
-      arpIndex.current = (arpIndex.current + 1) % ladder.length;
+      targetMidi.current = ladder[arpIndex.current % ladder.length];
+      recordNote(midiToFreq(targetMidi.current), 0.5); // sparse capture for REC
+      arpIndex.current += 1;
     }
   };
   // While held, re-emit on a jittered interval so the rhythm feels organic, and
@@ -181,6 +212,7 @@ export default function FenceWaves() {
   // Touch down: ripple now, then keep emitting at the finger while it's held.
   const startHold = (x: number, y: number) => {
     holdPos.current = { x, y };
+    startVoice();
     spawn(x, y);
     if (intervalRef.current) clearTimeout(intervalRef.current);
     scheduleNext();
@@ -193,6 +225,7 @@ export default function FenceWaves() {
       clearTimeout(intervalRef.current);
       intervalRef.current = null;
     }
+    stopVoice();
   };
   useEffect(() => stopHold, []);
 

@@ -65,7 +65,7 @@ export const experiments: Experiment[] = [
       {
         id: 'raindrops',
         title: 'Raindrops',
-        blurb: 'Rain ripples across a dark pond; each drop plinks the next note up the scale.',
+        blurb: 'The Waves substrate, but touch-and-hold drops raindrop ripples that plink up the scale.',
         audio: true,
         load: () => import('./fence/raindrops'),
       },

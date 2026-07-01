@@ -60,7 +60,6 @@ export const experiments: Experiment[] = [
         id: 'waves',
         title: 'Waves',
         blurb: 'A full-screen gradient that undulates like fluid (domain-warped flow).',
-        audio: true,
         load: () => import('./fence/waves'),
       },
       {

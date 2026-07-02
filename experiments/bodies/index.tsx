@@ -44,6 +44,7 @@ const PITCH_BOTTOM_INSET = 130;
 
 const PULSES = 24; // max concurrent ripples across the whole scene
 const LIFE = 1.6; // ripple lifetime, seconds
+const RING_ALPHA = 0.4; // per-ring brightness — kept low so many voices don't wash out
 
 // Monochrome raindrop ripple: for each pulse, an organically-wobbled expanding
 // ring of white light on black. Lifted from Fence · Raindrops' ring math with
@@ -84,7 +85,7 @@ half4 main(float2 fragcoord) {
     float band = (dist - r) / width;
     float env = exp(-band * band);
     float decay = max(0.0, 1.0 - age / ${LIFE});
-    light += env * decay;
+    light += env * decay * ${RING_ALPHA};
   }
 
   light = clamp(light, 0.0, 1.0);

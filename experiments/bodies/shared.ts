@@ -18,8 +18,8 @@ export type Body = {
 };
 
 export const MAX_BODIES = 12;
-export const BODY_R = 40; // core radius, px
-export const HIT_R = 52; // touch radius for tap/drag/hold, px
+export const BODY_R = 20; // core radius, px — small so bodies cover fine pitch ground
+export const HIT_R = 32; // touch radius for tap/drag/hold, px
 
 // Pulse subdivisions offered in the properties panel.
 export const SUBDIVISIONS = [

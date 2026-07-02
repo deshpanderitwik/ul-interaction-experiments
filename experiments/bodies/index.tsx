@@ -14,13 +14,11 @@ import {
 import { useExperimentActive } from '../_host';
 import { midiToFreq, noteName, useScale } from '../scale';
 import { useTempo } from '../tempo';
-import { Slider } from '../settings/Slider';
 import {
   BODY_R,
   HIT_R,
   MAX_BODIES,
   SUBDIVISIONS,
-  nearestIndex,
   periodMs,
   scaleMidiLadder,
   type Body,
@@ -36,9 +34,13 @@ import { playSine } from './voice';
 // sheds a ripple — the same domain-warped ring shader as Fence · Raindrops, but
 // monochrome (white rings on black) and emanating from the body's position.
 
-// The note picker (and new-body defaults) span this range of the shared scale.
-const LADDER_MIN = 36; // C2
+// Vertical position picks the note across this range of the shared scale:
+// top of the field = highest note, bottom = lowest.
+const LADDER_MIN = 48; // C3
 const LADDER_MAX = 60; // C4
+// The pitch field spans y ∈ [PITCH_TOP, height - PITCH_BOTTOM_INSET].
+const PITCH_TOP = 110;
+const PITCH_BOTTOM_INSET = 130;
 
 const PULSES = 24; // max concurrent ripples across the whole scene
 const LIFE = 1.6; // ripple lifetime, seconds
@@ -107,6 +109,18 @@ export default function Bodies() {
   const ladder = useMemo(() => scaleMidiLadder(scale, LADDER_MIN, LADDER_MAX), [scale]);
   const ladderRef = useRef(ladder);
   ladderRef.current = ladder;
+
+  // Vertical position → nearest scale note (top of the field = high, bottom = low).
+  const midiFromY = useCallback(
+    (y: number) => {
+      const l = ladderRef.current;
+      if (l.length === 0) return 48;
+      const bottom = height - PITCH_BOTTOM_INSET;
+      const f = Math.max(0, Math.min(1, (bottom - y) / (bottom - PITCH_TOP)));
+      return l[Math.round(f * (l.length - 1))];
+    },
+    [height]
+  );
 
   const [bodies, setBodies] = useState<Body[]>([]);
   const [editing, setEditing] = useState<number | null>(null);
@@ -197,6 +211,11 @@ export default function Bodies() {
     if (editing != null && !bodies.some((b) => b.id === editing)) setEditing(null);
   }, [editing, bodies]);
 
+  // Re-pitch every body when the scale or the field height changes.
+  useEffect(() => {
+    setBodies((prev) => prev.map((b) => ({ ...b, midi: midiFromY(b.y) })));
+  }, [ladder, midiFromY]);
+
   // Topmost body under a point (last drawn wins), or null.
   const hitId = (x: number, y: number): number | null => {
     const bs = bodiesRef.current;
@@ -209,9 +228,10 @@ export default function Bodies() {
   const addBody = (x: number, y: number) => {
     setBodies((prev) => {
       if (prev.length >= MAX_BODIES) return prev;
-      const l = ladderRef.current;
-      const midi = l.length ? l[prev.length % l.length] : 48;
-      return [...prev, { id: idRef.current++, x, y, midi, subdivision: 4, playing: true }];
+      return [
+        ...prev,
+        { id: idRef.current++, x, y, midi: midiFromY(y), subdivision: 4, playing: true },
+      ];
     });
   };
 
@@ -232,7 +252,7 @@ export default function Bodies() {
   const onDragMove = (x: number, y: number) => {
     const id = draggingRef.current;
     if (id == null) return;
-    setBodies((prev) => prev.map((b) => (b.id === id ? { ...b, x, y } : b)));
+    setBodies((prev) => prev.map((b) => (b.id === id ? { ...b, x, y, midi: midiFromY(y) } : b)));
   };
   const onDragEnd = () => {
     draggingRef.current = null;
@@ -270,8 +290,6 @@ export default function Bodies() {
 
   const setSubdivision = (d: number) =>
     setBodies((prev) => prev.map((b) => (b.id === editing ? { ...b, subdivision: d } : b)));
-  const setMidi = (midi: number) =>
-    setBodies((prev) => prev.map((b) => (b.id === editing ? { ...b, midi } : b)));
   const deleteEditing = () => {
     setBodies((prev) => prev.filter((b) => b.id !== editing));
     setEditing(null);
@@ -322,7 +340,7 @@ export default function Bodies() {
                 key={b.id}
                 style={[
                   styles.label,
-                  { left: b.x - 40, top: b.y - 9, color: b.playing ? '#0a0a0a' : '#fff' },
+                  { left: b.x - 40, top: b.y - 7, color: b.playing ? '#0a0a0a' : '#fff' },
                 ]}
               >
                 {noteName(b.midi)}
@@ -335,7 +353,7 @@ export default function Bodies() {
             </Text>
           ) : (
             <Text style={styles.hint} pointerEvents="none">
-              tap to play/pause · drag to move · hold to tune
+              tap to play/pause · drag up/down to pitch · hold for options
             </Text>
           )}
         </View>
@@ -344,9 +362,7 @@ export default function Bodies() {
       {editingBody ? (
         <PropertiesPanel
           body={editingBody}
-          ladder={ladder}
           onSubdivision={setSubdivision}
-          onMidi={setMidi}
           onDelete={deleteEditing}
           onClose={() => setEditing(null)}
         />
@@ -396,24 +412,19 @@ function BodyView({
   );
 }
 
-// Long-press panel: subdivision buttons, a scale-stepped note slider, and delete.
+// Long-press panel: subdivision buttons and delete. (Pitch is set by position,
+// so there's no note control here — drag the body up/down to tune it.)
 function PropertiesPanel({
   body,
-  ladder,
   onSubdivision,
-  onMidi,
   onDelete,
   onClose,
 }: {
   body: Body;
-  ladder: number[];
   onSubdivision: (d: number) => void;
-  onMidi: (midi: number) => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
-  const idx = nearestIndex(ladder, body.midi);
-
   return (
     <View style={StyleSheet.absoluteFill}>
       <Pressable style={styles.backdrop} onPress={onClose} />
@@ -441,19 +452,6 @@ function PropertiesPanel({
           })}
         </View>
 
-        <Text style={styles.panelLabel}>note</Text>
-        <View style={styles.sliderRow}>
-          <Slider
-            value={idx}
-            minimumValue={0}
-            maximumValue={Math.max(0, ladder.length - 1)}
-            step={1}
-            onValueChange={(v) => onMidi(ladder[Math.round(v)] ?? body.midi)}
-            fillColor="#ffffff"
-            thumbColor="#ffffff"
-          />
-        </View>
-
         <Pressable style={styles.deleteBtn} onPress={onDelete}>
           <Text style={styles.deleteText}>Delete</Text>
         </Pressable>
@@ -469,9 +467,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 80,
     textAlign: 'center',
-    fontSize: 15,
+    fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
     fontVariant: ['tabular-nums'],
   },
   hint: {
@@ -518,7 +516,6 @@ const styles = StyleSheet.create({
   },
   subBtnText: { color: 'rgba(255,255,255,0.85)', fontSize: 16, fontWeight: '600' },
   subBtnTextOn: { color: '#0a0a0a' },
-  sliderRow: { alignSelf: 'stretch', marginBottom: 8 },
   deleteBtn: {
     marginTop: 16,
     paddingVertical: 11,

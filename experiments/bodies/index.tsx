@@ -36,8 +36,8 @@ import { playSine } from './voice';
 
 // Vertical position picks the note across this range of the shared scale:
 // top of the field = highest note, bottom = lowest.
-const LADDER_MIN = 36; // C2
-const LADDER_MAX = 60; // C4 (two octaves)
+const LADDER_MIN = 48; // C3
+const LADDER_MAX = 72; // C5 (two octaves)
 // The pitch field spans y ∈ [PITCH_TOP, height - PITCH_BOTTOM_INSET].
 const PITCH_TOP = 110;
 const PITCH_BOTTOM_INSET = 130;

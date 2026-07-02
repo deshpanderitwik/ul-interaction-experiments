@@ -183,6 +183,7 @@ export default function Bodies() {
       if (existing) clearInterval(existing.handle);
       const period = periodMs(b.subdivision, tempo);
       const tick = () => {
+        if (draggingRef.current === b.id) return; // silent while being dragged; resumes on the next beat once it lands
         const cur = bodiesRef.current.find((x) => x.id === b.id);
         if (cur) fire(cur); // read fresh so a note change doesn't restart the clock
       };

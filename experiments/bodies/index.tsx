@@ -1,4 +1,4 @@
-import { Blur, Canvas, Circle, Fill, Group, Shader, Skia, useClock } from '@shopify/react-native-skia';
+import { Blur, Canvas, Circle, Fill, Group, Line, Shader, Skia, useClock, vec } from '@shopify/react-native-skia';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -120,6 +120,20 @@ export default function Bodies() {
   const ladder = useMemo(() => scaleMidiLadder(scale, LADDER_MIN, LADDER_MAX), [scale]);
   const ladderRef = useRef(ladder);
   ladderRef.current = ladder;
+
+  // Boundary lines between adjacent notes: the midpoints between consecutive note
+  // centers, spanning the full canvas width, so each note's band is visible.
+  const gridYs = useMemo(() => {
+    const n = ladder.length;
+    if (n < 2) return [];
+    const bottom = height - PITCH_BOTTOM_INSET;
+    const step = (bottom - PITCH_TOP) / (n - 1);
+    const ys: number[] = [];
+    for (let i = 0; i < n - 1; i++) {
+      ys.push(bottom - (i / (n - 1)) * (bottom - PITCH_TOP) - step / 2);
+    }
+    return ys;
+  }, [ladder, height]);
 
   // Vertical position → nearest scale note (top of the field = high, bottom = low).
   const midiFromY = useCallback(
@@ -346,6 +360,16 @@ export default function Bodies() {
             <Fill>
               <Shader source={source} uniforms={uniforms} />
             </Fill>
+            {/* note-boundary grid lines, behind the bodies */}
+            {gridYs.map((y, i) => (
+              <Line
+                key={i}
+                p1={vec(0, y)}
+                p2={vec(width, y)}
+                color="rgba(255,255,255,0.09)"
+                strokeWidth={1}
+              />
+            ))}
             {bodies.map((b) => (
               <BodyView key={b.id} body={b} register={registerFx} unregister={unregisterFx} />
             ))}

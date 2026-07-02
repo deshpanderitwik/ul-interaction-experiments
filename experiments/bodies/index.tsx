@@ -36,8 +36,8 @@ import { playSine } from './voice';
 
 // Vertical position picks the note across this range of the shared scale:
 // top of the field = highest note, bottom = lowest.
-const LADDER_MIN = 48; // C3
-const LADDER_MAX = 60; // C4
+const LADDER_MIN = 36; // C2
+const LADDER_MAX = 60; // C4 (two octaves)
 // The pitch field spans y ∈ [PITCH_TOP, height - PITCH_BOTTOM_INSET].
 const PITCH_TOP = 110;
 const PITCH_BOTTOM_INSET = 130;
@@ -369,15 +369,6 @@ export default function Bodies() {
               </Text>
             ))}
           </View>
-          {bodies.length === 0 ? (
-            <Text style={styles.hint} pointerEvents="none">
-              double-tap to add a body
-            </Text>
-          ) : (
-            <Text style={styles.hint} pointerEvents="none">
-              tap to play/pause · drag up/down to pitch · hold for options
-            </Text>
-          )}
         </View>
       </GestureDetector>
 
@@ -529,14 +520,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.3,
     fontVariant: ['tabular-nums'],
-  },
-  hint: {
-    position: 'absolute',
-    bottom: 60,
-    alignSelf: 'center',
-    color: 'rgba(255,255,255,0.3)',
-    fontSize: 15,
-    letterSpacing: 1,
   },
   ruler: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 64 },
   rulerSpine: {

@@ -45,6 +45,8 @@ const PITCH_BOTTOM_INSET = 130;
 const PULSES = 24; // max concurrent ripples across the whole scene
 const LIFE = 1.6; // ripple lifetime, seconds
 const RING_ALPHA = 0.4; // per-ring brightness — kept low so many voices don't wash out
+const SCHED_MS = 15; // scheduler poll interval — the grid's timing resolution
+const MAX_DRIFT_FRAC = 0.18; // max early/late as a fraction of a body's own step (subtle)
 
 // Monochrome raindrop ripple: for each pulse, an organically-wobbled expanding
 // ring of white light on black. Lifted from Fence · Raindrops' ring math with
@@ -100,6 +102,14 @@ half4 main(float2 fragcoord) {
 type Fx = { pulse: SharedValue<number> };
 type Pulse = { x: number; y: number; t: number; seed: number };
 
+// Horizontal position → timing offset against the grid. Center = on the grid;
+// right of center plays late (+), left plays early (−). Scaled to a fraction of
+// the body's own step so it stays subtle and never crosses into the next slot.
+function driftMs(x: number, period: number, width: number): number {
+  const frac = Math.max(-1, Math.min(1, (x - width / 2) / (width / 2)));
+  return frac * MAX_DRIFT_FRAC * period;
+}
+
 export default function Bodies() {
   const live = useExperimentActive();
   const scale = useScale();
@@ -130,6 +140,10 @@ export default function Bodies() {
   // without re-subscribing.
   const bodiesRef = useRef(bodies);
   bodiesRef.current = bodies;
+  const tempoRef = useRef(tempo);
+  tempoRef.current = tempo;
+  const widthRef = useRef(width);
+  widthRef.current = width;
   const idRef = useRef(0);
   const draggingRef = useRef<number | null>(null);
 
@@ -144,12 +158,6 @@ export default function Bodies() {
   const unregisterFx = useCallback((id: number) => {
     fxRef.current.delete(id);
   }, []);
-
-  // Per-body interval handles, keyed by id, with the schedule signature they
-  // were built for so we only restart a timer when its rhythm actually changes.
-  const timersRef = useRef<Map<number, { handle: ReturnType<typeof setInterval>; sig: string }>>(
-    new Map()
-  );
 
   // Fire a body: sound, pop the body, and shed a ripple from its position.
   const fire = useCallback(
@@ -170,43 +178,50 @@ export default function Bodies() {
     [pulses, clock]
   );
 
-  // Reconcile timers to the current scene: (re)start a body's interval when its
-  // subdivision or the tempo changes, and clear timers for paused/removed bodies.
+  // A single global scheduler drives every body off one shared grid, anchored at
+  // t0. A body fires when real time crosses gridSlot·period + drift(x): dead
+  // center is on the grid, right of center is a touch late, left a touch early.
+  // Polling fast and firing on the crossing keeps all voices phase-locked, so the
+  // drifted notes push and pull around a common pulse instead of free-running.
+  const schedRef = useRef<Map<number, number>>(new Map()); // body id → last fired slot
+  const t0Ref = useRef(Date.now());
   useEffect(() => {
-    const timers = timersRef.current;
-    const alive = new Set<number>();
-    for (const b of bodies) {
-      if (!live || !b.playing) continue;
-      alive.add(b.id);
-      const sig = `${b.subdivision}:${tempo}`;
-      const existing = timers.get(b.id);
-      if (existing && existing.sig === sig) continue;
-      if (existing) clearInterval(existing.handle);
-      const period = periodMs(b.subdivision, tempo);
-      const tick = () => {
-        if (draggingRef.current === b.id) return; // silent while being dragged; resumes on the next beat once it lands
-        const cur = bodiesRef.current.find((x) => x.id === b.id);
-        if (cur) fire(cur); // read fresh so a note change doesn't restart the clock
-      };
-      tick();
-      timers.set(b.id, { handle: setInterval(tick, period), sig });
-    }
-    for (const [id, t] of timers) {
-      if (!alive.has(id)) {
-        clearInterval(t.handle);
-        timers.delete(id);
+    if (!live) return;
+    const sched = schedRef.current;
+    const handle = setInterval(() => {
+      const now = Date.now();
+      const bpm = tempoRef.current;
+      const w = widthRef.current;
+      const present = new Set<number>();
+      for (const b of bodiesRef.current) {
+        present.add(b.id);
+        if (!b.playing) {
+          sched.delete(b.id);
+          continue;
+        }
+        const P = periodMs(b.subdivision, bpm);
+        const k = Math.floor((now - t0Ref.current - driftMs(b.x, P, w)) / P);
+        // While dragging, stay silent but keep the slot counter current so the
+        // body re-enters on the grid (not with a burst) once it lands.
+        if (draggingRef.current === b.id) {
+          sched.set(b.id, k);
+          continue;
+        }
+        const last = sched.get(b.id);
+        if (last === undefined) {
+          sched.set(b.id, k); // new/resumed voice: align, then fire on the next slot
+        } else if (k > last) {
+          sched.set(b.id, k);
+          fire(b);
+        }
       }
-    }
-  }, [bodies, tempo, live, fire]);
-
-  // Tear every timer down on unmount.
-  useEffect(
-    () => () => {
-      for (const t of timersRef.current.values()) clearInterval(t.handle);
-      timersRef.current.clear();
-    },
-    []
-  );
+      for (const id of sched.keys()) if (!present.has(id)) sched.delete(id);
+    }, SCHED_MS);
+    return () => {
+      clearInterval(handle);
+      sched.clear(); // re-align to the grid when we come back on-screen
+    };
+  }, [live, fire]);
 
   // Close the panel if its body is deleted out from under it.
   useEffect(() => {
@@ -337,6 +352,9 @@ export default function Bodies() {
           </Canvas>
           {/* pitch ruler down the left edge — the field's y→note legend */}
           <PitchRuler ladder={ladder} top={PITCH_TOP} bottom={height - PITCH_BOTTOM_INSET} />
+          {/* on-grid center line + horizontal drift (early ↔ late) ruler */}
+          <View style={styles.centerGuide} pointerEvents="none" />
+          <DriftRuler />
           {/* note-name labels, centered on each body (dark on white when playing) */}
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
             {bodies.map((b) => (
@@ -436,6 +454,22 @@ function PitchRuler({ ladder, top, bottom }: { ladder: number[]; top: number; bo
   );
 }
 
+// Horizontal drift ruler along the bottom: a hairline with a center "grid" tick
+// and early/late ends, matching the x→timing map (center = quantized).
+function DriftRuler() {
+  return (
+    <View style={styles.driftRuler} pointerEvents="none">
+      <View style={styles.driftLine} />
+      <View style={styles.driftCenterTick} />
+      <View style={styles.driftLabels}>
+        <Text style={styles.driftText}>early</Text>
+        <Text style={styles.driftText}>grid</Text>
+        <Text style={styles.driftText}>late</Text>
+      </View>
+    </View>
+  );
+}
+
 // Long-press panel: subdivision buttons and delete. (Pitch is set by position,
 // so there's no note control here — drag the body up/down to tune it.)
 function PropertiesPanel({
@@ -521,6 +555,42 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   rulerTick: { width: 8, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.3)' },
+  centerGuide: {
+    position: 'absolute',
+    left: '50%',
+    marginLeft: -0.5,
+    top: PITCH_TOP,
+    bottom: 120,
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  driftRuler: { position: 'absolute', left: 20, right: 20, bottom: 92, height: 26 },
+  driftLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 4,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  driftCenterTick: {
+    position: 'absolute',
+    left: '50%',
+    marginLeft: -0.5,
+    top: 0,
+    width: StyleSheet.hairlineWidth,
+    height: 10,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+  },
+  driftLabels: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  driftText: { color: 'rgba(255,255,255,0.4)', fontSize: 10, letterSpacing: 1 },
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.35)' },
   panel: {
     position: 'absolute',

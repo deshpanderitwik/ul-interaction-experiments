@@ -335,6 +335,8 @@ export default function Bodies() {
               <BodyView key={b.id} body={b} register={registerFx} unregister={unregisterFx} />
             ))}
           </Canvas>
+          {/* pitch ruler down the left edge — the field's y→note legend */}
+          <PitchRuler ladder={ladder} top={PITCH_TOP} bottom={height - PITCH_BOTTOM_INSET} />
           {/* note-name labels, centered on each body (dark on white when playing) */}
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
             {bodies.map((b) => (
@@ -414,6 +416,26 @@ function BodyView({
   );
 }
 
+// Pitch ruler down the left edge: each scale note at the exact y its position
+// maps to (lowest at the bottom, highest at the top). Purely a read-out.
+function PitchRuler({ ladder, top, bottom }: { ladder: number[]; top: number; bottom: number }) {
+  const n = ladder.length;
+  return (
+    <View style={styles.ruler} pointerEvents="none">
+      <View style={[styles.rulerSpine, { top, height: Math.max(0, bottom - top) }]} />
+      {ladder.map((midi, i) => {
+        const y = n > 1 ? bottom - (i / (n - 1)) * (bottom - top) : (top + bottom) / 2;
+        return (
+          <View key={midi} style={[styles.rulerRow, { top: y - 7 }]}>
+            <Text style={styles.rulerLabel}>{noteName(midi)}</Text>
+            <View style={styles.rulerTick} />
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 // Long-press panel: subdivision buttons and delete. (Pitch is set by position,
 // so there's no note control here — drag the body up/down to tune it.)
 function PropertiesPanel({
@@ -482,6 +504,23 @@ const styles = StyleSheet.create({
     fontSize: 15,
     letterSpacing: 1,
   },
+  ruler: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 64 },
+  rulerSpine: {
+    position: 'absolute',
+    left: 50,
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  rulerRow: { position: 'absolute', left: 10, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rulerLabel: {
+    width: 26,
+    textAlign: 'right',
+    color: 'rgba(255,255,255,0.42)',
+    fontSize: 11,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
+  rulerTick: { width: 8, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.3)' },
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.35)' },
   panel: {
     position: 'absolute',

@@ -315,6 +315,20 @@ export default function Bodies() {
               <BodyView key={b.id} body={b} register={registerFx} unregister={unregisterFx} />
             ))}
           </Canvas>
+          {/* note-name labels, centered on each body (dark on white when playing) */}
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {bodies.map((b) => (
+              <Text
+                key={b.id}
+                style={[
+                  styles.label,
+                  { left: b.x - 40, top: b.y - 9, color: b.playing ? '#0a0a0a' : '#fff' },
+                ]}
+              >
+                {noteName(b.midi)}
+              </Text>
+            ))}
+          </View>
           {bodies.length === 0 ? (
             <Text style={styles.hint} pointerEvents="none">
               double-tap to add a body
@@ -451,6 +465,15 @@ function PropertiesPanel({
 
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
+  label: {
+    position: 'absolute',
+    width: 80,
+    textAlign: 'center',
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    fontVariant: ['tabular-nums'],
+  },
   hint: {
     position: 'absolute',
     bottom: 60,

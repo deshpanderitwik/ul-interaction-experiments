@@ -75,9 +75,9 @@ half4 main(float2 fragcoord) {
     float bump = flow(d * 0.012 + float2(seed * 21.0, seed * 13.0), u_time * 0.15).x;
     float dist = len * (1.0 + 0.06 * bump);
 
-    // a single expanding wavefront — one clean ring per note
+    // a single expanding wavefront — one hairline ring (~2px) per note
     float speed = 200.0 + seed * 70.0;
-    float width = 16.0 + seed * 6.0;
+    float width = 1.2;
     float r = age * speed;
     float band = (dist - r) / width;
     float env = exp(-band * band);

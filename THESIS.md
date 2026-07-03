@@ -69,12 +69,49 @@ a scene (1), then link scenes (3).
 
 | Experiment | Facet | Reads on camera? |
 |---|---|---|
-| **bodies** | **Compose a scene** (Persistence · Layering · Coherence) | tbd — first cut |
+| **bodies** | **Compose a scene** (Persistence · Layering · Coherence) + first take on the legibility-without-discreteness win | strong — stark B/W (see log below) |
 | duet | Coupling | strong |
 | raindrops | Coupling | strong |
 | notesketch | Coupling (hint of persistence) | ? |
 | note-radial | Coupling / Coherence | ? |
 | fence/* | (visual substrate, no audio) | strong |
+
+## Bodies — where the sketch landed (log)
+
+The first `experiments/bodies` sketch, as of this writing. A stark monochrome
+scene: plain white circles ("bodies") on black.
+
+**Built / working (Level 1 — compose a scene):**
+- **Plant & arrange.** Double-tap plants a body; single-tap play/pauses it;
+  long-press opens options (subdivision + delete); drag to move. New bodies
+  *join on the grid* rather than firing instantly — they enter the groove.
+- **Position = pitch** (the slider is gone). Vertical position maps to the nearest
+  scale note (C3–C5, snapped); dragging up/down tunes, and the note letter on the
+  circle updates live. This is our first real take on **legibility without
+  discreteness**: a body is a *thing at a place* (aim-able like a button) yet
+  continuous, and it *is* the sound made visible. A left **pitch ruler** +
+  full-width **note-boundary grid lines** make the field read like a staff.
+- **One shared backing grid.** A single global scheduler phase-locks every body to
+  a common `t0`, so voices lock together instead of free-running (**coherence**).
+- **Drift** = horizontal position: center is on-grid, right lays a note late, left
+  pushes it early — bounded to a fraction of the body's own step, so it's subtle
+  and slot-safe. A bottom **drift ruler** + center guide read it. This is the
+  first taste of per-voice *life* on top of a quantized grid.
+- **Coupling.** Each note sheds a single hairline ripple — the Fence·Raindrops
+  ring shader ported to monochrome (white ring on black), dimmed so dense scenes
+  layer instead of washing out. Dragging mutes a body; it re-enters in time.
+
+**Not yet (the next frontier):**
+- **Level 2 — expressiveness / aliveness.** Each body still plays *one static
+  note*. The open move (brainstormed): make the note **change over time** via a
+  gesture beyond the slider. Position=pitch already sets up the key idea —
+  **motion = melody** — so the candidates are: draw-a-path (patrol a traced
+  shape), flick-to-orbit (physics), wander-within-a-temperament (generative), or
+  entangle neighbors (emergence). Tension to hold: composition wants
+  repeatability, aliveness wants variation — likely a deterministic path with a
+  thin generative jitter.
+- **Level 3 — link scenes.** Untouched. The Fence dissolve/erode vocabulary is the
+  candidate transition grammar.
 
 ## The video
 
@@ -86,8 +123,12 @@ a scene (1), then link scenes (3).
 ## Open questions
 
 - **What's the unit of accumulation?** A loop? a voice? a gesture-trace you can grab?
+  _(Bodies' answer so far: a placed, grid-locked voice — a body.)_
 - **How does structure work without a timeline / piano roll** — else we've just
   moved the grid up a layer?
 - **How do you edit a committed gesture** without delete-and-redo?
 - **Where's the "legibility without discreteness" win** that beats the button at
-  its own game?
+  its own game? _(Bodies: position=pitch — a body is aim-able like a button but
+  continuous and is the sound. Partial answer; wants stress-testing.)_
+- **How does a voice come alive?** Make its note change over time via gesture, not
+  a slider — the Level-2 question now on deck (see Bodies log).

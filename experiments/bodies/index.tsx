@@ -169,7 +169,7 @@ export default function Bodies() {
   // center is on the grid, right of center is a touch late, left a touch early.
   // Polling fast and firing on the crossing keeps all voices phase-locked, so the
   // drifted notes push and pull around a common pulse instead of free-running.
-  const schedRef = useRef<Map<number, number>>(new Map()); // body id → last fired slot
+  const schedRef = useRef<Map<number, { k: number; sig: string }>>(new Map()); // body id → last fired slot + its rhythm signature
   const t0Ref = useRef(Date.now());
   useEffect(() => {
     if (!live) return;
@@ -187,17 +187,18 @@ export default function Bodies() {
         }
         const P = periodMs(b.subdivision, bpm);
         const k = Math.floor((now - t0Ref.current - driftMs(b.x, P, w)) / P);
+        const sig = `${b.subdivision}:${bpm}`;
         // While dragging, stay silent but keep the slot counter current so the
         // body re-enters on the grid (not with a burst) once it lands.
         if (draggingRef.current === b.id) {
-          sched.set(b.id, k);
+          sched.set(b.id, { k, sig });
           continue;
         }
-        const last = sched.get(b.id);
-        if (last === undefined) {
-          sched.set(b.id, k); // new/resumed voice: align, then fire on the next slot
-        } else if (k > last) {
-          sched.set(b.id, k);
+        const entry = sched.get(b.id);
+        if (entry === undefined || entry.sig !== sig) {
+          sched.set(b.id, { k, sig }); // new/resumed/retimed voice: align, fire on the next slot
+        } else if (k > entry.k) {
+          sched.set(b.id, { k, sig });
           fire(b);
         }
       }

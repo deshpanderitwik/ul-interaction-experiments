@@ -195,7 +195,7 @@ export default function Paths() {
 
   // Shared-grid scheduler: every runner steps off the same clock, so all the
   // paths stay phase-locked. A path advances one step per subdivision.
-  const schedRef = useRef<Map<number, number>>(new Map()); // path id → last fired step (k)
+  const schedRef = useRef<Map<number, { k: number; sig: string }>>(new Map()); // id → last fired slot + its rhythm signature
   useEffect(() => {
     if (!live) return;
     const sched = schedRef.current;
@@ -209,11 +209,12 @@ export default function Paths() {
         if (S < 1) continue;
         const P = periodMs(p.subdivision, bpm);
         const k = Math.floor(now / P);
-        const last = sched.get(p.id);
-        if (last === undefined) {
-          sched.set(p.id, k);
-        } else if (k > last) {
-          sched.set(p.id, k);
+        const sig = `${p.subdivision}:${bpm}`;
+        const entry = sched.get(p.id);
+        if (entry === undefined || entry.sig !== sig) {
+          sched.set(p.id, { k, sig }); // (re)align when subdivision/tempo changes — no fire
+        } else if (k > entry.k) {
+          sched.set(p.id, { k, sig });
           const step = k - Math.floor(p.t0 / P); // steps since the path was drawn
           fire(p, ((step % S) + S) % S);
         }

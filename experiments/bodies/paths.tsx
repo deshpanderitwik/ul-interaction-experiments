@@ -48,6 +48,8 @@ const MIN_SEG = 6; // min spacing between recorded draw points
 const DEFAULT_SUB = 8; // 1/8-note steps
 const RUNNER_R = 9;
 const PATH_HIT = 30; // max long-press-to-path distance to open a path's sheet
+const HANDLE_R = 11; // endpoint handle radius
+const HANDLE_HIT = 28; // touch radius to grab an endpoint handle
 
 // Monochrome ripple shader (a hairline white ring per note on black), the same
 // port used by Bodies. Fed a ring buffer of recent note-fires.
@@ -156,6 +158,11 @@ export default function Paths() {
   const pathsRef = useRef(paths);
   pathsRef.current = paths;
   const draftRef = useRef<Pt[]>([]);
+  // While dragging an endpoint handle: which path/end, a snapshot of the stroke
+  // at grab time, the grabbed point, and the fixed step count.
+  const dragRef = useRef<{ id: number; end: 'a' | 'b'; base: Pt[]; anchor: Pt; steps: number } | null>(
+    null
+  );
   const tempoRef = useRef(tempo);
   tempoRef.current = tempo;
   const heightRef = useRef(height);
@@ -274,12 +281,64 @@ export default function Paths() {
     setEditing(null);
   };
 
-  // Draw gesture: record a stroke, then commit it as a path on release.
+  // An endpoint handle near a point (topmost path first), or null.
+  const hitHandle = (x: number, y: number): { id: number; end: 'a' | 'b' } | null => {
+    const ps = pathsRef.current;
+    for (let i = ps.length - 1; i >= 0; i--) {
+      const r = ps[i].raw;
+      const a = r[0];
+      const b = r[r.length - 1];
+      if (a && Math.hypot(x - a.x, y - a.y) <= HANDLE_HIT) return { id: ps[i].id, end: 'a' };
+      if (b && Math.hypot(x - b.x, y - b.y) <= HANDLE_HIT) return { id: ps[i].id, end: 'b' };
+    }
+    return null;
+  };
+
+  // Warp a path by its grabbed endpoint: the far end stays pinned, the grabbed
+  // end fully follows, points in between move proportionally (a lever bend).
+  // Re-resample to the same step count and re-pitch so the runner varies live.
+  const warpPath = (x: number, y: number) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const dx = x - drag.anchor.x;
+    const dy = y - drag.anchor.y;
+    const n = drag.base.length;
+    const newRaw = drag.base.map((pt, i) => {
+      const t = n > 1 ? i / (n - 1) : 0;
+      const w = drag.end === 'b' ? t : 1 - t;
+      return { x: pt.x + w * dx, y: pt.y + w * dy };
+    });
+    const samples = resample(newRaw, drag.steps);
+    const notes = samples.map((s) => midiFromY(s.y, ladderRef.current, heightRef.current));
+    setPaths((prev) => prev.map((p) => (p.id === drag.id ? { ...p, raw: newRaw, samples, notes } : p)));
+  };
+
+  // Pan: grab an endpoint handle to reshape a path, otherwise draw a new stroke.
   const onDrawBegin = (x: number, y: number) => {
+    const h = hitHandle(x, y);
+    if (h) {
+      const p = pathsRef.current.find((pp) => pp.id === h.id);
+      if (p) {
+        const r = p.raw;
+        dragRef.current = {
+          id: h.id,
+          end: h.end,
+          base: r.map((q) => ({ ...q })),
+          anchor: { ...(h.end === 'a' ? r[0] : r[r.length - 1]) },
+          steps: p.samples.length,
+        };
+      }
+      return; // grabbing a handle — don't start a new stroke
+    }
+    dragRef.current = null;
     draftRef.current = [{ x, y }];
     setDraft(draftRef.current.slice());
   };
   const onDrawMove = (x: number, y: number) => {
+    if (dragRef.current) {
+      warpPath(x, y);
+      return;
+    }
     const d = draftRef.current;
     const last = d[d.length - 1];
     if (last && dist(last, { x, y }) < MIN_SEG) return;
@@ -287,6 +346,10 @@ export default function Paths() {
     setDraft(d.slice());
   };
   const onDrawEnd = () => {
+    if (dragRef.current) {
+      dragRef.current = null; // finished reshaping
+      return;
+    }
     const pts = draftRef.current;
     draftRef.current = [];
     setDraft([]);
@@ -473,6 +536,10 @@ function PathView({
   const bloomOpacity = useDerivedValue(() => 0.12 + 0.5 * pulse.value);
   const runnerR = useDerivedValue(() => RUNNER_R * (1 + 0.5 * pulse.value));
 
+  const a = path.raw[0];
+  const b = path.raw[path.raw.length - 1];
+  const handleColor = selected ? 'rgba(255,120,120,0.9)' : 'rgba(255,255,255,0.85)';
+
   return (
     <Group>
       <Path
@@ -483,6 +550,13 @@ function PathView({
         strokeCap="round"
         color={selected ? 'rgba(255,120,120,0.85)' : 'rgba(255,255,255,0.4)'}
       />
+      {/* draggable endpoint handles */}
+      {a ? (
+        <Circle cx={a.x} cy={a.y} r={HANDLE_R} style="stroke" strokeWidth={2} color={handleColor} />
+      ) : null}
+      {b ? (
+        <Circle cx={b.x} cy={b.y} r={HANDLE_R} style="stroke" strokeWidth={2} color={handleColor} />
+      ) : null}
       <Circle c={pos} r={RUNNER_R * 2.2} color="white" opacity={bloomOpacity}>
         <Blur blur={RUNNER_R} />
       </Circle>

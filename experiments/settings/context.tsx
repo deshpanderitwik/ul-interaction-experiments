@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { Schema, ValuesOf } from './types';
+import type { Action, Schema, ValuesOf } from './types';
 
 type Values = Record<string, number>;
 
@@ -16,6 +16,8 @@ type SettingsCtx = {
   values: Values;
   setValue: (key: string, value: number) => void;
   register: (schema: Schema) => void;
+  actions: Action[];
+  registerActions: (actions: Action[]) => void;
   open: boolean;
   setOpen: (open: boolean) => void;
   audio: boolean; // musical experiment → show scale + tempo
@@ -39,6 +41,7 @@ export function SettingsProvider({
 }) {
   const [schema, setSchema] = useState<Schema | null>(null);
   const [values, setValues] = useState<Values>(() => ({ ...(store.get(id) ?? {}) }));
+  const [actions, setActions] = useState<Action[]>([]);
   const [open, setOpen] = useState(false);
 
   // Called by the experiment (via useSettings) to publish its schema and seed
@@ -69,9 +72,11 @@ export function SettingsProvider({
     [id]
   );
 
+  const registerActions = useCallback((next: Action[]) => setActions(next), []);
+
   const ctx = useMemo<SettingsCtx>(
-    () => ({ schema, values, setValue, register, open, setOpen, audio }),
-    [schema, values, setValue, register, open, audio]
+    () => ({ schema, values, setValue, register, actions, registerActions, open, setOpen, audio }),
+    [schema, values, setValue, register, actions, registerActions, open, audio]
   );
 
   return <Context.Provider value={ctx}>{children}</Context.Provider>;
@@ -107,4 +112,17 @@ export function useSettings<S extends Schema>(schema: S): ValuesOf<S> {
     for (const key in schema) out[key] = values[key] ?? schema[key].default;
     return out as ValuesOf<S>;
   }, [schema, values]);
+}
+
+/**
+ * Register one-shot action buttons (e.g. "Clear") into the settings sheet. Pass a
+ * stable (useMemo'd) array; the buttons appear at the bottom of the panel and
+ * clear when the experiment unmounts.
+ */
+export function useSettingsActions(actions: Action[]): void {
+  const { registerActions } = useSettingsContext();
+  useEffect(() => {
+    registerActions(actions);
+    return () => registerActions([]);
+  }, [registerActions, actions]);
 }

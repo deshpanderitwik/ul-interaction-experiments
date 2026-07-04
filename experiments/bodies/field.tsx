@@ -9,7 +9,7 @@ import { scaleMidiLadder } from './shared';
 export const LADDER_MIN = 48; // C3
 export const LADDER_MAX = 72; // C5 (two octaves)
 export const PITCH_TOP = 110; // y of the highest note
-export const PITCH_BOTTOM_INSET = 130; // highest y (from bottom) of the lowest note
+export const PITCH_BOTTOM_INSET = 92; // y (from bottom) of the lowest note
 
 export function fieldLadder(scale: Scale): number[] {
   return scaleMidiLadder(scale, LADDER_MIN, LADDER_MAX);

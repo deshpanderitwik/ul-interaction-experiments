@@ -1,4 +1,4 @@
-export { SettingsProvider, useSettings, useSettingsContext } from './context';
+export { SettingsProvider, useSettings, useSettingsActions, useSettingsContext } from './context';
 export { SettingsGear, SettingsSheet } from './SettingsPanel';
 export { Slider, type SliderProps } from './Slider';
-export type { Schema, Setting, SliderSetting, ValuesOf } from './types';
+export type { Action, Schema, Setting, SliderSetting, ValuesOf } from './types';

@@ -28,6 +28,7 @@ import { midiToFreq, useScale } from '../scale';
 import { useTempo } from '../tempo';
 import { periodMs, SUBDIVISIONS } from './shared';
 import { PITCH_TOP, computeGridYs, fieldLadder, midiFromY, PitchRuler } from './field';
+import { useSettingsActions } from '../settings';
 import { playSine } from './voice';
 
 // Bodies · Paths — trace a stroke across the same pitch field and a runner
@@ -160,6 +161,14 @@ export default function Paths() {
   const heightRef = useRef(height);
   heightRef.current = height;
   const idRef = useRef(0);
+
+  // "Clear paths" lives in the gear settings sheet (not a bottom button).
+  useSettingsActions(
+    useMemo(
+      () => [{ id: 'clear', label: 'Clear paths', danger: true, onPress: () => setPaths([]) }],
+      []
+    )
+  );
 
   const pulses = useSharedValue<Pulse[]>([]);
   const fxRef = useRef<Map<number, Fx>>(new Map());
@@ -395,12 +404,6 @@ export default function Paths() {
         </View>
       </GestureDetector>
 
-      {paths.length > 0 ? (
-        <Pressable style={styles.clear} onPress={() => setPaths([])} hitSlop={10}>
-          <Text style={styles.clearText}>Clear</Text>
-        </Pressable>
-      ) : null}
-
       {editingPath ? (
         <PathSheet
           path={editingPath}
@@ -583,16 +586,4 @@ const styles = StyleSheet.create({
   },
   deleteText: { color: '#ff5a5a', fontSize: 15, fontWeight: '700', letterSpacing: 0.5 },
   closeHint: { color: 'rgba(255,255,255,0.32)', fontSize: 13, letterSpacing: 0.5, marginTop: 16 },
-  clear: {
-    position: 'absolute',
-    bottom: 44,
-    right: 20,
-    paddingVertical: 9,
-    paddingHorizontal: 18,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.28)',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-  },
-  clearText: { color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: '600', letterSpacing: 0.5 },
 });

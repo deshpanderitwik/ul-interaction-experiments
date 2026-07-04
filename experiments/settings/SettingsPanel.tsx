@@ -17,8 +17,8 @@ import type { SliderSetting } from './types';
 // there's something to configure: a musical experiment (scale + tempo) or one
 // that registered its own controls.
 export function SettingsGear() {
-  const { setOpen, audio, schema } = useSettingsContext();
-  if (!audio && !schema) return null;
+  const { setOpen, audio, schema, actions } = useSettingsContext();
+  if (!audio && !schema && actions.length === 0) return null;
   return (
     <Pressable
       onPress={() => setOpen(true)}
@@ -37,7 +37,7 @@ const SHEET_W = 320;
 // Side sheet that slides in from the right. Live-apply: each control writes
 // straight to the settings store, so the experiment behind updates immediately.
 export function SettingsSheet() {
-  const { schema, values, setValue, open, setOpen, audio } = useSettingsContext();
+  const { schema, values, setValue, actions, open, setOpen, audio } = useSettingsContext();
   const { width } = useWindowDimensions();
   const sheetW = Math.min(SHEET_W, width * 0.86);
 
@@ -135,6 +135,23 @@ export function SettingsSheet() {
               </View>
             );
           })}
+
+          {actions.length > 0 ? (
+            <View style={styles.actions}>
+              {actions.map((a) => (
+                <Pressable
+                  key={a.id}
+                  onPress={() => {
+                    a.onPress();
+                    setOpen(false);
+                  }}
+                  style={styles.actionBtn}
+                >
+                  <Text style={[styles.actionText, a.danger && styles.actionDanger]}>{a.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
         </ScrollView>
       </Animated.View>
     </View>
@@ -211,4 +228,16 @@ const styles = StyleSheet.create({
   segmentOn: { backgroundColor: '#5b8cff', borderColor: '#5b8cff' },
   segmentText: { color: '#bbbbbb', fontSize: 14, fontWeight: '600' },
   segmentTextOn: { color: '#ffffff' },
+  actions: { marginTop: 8, gap: 10 },
+  actionBtn: {
+    height: 46,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1c1c1c',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  actionText: { color: '#dddddd', fontSize: 15, fontWeight: '600' },
+  actionDanger: { color: '#ff5a5a' },
 });

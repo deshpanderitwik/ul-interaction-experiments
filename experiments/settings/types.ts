@@ -33,6 +33,15 @@ export type Setting = SliderSetting | SelectSetting | ToggleSetting;
 
 export type Schema = Record<string, Setting>;
 
+// A one-shot action button (e.g. "Clear"). Not a stored value — it fires a
+// callback. Rendered at the bottom of the settings sheet.
+export type Action = {
+  id: string;
+  label: string;
+  danger?: boolean;
+  onPress: () => void;
+};
+
 // The values object an experiment reads back. Every control currently yields a
 // number; when non-numeric controls land, switch this to map by `type`.
 export type ValuesOf<S extends Schema> = {

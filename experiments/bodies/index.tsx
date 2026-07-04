@@ -503,11 +503,11 @@ const styles = StyleSheet.create({
     left: '50%',
     marginLeft: -0.5,
     top: PITCH_TOP,
-    bottom: 120,
+    bottom: PITCH_BOTTOM_INSET,
     width: StyleSheet.hairlineWidth,
     backgroundColor: 'rgba(255,255,255,0.1)',
   },
-  driftRuler: { position: 'absolute', left: 20, right: 20, bottom: 92, height: 26 },
+  driftRuler: { position: 'absolute', left: 20, right: 20, bottom: 46, height: 26 },
   driftLine: {
     position: 'absolute',
     left: 0,

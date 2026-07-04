@@ -26,7 +26,7 @@ import {
 import { useExperimentActive } from '../_host';
 import { midiToFreq, useScale } from '../scale';
 import { useTempo } from '../tempo';
-import { periodMs } from './shared';
+import { periodMs, SUBDIVISIONS } from './shared';
 import { PITCH_TOP, computeGridYs, fieldLadder, midiFromY, PitchRuler } from './field';
 import { playSine } from './voice';
 
@@ -46,7 +46,7 @@ const MIN_PATH_LEN = 60; // ignore taps / tiny scribbles shorter than this
 const MIN_SEG = 6; // min spacing between recorded draw points
 const DEFAULT_SUB = 8; // 1/8-note steps
 const RUNNER_R = 9;
-const DELETE_HIT = 30; // max tap-to-path distance to select a path for deletion
+const PATH_HIT = 30; // max long-press-to-path distance to open a path's sheet
 
 // Monochrome ripple shader (a hairline white ring per note on black), the same
 // port used by Bodies. Fed a ring buffer of recent note-fires.
@@ -150,8 +150,8 @@ export default function Paths() {
 
   const [paths, setPaths] = useState<PathItem[]>([]);
   const [draft, setDraft] = useState<Pt[]>([]);
-  // A path selected for deletion (double-tapped): id + the anchor point for the ×.
-  const [selected, setSelected] = useState<{ id: number; x: number; y: number } | null>(null);
+  // The path whose options sheet is open (long-pressed).
+  const [editing, setEditing] = useState<number | null>(null);
   const pathsRef = useRef(paths);
   pathsRef.current = paths;
   const draftRef = useRef<Pt[]>([]);
@@ -233,33 +233,35 @@ export default function Paths() {
     );
   }, [ladder, height]);
 
-  // Drop the delete affordance if its path is gone.
+  // Close the sheet if its path is gone.
   useEffect(() => {
-    if (selected && !paths.some((p) => p.id === selected.id)) setSelected(null);
-  }, [paths, selected]);
+    if (editing != null && !paths.some((p) => p.id === editing)) setEditing(null);
+  }, [paths, editing]);
 
-  // Nearest path to a point (within DELETE_HIT), anchored at its closest point.
-  const hitPath = (x: number, y: number): { id: number; x: number; y: number } | null => {
-    let best: { id: number; x: number; y: number } | null = null;
-    let bd = DELETE_HIT;
+  // Id of the nearest path to a point (within PATH_HIT), or null.
+  const hitPathId = (x: number, y: number): number | null => {
+    let best: number | null = null;
+    let bd = PATH_HIT;
     for (const p of pathsRef.current) {
       for (const pt of p.raw) {
         const d = Math.hypot(x - pt.x, y - pt.y);
         if (d < bd) {
           bd = d;
-          best = { id: p.id, x: pt.x, y: pt.y };
+          best = p.id;
         }
       }
     }
     return best;
   };
-  const onDoubleTap = (x: number, y: number) => setSelected(hitPath(x, y));
-  const clearSelected = () => setSelected(null);
-  const deleteSelected = () => {
-    setSelected((sel) => {
-      if (sel) setPaths((prev) => prev.filter((p) => p.id !== sel.id));
-      return null;
-    });
+  const onLongPress = (x: number, y: number) => {
+    const id = hitPathId(x, y);
+    if (id != null) setEditing(id);
+  };
+  const setSubdivision = (d: number) =>
+    setPaths((prev) => prev.map((p) => (p.id === editing ? { ...p, subdivision: d } : p)));
+  const deleteEditing = () => {
+    setPaths((prev) => prev.filter((p) => p.id !== editing));
+    setEditing(null);
   };
 
   // Draw gesture: record a stroke, then commit it as a path on release.
@@ -288,17 +290,13 @@ export default function Paths() {
     ]);
   };
 
-  // Drag draws a path (needs a little movement, so taps stay taps); double-tap on
-  // a path selects it for deletion; a single tap dismisses the delete affordance.
+  // Drag draws a path (needs a little movement, so a hold stays a hold); a hold on
+  // a path opens its options sheet.
   const draw = Gesture.Pan()
     .minDistance(6)
     .onBegin((e) => {
       if (!live) return;
       runOnJS(onDrawBegin)(e.x, e.y);
-    })
-    .onStart(() => {
-      if (!live) return;
-      runOnJS(clearSelected)();
     })
     .onUpdate((e) => {
       if (!live) return;
@@ -308,18 +306,15 @@ export default function Paths() {
       if (!live) return;
       runOnJS(onDrawEnd)();
     });
-  const doubleTap = Gesture.Tap()
-    .numberOfTaps(2)
-    .maxDuration(300)
+  const longPress = Gesture.LongPress()
+    .minDuration(350)
     .onStart((e) => {
       if (!live) return;
-      runOnJS(onDoubleTap)(e.x, e.y);
+      runOnJS(onLongPress)(e.x, e.y);
     });
-  const singleTap = Gesture.Tap().onStart(() => {
-    if (!live) return;
-    runOnJS(clearSelected)();
-  });
-  const gesture = Gesture.Race(draw, Gesture.Exclusive(doubleTap, singleTap));
+  const gesture = Gesture.Race(draw, longPress);
+
+  const editingPath = editing != null ? paths.find((p) => p.id === editing) : undefined;
 
   const draftPath = useMemo(() => {
     const p = Skia.Path.Make();
@@ -389,7 +384,7 @@ export default function Paths() {
                 path={p}
                 tempo={tempo}
                 clock={clock}
-                selected={selected?.id === p.id}
+                selected={editing === p.id}
                 register={registerFx}
                 unregister={unregisterFx}
               />
@@ -399,20 +394,19 @@ export default function Paths() {
         </View>
       </GestureDetector>
 
-      {selected ? (
-        <Pressable
-          style={[styles.del, { left: selected.x - 20, top: selected.y - 20 }]}
-          onPress={deleteSelected}
-          hitSlop={12}
-        >
-          <Text style={styles.delText}>×</Text>
-        </Pressable>
-      ) : null}
-
       {paths.length > 0 ? (
         <Pressable style={styles.clear} onPress={() => setPaths([])} hitSlop={10}>
           <Text style={styles.clearText}>Clear</Text>
         </Pressable>
+      ) : null}
+
+      {editingPath ? (
+        <PathSheet
+          path={editingPath}
+          onSubdivision={setSubdivision}
+          onDelete={deleteEditing}
+          onClose={() => setEditing(null)}
+        />
       ) : null}
     </View>
   );
@@ -493,8 +487,101 @@ function PathView({
   );
 }
 
+// Long-press sheet for a path: subdivision selector + delete.
+function PathSheet({
+  path,
+  onSubdivision,
+  onDelete,
+  onClose,
+}: {
+  path: PathItem;
+  onSubdivision: (d: number) => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      <Pressable style={styles.backdrop} onPress={onClose} />
+      <View style={styles.panel} pointerEvents="box-none">
+        <Text style={styles.panelTitle}>Path · {path.notes.length} steps</Text>
+
+        <Text style={styles.panelLabel}>subdivision</Text>
+        <View style={styles.row}>
+          {SUBDIVISIONS.map((s) => {
+            const on = s.d === path.subdivision;
+            return (
+              <Pressable
+                key={s.d}
+                onPress={() => onSubdivision(s.d)}
+                style={[
+                  styles.subBtn,
+                  on
+                    ? { backgroundColor: '#fff', borderColor: '#fff' }
+                    : { borderColor: 'rgba(255,255,255,0.28)' },
+                ]}
+              >
+                <Text style={[styles.subBtnText, on ? styles.subBtnTextOn : null]}>{s.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Pressable style={styles.deleteBtn} onPress={onDelete}>
+          <Text style={styles.deleteText}>Delete</Text>
+        </Pressable>
+        <Text style={styles.closeHint}>tap outside to close</Text>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.35)' },
+  panel: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    bottom: 60,
+    alignItems: 'center',
+    paddingVertical: 22,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    backgroundColor: 'rgba(14,14,16,0.96)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  panelTitle: { color: '#fff', fontSize: 18, fontWeight: '700', letterSpacing: 0.5, marginBottom: 16 },
+  panelLabel: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+  row: { flexDirection: 'row', gap: 10, marginBottom: 18 },
+  subBtn: {
+    minWidth: 50,
+    paddingHorizontal: 12,
+    height: 46,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  subBtnText: { color: 'rgba(255,255,255,0.85)', fontSize: 16, fontWeight: '600' },
+  subBtnTextOn: { color: '#0a0a0a' },
+  deleteBtn: {
+    marginTop: 4,
+    paddingVertical: 11,
+    paddingHorizontal: 28,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,90,90,0.7)',
+  },
+  deleteText: { color: '#ff5a5a', fontSize: 15, fontWeight: '700', letterSpacing: 0.5 },
+  closeHint: { color: 'rgba(255,255,255,0.32)', fontSize: 13, letterSpacing: 0.5, marginTop: 16 },
   clear: {
     position: 'absolute',
     bottom: 44,
@@ -507,16 +594,4 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.4)',
   },
   clearText: { color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: '600', letterSpacing: 0.5 },
-  del: {
-    position: 'absolute',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(20,10,10,0.9)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,90,90,0.85)',
-  },
-  delText: { color: '#ff6b6b', fontSize: 24, fontWeight: '700', marginTop: -2 },
 });

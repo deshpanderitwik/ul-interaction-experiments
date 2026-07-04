@@ -14,15 +14,15 @@ import {
 import { useExperimentActive } from '../_host';
 import { midiToFreq, noteName, useScale } from '../scale';
 import { useTempo } from '../tempo';
+import { BODY_R, HIT_R, MAX_BODIES, SUBDIVISIONS, periodMs, type Body } from './shared';
 import {
-  BODY_R,
-  HIT_R,
-  MAX_BODIES,
-  SUBDIVISIONS,
-  periodMs,
-  scaleMidiLadder,
-  type Body,
-} from './shared';
+  PITCH_TOP,
+  PITCH_BOTTOM_INSET,
+  fieldLadder,
+  midiFromY as pitchAtY,
+  computeGridYs,
+  PitchRuler,
+} from './field';
 import { playSine } from './voice';
 
 // Bodies — the "compose a scene" atom (see THESIS.md), stark monochrome cut.
@@ -33,14 +33,6 @@ import { playSine } from './voice';
 // Bodies are plain white circles. Each time a playing body plucks its sine it
 // sheds a ripple — the same domain-warped ring shader as Fence · Raindrops, but
 // monochrome (white rings on black) and emanating from the body's position.
-
-// Vertical position picks the note across this range of the shared scale:
-// top of the field = highest note, bottom = lowest.
-const LADDER_MIN = 48; // C3
-const LADDER_MAX = 72; // C5 (two octaves)
-// The pitch field spans y ∈ [PITCH_TOP, height - PITCH_BOTTOM_INSET].
-const PITCH_TOP = 110;
-const PITCH_BOTTOM_INSET = 130;
 
 const PULSES = 24; // max concurrent ripples across the whole scene
 const LIFE = 1.6; // ripple lifetime, seconds
@@ -117,35 +109,15 @@ export default function Bodies() {
   const { width, height } = useWindowDimensions();
   const clock = useClock();
 
-  const ladder = useMemo(() => scaleMidiLadder(scale, LADDER_MIN, LADDER_MAX), [scale]);
+  const ladder = useMemo(() => fieldLadder(scale), [scale]);
   const ladderRef = useRef(ladder);
   ladderRef.current = ladder;
 
-  // Boundary lines between adjacent notes: the midpoints between consecutive note
-  // centers, spanning the full canvas width, so each note's band is visible.
-  const gridYs = useMemo(() => {
-    const n = ladder.length;
-    if (n < 2) return [];
-    const bottom = height - PITCH_BOTTOM_INSET;
-    const step = (bottom - PITCH_TOP) / (n - 1);
-    const ys: number[] = [];
-    for (let i = 0; i < n - 1; i++) {
-      ys.push(bottom - (i / (n - 1)) * (bottom - PITCH_TOP) - step / 2);
-    }
-    return ys;
-  }, [ladder, height]);
+  // Full-width note-boundary lines (midpoints between note centers).
+  const gridYs = useMemo(() => computeGridYs(ladder, height), [ladder, height]);
 
   // Vertical position → nearest scale note (top of the field = high, bottom = low).
-  const midiFromY = useCallback(
-    (y: number) => {
-      const l = ladderRef.current;
-      if (l.length === 0) return 48;
-      const bottom = height - PITCH_BOTTOM_INSET;
-      const f = Math.max(0, Math.min(1, (bottom - y) / (bottom - PITCH_TOP)));
-      return l[Math.round(f * (l.length - 1))];
-    },
-    [height]
-  );
+  const midiFromY = useCallback((y: number) => pitchAtY(y, ladderRef.current, height), [height]);
 
   const [bodies, setBodies] = useState<Body[]>([]);
   const [editing, setEditing] = useState<number | null>(null);
@@ -375,7 +347,7 @@ export default function Bodies() {
             ))}
           </Canvas>
           {/* pitch ruler down the left edge — the field's y→note legend */}
-          <PitchRuler ladder={ladder} top={PITCH_TOP} bottom={height - PITCH_BOTTOM_INSET} />
+          <PitchRuler ladder={ladder} height={height} />
           {/* on-grid center line + horizontal drift (early ↔ late) ruler */}
           <View style={styles.centerGuide} pointerEvents="none" />
           <DriftRuler />
@@ -446,26 +418,6 @@ function BodyView({
         <Circle cx={body.x} cy={body.y} r={BODY_R} style="stroke" strokeWidth={2} color="white" opacity={0.5} />
       )}
     </Group>
-  );
-}
-
-// Pitch ruler down the left edge: each scale note at the exact y its position
-// maps to (lowest at the bottom, highest at the top). Purely a read-out.
-function PitchRuler({ ladder, top, bottom }: { ladder: number[]; top: number; bottom: number }) {
-  const n = ladder.length;
-  return (
-    <View style={styles.ruler} pointerEvents="none">
-      <View style={[styles.rulerSpine, { top, height: Math.max(0, bottom - top) }]} />
-      {ladder.map((midi, i) => {
-        const y = n > 1 ? bottom - (i / (n - 1)) * (bottom - top) : (top + bottom) / 2;
-        return (
-          <View key={midi} style={[styles.rulerRow, { top: y - 7 }]}>
-            <Text style={styles.rulerLabel}>{noteName(midi)}</Text>
-            <View style={styles.rulerTick} />
-          </View>
-        );
-      })}
-    </View>
   );
 }
 
@@ -545,23 +497,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
     fontVariant: ['tabular-nums'],
   },
-  ruler: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 64 },
-  rulerSpine: {
-    position: 'absolute',
-    left: 50,
-    width: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-  },
-  rulerRow: { position: 'absolute', left: 10, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  rulerLabel: {
-    width: 26,
-    textAlign: 'right',
-    color: 'rgba(255,255,255,0.42)',
-    fontSize: 11,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-  rulerTick: { width: 8, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.3)' },
   centerGuide: {
     position: 'absolute',
     left: '50%',

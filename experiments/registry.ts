@@ -50,6 +50,14 @@ export const experiments: Experiment[] = [
     accent: '#54f2b0',
     audio: true,
     load: () => import('./bodies'),
+    variations: [
+      {
+        id: 'paths',
+        title: 'Paths',
+        blurb: 'Trace a stroke across the pitch grid and a runner travels down it, plucking an arp as it goes. Draw many.',
+        load: () => import('./bodies/paths'),
+      },
+    ],
   },
   {
     id: 'fence',

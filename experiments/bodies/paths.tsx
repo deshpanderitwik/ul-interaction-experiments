@@ -46,6 +46,7 @@ const MIN_PATH_LEN = 60; // ignore taps / tiny scribbles shorter than this
 const MIN_SEG = 6; // min spacing between recorded draw points
 const DEFAULT_SUB = 8; // 1/8-note steps
 const RUNNER_R = 9;
+const DELETE_HIT = 30; // max tap-to-path distance to select a path for deletion
 
 // Monochrome ripple shader (a hairline white ring per note on black), the same
 // port used by Bodies. Fed a ring buffer of recent note-fires.
@@ -149,6 +150,8 @@ export default function Paths() {
 
   const [paths, setPaths] = useState<PathItem[]>([]);
   const [draft, setDraft] = useState<Pt[]>([]);
+  // A path selected for deletion (double-tapped): id + the anchor point for the ×.
+  const [selected, setSelected] = useState<{ id: number; x: number; y: number } | null>(null);
   const pathsRef = useRef(paths);
   pathsRef.current = paths;
   const draftRef = useRef<Pt[]>([]);
@@ -230,6 +233,35 @@ export default function Paths() {
     );
   }, [ladder, height]);
 
+  // Drop the delete affordance if its path is gone.
+  useEffect(() => {
+    if (selected && !paths.some((p) => p.id === selected.id)) setSelected(null);
+  }, [paths, selected]);
+
+  // Nearest path to a point (within DELETE_HIT), anchored at its closest point.
+  const hitPath = (x: number, y: number): { id: number; x: number; y: number } | null => {
+    let best: { id: number; x: number; y: number } | null = null;
+    let bd = DELETE_HIT;
+    for (const p of pathsRef.current) {
+      for (const pt of p.raw) {
+        const d = Math.hypot(x - pt.x, y - pt.y);
+        if (d < bd) {
+          bd = d;
+          best = { id: p.id, x: pt.x, y: pt.y };
+        }
+      }
+    }
+    return best;
+  };
+  const onDoubleTap = (x: number, y: number) => setSelected(hitPath(x, y));
+  const clearSelected = () => setSelected(null);
+  const deleteSelected = () => {
+    setSelected((sel) => {
+      if (sel) setPaths((prev) => prev.filter((p) => p.id !== sel.id));
+      return null;
+    });
+  };
+
   // Draw gesture: record a stroke, then commit it as a path on release.
   const onDrawBegin = (x: number, y: number) => {
     draftRef.current = [{ x, y }];
@@ -256,11 +288,17 @@ export default function Paths() {
     ]);
   };
 
-  const gesture = Gesture.Pan()
-    .minDistance(0)
+  // Drag draws a path (needs a little movement, so taps stay taps); double-tap on
+  // a path selects it for deletion; a single tap dismisses the delete affordance.
+  const draw = Gesture.Pan()
+    .minDistance(6)
     .onBegin((e) => {
       if (!live) return;
       runOnJS(onDrawBegin)(e.x, e.y);
+    })
+    .onStart(() => {
+      if (!live) return;
+      runOnJS(clearSelected)();
     })
     .onUpdate((e) => {
       if (!live) return;
@@ -270,6 +308,18 @@ export default function Paths() {
       if (!live) return;
       runOnJS(onDrawEnd)();
     });
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .maxDuration(300)
+    .onStart((e) => {
+      if (!live) return;
+      runOnJS(onDoubleTap)(e.x, e.y);
+    });
+  const singleTap = Gesture.Tap().onStart(() => {
+    if (!live) return;
+    runOnJS(clearSelected)();
+  });
+  const gesture = Gesture.Race(draw, Gesture.Exclusive(doubleTap, singleTap));
 
   const draftPath = useMemo(() => {
     const p = Skia.Path.Make();
@@ -339,15 +389,25 @@ export default function Paths() {
                 path={p}
                 tempo={tempo}
                 clock={clock}
+                selected={selected?.id === p.id}
                 register={registerFx}
                 unregister={unregisterFx}
               />
             ))}
-            {/* PathView reads path.t0 for its runner phase */}
           </Canvas>
           <PitchRuler ladder={ladder} height={height} />
         </View>
       </GestureDetector>
+
+      {selected ? (
+        <Pressable
+          style={[styles.del, { left: selected.x - 20, top: selected.y - 20 }]}
+          onPress={deleteSelected}
+          hitSlop={12}
+        >
+          <Text style={styles.delText}>×</Text>
+        </Pressable>
+      ) : null}
 
       {paths.length > 0 ? (
         <Pressable style={styles.clear} onPress={() => setPaths([])} hitSlop={10}>
@@ -365,12 +425,14 @@ function PathView({
   path,
   tempo,
   clock,
+  selected,
   register,
   unregister,
 }: {
   path: PathItem;
   tempo: number;
   clock: SharedValue<number>;
+  selected: boolean;
   register: (id: number, fx: Fx) => void;
   unregister: (id: number) => void;
 }) {
@@ -418,10 +480,10 @@ function PathView({
       <Path
         path={skPath}
         style="stroke"
-        strokeWidth={1.5}
+        strokeWidth={selected ? 2 : 1.5}
         strokeJoin="round"
         strokeCap="round"
-        color="rgba(255,255,255,0.4)"
+        color={selected ? 'rgba(255,120,120,0.85)' : 'rgba(255,255,255,0.4)'}
       />
       <Circle c={pos} r={RUNNER_R * 2.2} color="white" opacity={bloomOpacity}>
         <Blur blur={RUNNER_R} />
@@ -445,4 +507,16 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.4)',
   },
   clearText: { color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: '600', letterSpacing: 0.5 },
+  del: {
+    position: 'absolute',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(20,10,10,0.9)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,90,90,0.85)',
+  },
+  delText: { color: '#ff6b6b', fontSize: 24, fontWeight: '700', marginTop: -2 },
 });

@@ -44,7 +44,7 @@ const PITCH_BOTTOM_INSET = 130;
 
 const PULSES = 24; // max concurrent ripples across the whole scene
 const LIFE = 1.6; // ripple lifetime, seconds
-const RING_ALPHA = 0.4; // per-ring brightness — kept low so many voices don't wash out
+const RING_ALPHA = 0.24; // per-ring brightness — kept low so many voices don't wash out
 const SCHED_MS = 15; // scheduler poll interval — the grid's timing resolution
 const MAX_DRIFT_FRAC = 0.18; // max early/late as a fraction of a body's own step (subtle)
 

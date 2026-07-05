@@ -57,6 +57,12 @@ export const experiments: Experiment[] = [
         blurb: 'Trace a stroke across the pitch grid and a runner travels down it, plucking an arp as it goes. Draw many.',
         load: () => import('./bodies/paths'),
       },
+      {
+        id: 'emitters',
+        title: 'Emitters & Receivers',
+        blurb: 'Double-tap an emitter that pulses waves; long-press a receiver that sounds when a wave reaches it. Rhythm from distance.',
+        load: () => import('./bodies/emitters'),
+      },
     ],
   },
   {

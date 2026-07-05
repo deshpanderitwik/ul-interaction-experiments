@@ -283,10 +283,25 @@ export default function ExtendedGrid() {
     const id = hitId(x, y);
     if (id != null) setEditing(id);
   };
+  // A drag that lands on a body moves it; a drag on empty grid scrolls the window.
+  const dragModeRef = useRef<'body' | 'scroll' | null>(null);
   const onDragBegin = (x: number, y: number) => {
-    draggingRef.current = hitId(x, y);
+    const id = hitId(x, y);
+    if (id != null) {
+      draggingRef.current = id;
+      dragModeRef.current = 'body';
+    } else {
+      draggingRef.current = null;
+      dragModeRef.current = 'scroll';
+      scrollStartRef.current = scrollRef.current;
+      scrollY0Ref.current = y;
+    }
   };
   const onDragMove = (x: number, y: number) => {
+    if (dragModeRef.current === 'scroll') {
+      onScrollMove(y);
+      return;
+    }
     const id = draggingRef.current;
     if (id == null) return;
     const cx = Math.max(RULER_WIDTH, x);
@@ -295,6 +310,7 @@ export default function ExtendedGrid() {
   };
   const onDragEnd = () => {
     draggingRef.current = null;
+    dragModeRef.current = null;
   };
 
   const singleTap = Gesture.Tap()

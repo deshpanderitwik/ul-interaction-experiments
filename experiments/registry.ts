@@ -60,7 +60,7 @@ export const experiments: Experiment[] = [
       {
         id: 'emitters',
         title: 'Emitters & Receivers',
-        blurb: 'Double-tap an emitter that pulses waves; long-press a receiver that sounds when a wave reaches it. Rhythm from distance.',
+        blurb: 'Long-press an emitter that pulses waves; double-tap a receiver that sounds when a wave reaches it. Rhythm from distance.',
         load: () => import('./bodies/emitters'),
       },
       {

@@ -31,11 +31,12 @@ import { useSettingsActions } from '../settings';
 import { playSine } from './voice';
 
 // Bodies · Emitters & Receivers — bodies as a medium, not metronomes.
-//   double-tap → drop an EMITTER (a clocked driver that plucks its note and
-//                spits an expanding wave on its subdivision)
-//   long-press (empty) → drop a RECEIVER (silent until a wave front reaches it,
-//                then it sounds its note and flashes)
-//   long-press (a body) → its sheet (delete; emitters also get a subdivision)
+//   double-tap → drop a RECEIVER (silent until a wave front reaches it, then it
+//                sounds its note and flashes)
+//   long-press (empty) → drop an EMITTER (a clocked driver that plucks its note
+//                and spits an expanding wave on its subdivision)
+//   long-press (an emitter) → its sheet (subdivision + delete)
+//   long-press (a receiver) → delete it
 //   drag → move a body (its note follows its height)
 // Both sit on the same pitch grid (y = note). The wave you SEE is the wave that
 // triggers — so rhythm emerges from where you place things: near receivers answer
@@ -287,12 +288,12 @@ export default function Emitters() {
     ]);
   };
   const onDoubleTap = (x: number, y: number) => {
-    if (hitNode(x, y) == null) place(x, y, 'emitter');
+    if (hitNode(x, y) == null) place(x, y, 'receiver');
   };
   const onLongPress = (x: number, y: number) => {
     const id = hitNode(x, y);
     if (id == null) {
-      place(x, y, 'receiver');
+      place(x, y, 'emitter');
       return;
     }
     const n = nodesRef.current.find((nn) => nn.id === id);

@@ -145,6 +145,7 @@ type Body = {
   playing: boolean;
   path?: Waypoint[]; // if set (>=2), the body travels through these, playing each
   pathT0?: number; // clock ms when traversal started
+  muted?: boolean; // silent but still alive (keeps its place / keeps gliding)
 };
 type Fx = { pulse: SharedValue<number>; px: SharedValue<number>; py: SharedValue<number> };
 type Pulse = { x: number; y: number; t: number; seed: number }; // published to the shader
@@ -279,7 +280,7 @@ export default function ExtendedGrid() {
           if (entry === undefined || entry.sig !== sig) sched.set(b.id, { k: step, sig });
           else if (step > entry.k) {
             sched.set(b.id, { k: step, sig });
-            emitNote(b.id, b.path[i0].midi, b.path[i0].x);
+            if (!b.muted) emitNote(b.id, b.path[i0].midi, b.path[i0].x); // muted: keep gliding, stay silent
           }
           continue;
         }
@@ -291,7 +292,7 @@ export default function ExtendedGrid() {
         if (entry === undefined || entry.sig !== sig) sched.set(b.id, { k, sig });
         else if (k > entry.k) {
           sched.set(b.id, { k, sig });
-          fire(b);
+          if (!b.muted) fire(b); // muted: stays put, stays silent
         }
       }
       for (const id of sched.keys()) if (!present.has(id)) sched.delete(id);
@@ -499,6 +500,8 @@ export default function ExtendedGrid() {
     setBodies((prev) => prev.filter((b) => b.id !== editing));
     setEditing(null);
   };
+  const toggleMute = () =>
+    setBodies((prev) => prev.map((b) => (b.id === editing ? { ...b, muted: !b.muted } : b)));
   // The path always begins where the body currently sits; the user taps the rest.
   const startLaying = () => {
     const b = bodiesRef.current.find((bb) => bb.id === editing);
@@ -640,6 +643,7 @@ export default function ExtendedGrid() {
           onClearPath={clearPath}
           onConfirm={confirmLaying}
           onCancel={cancelLaying}
+          onMute={toggleMute}
           onDelete={deleteEditing}
           onClose={() => setEditing(null)}
         />
@@ -739,17 +743,22 @@ function BodyView({
     [isPath, body.x, y0]
   );
   const r = useDerivedValue(() => BODY_R * (1 + 0.14 * pulse.value));
-  const glowOpacity = useDerivedValue(() => (body.playing ? 0.2 : 0.0) + 0.45 * pulse.value, [body.playing]);
+  const muted = !!body.muted;
+  const glowOpacity = useDerivedValue(
+    () => (muted ? 0.0 : (body.playing ? 0.2 : 0.0) + 0.45 * pulse.value),
+    [body.playing, muted]
+  );
 
+  // A muted body reads dimmer — still on screen (and gliding), just silent.
   return (
     <Group>
       <Circle c={center} r={BODY_R * 1.1} color="white" opacity={glowOpacity}>
         <Blur blur={BODY_R * 0.5} />
       </Circle>
       {body.playing ? (
-        <Circle c={center} r={r} color="white" />
+        <Circle c={center} r={r} color="white" opacity={muted ? 0.3 : 1} />
       ) : (
-        <Circle c={center} r={r} style="stroke" strokeWidth={2} color="white" opacity={0.5} />
+        <Circle c={center} r={r} style="stroke" strokeWidth={2} color="white" opacity={muted ? 0.22 : 0.5} />
       )}
     </Group>
   );
@@ -778,6 +787,7 @@ function PropertiesPanel({
   onClearPath,
   onConfirm,
   onCancel,
+  onMute,
   onDelete,
   onClose,
 }: {
@@ -788,6 +798,7 @@ function PropertiesPanel({
   onClearPath: () => void;
   onConfirm: () => void;
   onCancel: () => void;
+  onMute: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
@@ -846,9 +857,19 @@ function PropertiesPanel({
                 );
               })}
             </View>
-            <Pressable style={styles.deleteBtn} onPress={onDelete}>
-              <Text style={styles.deleteText}>Delete</Text>
-            </Pressable>
+            <View style={styles.deleteRow}>
+              <Pressable
+                style={[styles.muteBtn, body.muted && styles.muteBtnOn]}
+                onPress={onMute}
+              >
+                <Text style={[styles.muteText, body.muted && styles.muteTextOn]}>
+                  {body.muted ? 'Unmute' : 'Mute'}
+                </Text>
+              </Pressable>
+              <Pressable style={styles.deleteBtn} onPress={onDelete}>
+                <Text style={styles.deleteText}>Delete</Text>
+              </Pressable>
+            </View>
           </>
         )}
       </View>
@@ -960,6 +981,17 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,90,90,0.7)',
   },
   deleteText: { color: '#ff5a5a', fontSize: 15, fontWeight: '700', letterSpacing: 0.5 },
+  deleteRow: { flexDirection: 'row', gap: 10, marginTop: 4, alignItems: 'center' },
+  muteBtn: {
+    paddingVertical: 11,
+    paddingHorizontal: 28,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.45)',
+  },
+  muteBtnOn: { backgroundColor: '#fff', borderColor: '#fff' },
+  muteText: { color: '#fff', fontSize: 15, fontWeight: '700', letterSpacing: 0.5 },
+  muteTextOn: { color: '#0a0a0a' },
   actionRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
   moveBtn: {
     paddingVertical: 10,

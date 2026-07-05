@@ -513,10 +513,12 @@ export default function ExtendedGrid() {
   };
   const toggleMute = () =>
     setBodies((prev) => prev.map((b) => (b.id === editing ? { ...b, muted: !b.muted } : b)));
-  // The path always begins where the body currently sits; the user taps the rest.
+  // Move: begin a fresh path at the body's current spot. Extend: keep the existing
+  // waypoints and let the user append more from the end.
   const startLaying = () => {
     const b = bodiesRef.current.find((bb) => bb.id === editing);
-    setLaying(b ? [{ x: b.x, midi: b.midi }] : []);
+    if (!b) return setLaying([]);
+    setLaying(b.path && b.path.length >= 2 ? [...b.path] : [{ x: b.x, midi: b.midi }]);
   };
   const cancelLaying = () => setLaying(null);
   const clearPath = () =>
@@ -832,9 +834,11 @@ function PropertiesPanel({
       <View style={styles.panel} pointerEvents="box-none">
         {laying != null ? (
           <>
-            <Text style={styles.panelTitle}>Lay a path</Text>
+            <Text style={styles.panelTitle}>{body.path ? 'Extend the path' : 'Lay a path'}</Text>
             <Text style={styles.panelHint}>
-              starts at the body · tap the grid to add stops · {Math.max(0, laying.length - 1)} added
+              {body.path
+                ? `tap the grid to add more stops · ${Math.max(0, laying.length - body.path.length)} added`
+                : `starts at the body · tap the grid to add stops · ${Math.max(0, laying.length - 1)} added`}
             </Text>
             <View style={styles.confirmRow}>
               <Pressable style={styles.cancelBtn} onPress={onCancel}>
@@ -853,7 +857,7 @@ function PropertiesPanel({
             <Text style={styles.panelTitle}>{noteName(body.midi)}</Text>
             <View style={styles.actionRow}>
               <Pressable style={styles.moveBtn} onPress={onMove}>
-                <Text style={styles.moveText}>{body.path ? 'Re-path' : 'Move'}</Text>
+                <Text style={styles.moveText}>{body.path ? 'Extend' : 'Move'}</Text>
               </Pressable>
               {body.path ? (
                 <Pressable style={styles.moveBtn} onPress={onClearPath}>

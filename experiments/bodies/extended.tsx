@@ -493,6 +493,17 @@ export default function ExtendedGrid() {
     .onBegin((e) => runOnJS(onScrollBegin)(e.y))
     .onUpdate((e) => runOnJS(onScrollMove)(e.y));
 
+  // While laying a path, the catcher still lets you scroll the grid: a tap drops a
+  // waypoint, a drag scrolls the visible window (same handlers as the ruler).
+  const layTap = Gesture.Tap()
+    .maxDuration(250)
+    .onStart((e) => runOnJS(addPathPoint)(e.x, e.y));
+  const layScrollPan = Gesture.Pan()
+    .minDistance(8)
+    .onBegin((e) => runOnJS(onScrollBegin)(e.y))
+    .onUpdate((e) => runOnJS(onScrollMove)(e.y));
+  const layingGesture = Gesture.Race(layScrollPan, layTap);
+
   const editingBody = editing != null ? bodies.find((b) => b.id === editing) : undefined;
   const setSubdivision = (d: number) =>
     setBodies((prev) => prev.map((b) => (b.id === editing ? { ...b, subdivision: d } : b)));
@@ -624,14 +635,13 @@ export default function ExtendedGrid() {
         </View>
       </GestureDetector>
 
-      {/* While laying a path, a dedicated full-screen catcher takes every tap and
-          drops a waypoint. It sits above the gesture layer (so taps don't need to
-          pass through the panel overlay) but below the panel's buttons. */}
+      {/* While laying a path, a full-screen catcher sits above the base gesture
+          layer (so input doesn't need to pass through the panel overlay) but below
+          the panel's buttons: a tap drops a waypoint, a drag scrolls the grid. */}
       {laying != null ? (
-        <Pressable
-          style={StyleSheet.absoluteFill}
-          onPress={(e) => addPathPoint(e.nativeEvent.locationX, e.nativeEvent.locationY)}
-        />
+        <GestureDetector gesture={layingGesture}>
+          <View style={StyleSheet.absoluteFill} />
+        </GestureDetector>
       ) : null}
 
       {editingBody ? (

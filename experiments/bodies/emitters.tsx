@@ -122,7 +122,8 @@ export default function Emitters() {
   const idRef = useRef(0);
   const draggingRef = useRef<number | null>(null);
 
-  const pulses = useSharedValue<Pulse[]>([]); // shader waves
+  const pulses = useSharedValue<Pulse[]>([]); // shader waves (published once per tick)
+  const pulseBufRef = useRef<Pulse[]>([]); // authoritative JS-side buffer
   const wavesRef = useRef<Wave[]>([]); // trigger waves (JS)
   const fxRef = useRef<Map<number, Fx>>(new Map());
   const registerFx = useCallback((id: number, fx: Fx) => {
@@ -160,19 +161,15 @@ export default function Emitters() {
   };
 
   // Emitter fires: pluck its own note, pop, and spawn a wave (shader + trigger).
-  const emit = useCallback(
-    (n: Node, nowSec: number) => {
-      playSine(midiToFreq(n.midi));
-      popFx(n.id, 70, 300);
-      const list = pulses.value.slice(-(PULSES - 1));
-      list.push({ x: n.x, y: n.y, t: nowSec, seed: Math.random() });
-      pulses.value = list;
-      const waves = wavesRef.current;
-      waves.push({ x: n.x, y: n.y, t0: nowSec, fired: new Set() });
-      if (waves.length > 64) waves.splice(0, waves.length - 64);
-    },
-    [pulses]
-  );
+  const emit = useCallback((n: Node, nowSec: number) => {
+    playSine(midiToFreq(n.midi));
+    popFx(n.id, 70, 300);
+    // accumulate into the JS buffer; the scheduler publishes it once per tick
+    pulseBufRef.current.push({ x: n.x, y: n.y, t: nowSec, seed: Math.random() });
+    const waves = wavesRef.current;
+    waves.push({ x: n.x, y: n.y, t0: nowSec, fired: new Set() });
+    if (waves.length > 64) waves.splice(0, waves.length - 64);
+  }, []);
 
   // Receiver hit by a wave front: sound its note and flash.
   const fireReceiver = useCallback((r: Node) => {
@@ -228,13 +225,23 @@ export default function Emitters() {
           }
         }
       }
+
+      // Publish the accumulated wave buffer to the shader in one write — prune
+      // dead pulses and cap length. Doing this once per tick (not per emit) is
+      // what lets multiple emitters that fire together all show.
+      let buf = pulseBufRef.current.filter((p) => nowSec - p.t <= WAVE_LIFE);
+      if (buf.length > PULSES) buf = buf.slice(buf.length - PULSES);
+      pulseBufRef.current = buf;
+      pulses.value = buf;
     }, SCHED_MS);
     return () => {
       clearInterval(handle);
       sched.clear();
       wavesRef.current = [];
+      pulseBufRef.current = [];
+      pulses.value = [];
     };
-  }, [live, emit, fireReceiver, clock]);
+  }, [live, emit, fireReceiver, clock, pulses]);
 
   // Re-pitch nodes when the scale or field height changes.
   useEffect(() => {

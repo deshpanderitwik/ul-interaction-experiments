@@ -42,6 +42,8 @@ const MAX_DRIFT_FRAC = 0.18;
 const EXT_MIN = 24; // C0 (Ableton labeling)
 const EXT_MAX = 84; // C5
 const GRAB_R = 48; // forgiving touch radius for grabbing a body (drag/tap/hold)
+const HANDLE_R = 8; // drawn radius of a path waypoint handle
+const HANDLE_HIT = 34; // touch radius to grab a waypoint handle
 
 function driftMs(x: number, period: number, width: number): number {
   const frac = Math.max(-1, Math.min(1, (x - width / 2) / (width / 2)));
@@ -299,12 +301,50 @@ export default function ExtendedGrid() {
   }, [live, fire, emitNote, clock, pulses]);
 
   const midiAtY = (y: number) => midiFromY(y, windowLadder, height);
+  const wpY = (midi: number) =>
+    yForMidi(midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
+  // Tap/hold hit-test: a path body is hit at its gliding dot OR at any waypoint;
+  // a static body at its note position. Topmost first.
   const hitId = (x: number, y: number): number | null => {
     const bs = bodiesRef.current;
     for (let i = bs.length - 1; i >= 0; i--) {
-      const by = yForMidi(bs[i].midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
-      if (by == null) continue;
-      if (Math.hypot(x - bs[i].x, y - by) <= GRAB_R) return bs[i].id;
+      const b = bs[i];
+      if (b.path && b.path.length >= 2) {
+        const fx = fxRef.current.get(b.id);
+        if (fx && Math.hypot(x - fx.px.value, y - fx.py.value) <= GRAB_R) return b.id;
+        for (const wp of b.path) {
+          const wy = wpY(wp.midi);
+          if (wy != null && Math.hypot(x - wp.x, y - wy) <= GRAB_R) return b.id;
+        }
+      } else {
+        const by = wpY(b.midi);
+        if (by != null && Math.hypot(x - b.x, y - by) <= GRAB_R) return b.id;
+      }
+    }
+    return null;
+  };
+  // Static bodies only — path bodies aren't dragged as a whole (they ride rails);
+  // you move them by dragging their waypoints instead.
+  const hitStaticBody = (x: number, y: number): number | null => {
+    const bs = bodiesRef.current;
+    for (let i = bs.length - 1; i >= 0; i--) {
+      const b = bs[i];
+      if (b.path && b.path.length >= 2) continue;
+      const by = wpY(b.midi);
+      if (by != null && Math.hypot(x - b.x, y - by) <= GRAB_R) return b.id;
+    }
+    return null;
+  };
+  // A waypoint handle under the finger (for reshaping a laid path). Topmost first.
+  const hitWaypoint = (x: number, y: number): { bodyId: number; index: number } | null => {
+    const bs = bodiesRef.current;
+    for (let i = bs.length - 1; i >= 0; i--) {
+      const b = bs[i];
+      if (!(b.path && b.path.length >= 2)) continue;
+      for (let j = 0; j < b.path.length; j++) {
+        const wy = wpY(b.path[j].midi);
+        if (wy != null && Math.hypot(x - b.path[j].x, y - wy) <= HANDLE_HIT) return { bodyId: b.id, index: j };
+      }
     }
     return null;
   };
@@ -337,14 +377,22 @@ export default function ExtendedGrid() {
     const id = hitId(x, y);
     if (id != null) setEditing(id);
   };
-  // A drag that lands on a body moves it; a drag on empty grid scrolls the window.
-  const dragModeRef = useRef<'body' | 'scroll' | null>(null);
+  // A drag grabs (in priority order) a path waypoint, then a static body, else it
+  // scrolls the window.
+  const dragModeRef = useRef<'body' | 'waypoint' | 'scroll' | null>(null);
+  const waypointDragRef = useRef<{ bodyId: number; index: number } | null>(null);
   const onDragBegin = (x: number, y: number) => {
     if (layingRef.current) {
       dragModeRef.current = null;
       return;
     }
-    const id = hitId(x, y);
+    const wp = hitWaypoint(x, y);
+    if (wp) {
+      waypointDragRef.current = wp;
+      dragModeRef.current = 'waypoint';
+      return;
+    }
+    const id = hitStaticBody(x, y);
     if (id != null) {
       draggingRef.current = id;
       dragModeRef.current = 'body';
@@ -360,6 +408,20 @@ export default function ExtendedGrid() {
       onScrollMove(y);
       return;
     }
+    if (dragModeRef.current === 'waypoint') {
+      const wp = waypointDragRef.current;
+      if (!wp) return;
+      const cx = Math.max(RULER_WIDTH, x);
+      const midi = midiAtY(y);
+      setBodies((prev) =>
+        prev.map((b) =>
+          b.id === wp.bodyId && b.path
+            ? { ...b, path: b.path.map((p, idx) => (idx === wp.index ? { x: cx, midi } : p)) }
+            : b
+        )
+      );
+      return;
+    }
     const id = draggingRef.current;
     if (id == null) return;
     const cx = Math.max(RULER_WIDTH, x);
@@ -369,6 +431,7 @@ export default function ExtendedGrid() {
   const onDragEnd = () => {
     draggingRef.current = null;
     dragModeRef.current = null;
+    waypointDragRef.current = null;
   };
 
   const singleTap = Gesture.Tap()
@@ -422,7 +485,11 @@ export default function ExtendedGrid() {
     setBodies((prev) => prev.filter((b) => b.id !== editing));
     setEditing(null);
   };
-  const startLaying = () => setLaying([]);
+  // The path always begins where the body currently sits; the user taps the rest.
+  const startLaying = () => {
+    const b = bodiesRef.current.find((bb) => bb.id === editing);
+    setLaying(b ? [{ x: b.x, midi: b.midi }] : []);
+  };
   const cancelLaying = () => setLaying(null);
   const clearPath = () =>
     setBodies((prev) => prev.map((b) => (b.id === editing ? { ...b, path: undefined, pathT0: undefined } : b)));
@@ -490,6 +557,7 @@ export default function ExtendedGrid() {
                   scroll={scroll}
                   visible={visibleCount}
                   height={height}
+                  handles
                 />
               ) : null
             )}
@@ -578,7 +646,9 @@ export default function ExtendedGrid() {
   );
 }
 
-// The faint line a path body travels; `dots` marks the waypoints (used while laying).
+// The faint line a path body travels. `dots` marks the waypoints (used while
+// laying); `handles` draws grabbable rings at each waypoint (a committed path you
+// can drag to reshape).
 function PathLine({
   points,
   full,
@@ -586,6 +656,7 @@ function PathLine({
   visible,
   height,
   dots,
+  handles,
 }: {
   points: Waypoint[];
   full: number[];
@@ -593,6 +664,7 @@ function PathLine({
   visible: number;
   height: number;
   dots?: boolean;
+  handles?: boolean;
 }) {
   const skPath = useMemo(() => {
     const p = Skia.Path.Make();
@@ -619,6 +691,22 @@ function PathLine({
             const y = yForMidi(wp.midi, full, scroll, visible, height);
             return y == null ? null : (
               <Circle key={i} cx={wp.x} cy={y} r={4.5} color="rgba(255,255,255,0.7)" />
+            );
+          })
+        : null}
+      {handles
+        ? points.map((wp, i) => {
+            const y = yForMidi(wp.midi, full, scroll, visible, height);
+            return y == null ? null : (
+              <Circle
+                key={i}
+                cx={wp.x}
+                cy={y}
+                r={HANDLE_R}
+                style="stroke"
+                strokeWidth={2}
+                color="rgba(255,255,255,0.6)"
+              />
             );
           })
         : null}
@@ -714,7 +802,9 @@ function PropertiesPanel({
         {laying != null ? (
           <>
             <Text style={styles.panelTitle}>Lay a path</Text>
-            <Text style={styles.panelHint}>tap the grid to add points · {laying.length} placed</Text>
+            <Text style={styles.panelHint}>
+              starts at the body · tap the grid to add stops · {Math.max(0, laying.length - 1)} added
+            </Text>
             <View style={styles.confirmRow}>
               <Pressable style={styles.cancelBtn} onPress={onCancel}>
                 <Text style={styles.cancelText}>Cancel</Text>

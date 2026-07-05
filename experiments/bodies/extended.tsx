@@ -150,7 +150,6 @@ export default function ExtendedGrid() {
 
   const [bodies, setBodies] = useState<Body[]>([]);
   const [editing, setEditing] = useState<number | null>(null);
-  const [selectedId, setSelectedId] = useState<number | null>(null); // armed for moving (shows a ring)
 
   const bodiesRef = useRef(bodies);
   bodiesRef.current = bodies;
@@ -170,8 +169,6 @@ export default function ExtendedGrid() {
   maxScrollRef.current = maxScroll;
   const idRef = useRef(0);
   const draggingRef = useRef<number | null>(null);
-  const selectedIdRef = useRef<number | null>(null);
-  selectedIdRef.current = selectedId;
 
   const pulses = useSharedValue<Pulse[]>([]);
   const pulseBufRef = useRef<BufPulse[]>([]);
@@ -191,9 +188,6 @@ export default function ExtendedGrid() {
   useEffect(() => {
     if (editing != null && !bodies.some((b) => b.id === editing)) setEditing(null);
   }, [editing, bodies]);
-  useEffect(() => {
-    if (selectedId != null && !bodies.some((b) => b.id === selectedId)) setSelectedId(null);
-  }, [selectedId, bodies]);
 
   const fire = useCallback(
     (b: Body) => {
@@ -284,22 +278,20 @@ export default function ExtendedGrid() {
         : [...prev, { id: idRef.current++, x, midi: midiAtY(y), subdivision: 4, playing: true }]
     );
   };
-  // Tap a body to select it (arm it for moving); tap it again or tap empty to
-  // deselect. Only the selected body can be dragged — everything else scrolls.
-  const selectAt = (x: number, y: number) => {
+  const toggleAt = (x: number, y: number) => {
     const id = hitId(x, y);
-    if (id == null) setSelectedId(null);
-    else setSelectedId((prev) => (prev === id ? null : id));
+    if (id == null) return;
+    setBodies((prev) => prev.map((b) => (b.id === id ? { ...b, playing: !b.playing } : b)));
   };
   const openPropsAt = (x: number, y: number) => {
     const id = hitId(x, y);
     if (id != null) setEditing(id);
   };
-  // Dragging the SELECTED body moves it; any other drag scrolls the window.
+  // A drag that lands on a body moves it; a drag on empty grid scrolls the window.
   const dragModeRef = useRef<'body' | 'scroll' | null>(null);
   const onDragBegin = (x: number, y: number) => {
     const id = hitId(x, y);
-    if (id != null && id === selectedIdRef.current) {
+    if (id != null) {
       draggingRef.current = id;
       dragModeRef.current = 'body';
     } else {
@@ -329,7 +321,7 @@ export default function ExtendedGrid() {
     .maxDuration(250)
     .onStart((e) => {
       if (!live) return;
-      runOnJS(selectAt)(e.x, e.y);
+      runOnJS(toggleAt)(e.x, e.y);
     });
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
@@ -372,8 +364,6 @@ export default function ExtendedGrid() {
   const editingBody = editing != null ? bodies.find((b) => b.id === editing) : undefined;
   const setSubdivision = (d: number) =>
     setBodies((prev) => prev.map((b) => (b.id === editing ? { ...b, subdivision: d } : b)));
-  const toggleEditingPlay = () =>
-    setBodies((prev) => prev.map((b) => (b.id === editing ? { ...b, playing: !b.playing } : b)));
   const deleteEditing = () => {
     setBodies((prev) => prev.filter((b) => b.id !== editing));
     setEditing(null);
@@ -422,14 +412,7 @@ export default function ExtendedGrid() {
               <Line key={i} p1={vec(0, y)} p2={vec(width, y)} color="rgba(255,255,255,0.09)" strokeWidth={1} />
             ))}
             {visibleBodies.map(({ b, y }) => (
-              <BodyView
-                key={b.id}
-                body={b}
-                y={y}
-                selected={selectedId === b.id}
-                register={registerFx}
-                unregister={unregisterFx}
-              />
+              <BodyView key={b.id} body={b} y={y} register={registerFx} unregister={unregisterFx} />
             ))}
           </Canvas>
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -476,7 +459,6 @@ export default function ExtendedGrid() {
         <PropertiesPanel
           body={editingBody}
           onSubdivision={setSubdivision}
-          onTogglePlay={toggleEditingPlay}
           onDelete={deleteEditing}
           onClose={() => setEditing(null)}
         />
@@ -488,13 +470,11 @@ export default function ExtendedGrid() {
 function BodyView({
   body,
   y,
-  selected,
   register,
   unregister,
 }: {
   body: Body;
   y: number;
-  selected: boolean;
   register: (id: number, fx: Fx) => void;
   unregister: (id: number) => void;
 }) {
@@ -509,21 +489,15 @@ function BodyView({
   const glowOpacity = useDerivedValue(() => (body.playing ? 0.2 : 0.0) + 0.45 * pulse.value, [body.playing]);
 
   return (
-    <Group>
-      {/* selection ring: this body is armed for moving */}
-      {selected ? (
-        <Circle cx={body.x} cy={y} r={BODY_R * 1.7} style="stroke" strokeWidth={2} color="rgba(255,255,255,0.85)" />
-      ) : null}
-      <Group transform={transform} origin={{ x: body.x, y }}>
-        <Circle cx={body.x} cy={y} r={BODY_R * 1.1} color="white" opacity={glowOpacity}>
-          <Blur blur={BODY_R * 0.5} />
-        </Circle>
-        {body.playing ? (
-          <Circle cx={body.x} cy={y} r={BODY_R} color="white" />
-        ) : (
-          <Circle cx={body.x} cy={y} r={BODY_R} style="stroke" strokeWidth={2} color="white" opacity={0.5} />
-        )}
-      </Group>
+    <Group transform={transform} origin={{ x: body.x, y }}>
+      <Circle cx={body.x} cy={y} r={BODY_R * 1.1} color="white" opacity={glowOpacity}>
+        <Blur blur={BODY_R * 0.5} />
+      </Circle>
+      {body.playing ? (
+        <Circle cx={body.x} cy={y} r={BODY_R} color="white" />
+      ) : (
+        <Circle cx={body.x} cy={y} r={BODY_R} style="stroke" strokeWidth={2} color="white" opacity={0.5} />
+      )}
     </Group>
   );
 }
@@ -546,13 +520,11 @@ function DriftRuler() {
 function PropertiesPanel({
   body,
   onSubdivision,
-  onTogglePlay,
   onDelete,
   onClose,
 }: {
   body: Body;
   onSubdivision: (d: number) => void;
-  onTogglePlay: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
@@ -561,9 +533,6 @@ function PropertiesPanel({
       <Pressable style={styles.backdrop} onPress={onClose} />
       <View style={styles.panel} pointerEvents="box-none">
         <Text style={styles.panelTitle}>{noteName(body.midi)}</Text>
-        <Pressable style={styles.playBtn} onPress={onTogglePlay}>
-          <Text style={styles.playText}>{body.playing ? 'Pause' : 'Play'}</Text>
-        </Pressable>
         <Text style={styles.panelLabel}>subdivision</Text>
         <View style={styles.row}>
           {SUBDIVISIONS.map((s) => {
@@ -663,16 +632,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.14)',
   },
-  panelTitle: { color: '#fff', fontSize: 20, fontWeight: '700', letterSpacing: 0.5, marginBottom: 14 },
-  playBtn: {
-    marginBottom: 16,
-    paddingVertical: 10,
-    paddingHorizontal: 30,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.5)',
-  },
-  playText: { color: '#fff', fontSize: 15, fontWeight: '700', letterSpacing: 0.5 },
+  panelTitle: { color: '#fff', fontSize: 20, fontWeight: '700', letterSpacing: 0.5, marginBottom: 16 },
   panelLabel: {
     color: 'rgba(255,255,255,0.5)',
     fontSize: 12,

@@ -356,7 +356,7 @@ export default function Paths() {
     const pts = drag.base.map((pt, i) => {
       const t = n > 1 ? i / (n - 1) : 0;
       const w = drag.end === 'b' ? t : 1 - t;
-      return { x: pt.x + w * dx, y: pt.y + w * dy };
+      return { x: Math.max(RULER_WIDTH, pt.x + w * dx), y: pt.y + w * dy };
     });
     setPaths((prev) => prev.map((p) => (p.id === drag.id ? { ...p, pts, notes: notesFor(pts) } : p)));
   };
@@ -368,7 +368,7 @@ export default function Paths() {
     setPaths((prev) =>
       prev.map((p) => {
         if (p.id !== drag.id) return p;
-        const pts = p.pts.map((pt, idx) => (idx === drag.index ? { x, y } : pt));
+        const pts = p.pts.map((pt, idx) => (idx === drag.index ? { x: Math.max(RULER_WIDTH, x), y } : pt));
         const notes = p.notes.map((n, idx) =>
           idx === drag.index ? midiFromY(y, ladderRef.current, heightRef.current) : n
         );
@@ -409,10 +409,11 @@ export default function Paths() {
       else subMove(x, y);
       return;
     }
+    const cx = Math.max(RULER_WIDTH, x); // keep the stroke out of the ruler
     const d = draftRef.current;
     const last = d[d.length - 1];
-    if (last && dist(last, { x, y }) < MIN_SEG) return;
-    d.push({ x, y });
+    if (last && dist(last, { x: cx, y }) < MIN_SEG) return;
+    d.push({ x: cx, y });
     setDraft(d.slice());
   };
   const onDrawEnd = () => {

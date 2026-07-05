@@ -163,7 +163,7 @@ export default function Slingshot() {
       const nowMs = clock.value;
       const nowSec = nowMs / 1000;
       const ld = ladderRef.current;
-      const xMin = EDGE;
+      const xMin = RULER_WIDTH; // bounce off the ruler edge, never under it
       const xMax = widthRef.current - EDGE;
       const yMin = PITCH_TOP;
       const yMax = heightRef.current - PITCH_BOTTOM_INSET;

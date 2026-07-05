@@ -260,7 +260,8 @@ export default function Bodies() {
   const onDragMove = (x: number, y: number) => {
     const id = draggingRef.current;
     if (id == null) return;
-    setBodies((prev) => prev.map((b) => (b.id === id ? { ...b, x, y, midi: midiFromY(y) } : b)));
+    const cx = Math.max(RULER_WIDTH, x); // never under the ruler
+    setBodies((prev) => prev.map((b) => (b.id === id ? { ...b, x: cx, y, midi: midiFromY(y) } : b)));
   };
   const onDragEnd = () => {
     draggingRef.current = null;

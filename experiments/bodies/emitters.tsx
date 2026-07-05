@@ -308,9 +308,10 @@ export default function Emitters() {
   const onDragMove = (x: number, y: number) => {
     const id = draggingRef.current;
     if (id == null) return;
+    const cx = Math.max(RULER_WIDTH, x); // never under the ruler
     setNodes((prev) =>
       prev.map((n) =>
-        n.id === id ? { ...n, x, y, midi: midiFromY(y, ladderRef.current, heightRef.current) } : n
+        n.id === id ? { ...n, x: cx, y, midi: midiFromY(y, ladderRef.current, heightRef.current) } : n
       )
     );
   };

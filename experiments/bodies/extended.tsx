@@ -14,7 +14,7 @@ import {
 import { useExperimentActive } from '../_host';
 import { getScale, midiToFreq, noteName, useScale } from '../scale';
 import { useTempo } from '../tempo';
-import { BODY_R, HIT_R, MAX_BODIES, SUBDIVISIONS, periodMs, scaleMidiLadder } from './shared';
+import { BODY_R, MAX_BODIES, SUBDIVISIONS, periodMs, scaleMidiLadder } from './shared';
 import {
   PITCH_BOTTOM_INSET,
   PITCH_TOP,
@@ -41,6 +41,7 @@ const SCHED_MS = 15;
 const MAX_DRIFT_FRAC = 0.18;
 const EXT_MIN = 24; // C0 (Ableton labeling)
 const EXT_MAX = 84; // C5
+const GRAB_R = 48; // forgiving touch radius for grabbing a body (drag/tap/hold)
 
 function driftMs(x: number, period: number, width: number): number {
   const frac = Math.max(-1, Math.min(1, (x - width / 2) / (width / 2)));
@@ -265,7 +266,7 @@ export default function ExtendedGrid() {
     for (let i = bs.length - 1; i >= 0; i--) {
       const by = yForMidi(bs[i].midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
       if (by == null) continue;
-      if (Math.hypot(x - bs[i].x, y - by) <= HIT_R) return bs[i].id;
+      if (Math.hypot(x - bs[i].x, y - by) <= GRAB_R) return bs[i].id;
     }
     return null;
   };

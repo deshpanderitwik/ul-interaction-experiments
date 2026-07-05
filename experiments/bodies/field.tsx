@@ -11,6 +11,7 @@ export const LADDER_MIN = 48; // C2 (Ableton labeling; MIDI 48)
 export const LADDER_MAX = 72; // C4 (two octaves; MIDI 72)
 export const PITCH_TOP = 130; // y of the highest note (kept clear of the top bar / back button)
 export const PITCH_BOTTOM_INSET = 92; // y (from bottom) of the lowest note
+export const RULER_WIDTH = 64; // left strip the ruler occupies — a placement dead-zone
 
 export function fieldLadder(scale: Scale): number[] {
   return scaleMidiLadder(scale, LADDER_MIN, LADDER_MAX);
@@ -94,7 +95,7 @@ export function PitchRuler({ ladder, height }: { ladder: number[]; height: numbe
 }
 
 const styles = StyleSheet.create({
-  ruler: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 64 },
+  ruler: { position: 'absolute', left: 0, top: 0, bottom: 0, width: RULER_WIDTH },
   rulerSpine: {
     position: 'absolute',
     left: 50,

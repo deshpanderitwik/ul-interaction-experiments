@@ -23,6 +23,7 @@ import {
   computeGridYs,
   noteEnabled,
   PitchRuler,
+  RULER_WIDTH,
 } from './field';
 import { playSine } from './voice';
 
@@ -232,6 +233,7 @@ export default function Bodies() {
   };
 
   const addBody = (x: number, y: number) => {
+    if (x < RULER_WIDTH) return; // don't place under the ruler
     setBodies((prev) => {
       if (prev.length >= MAX_BODIES) return prev;
       return [

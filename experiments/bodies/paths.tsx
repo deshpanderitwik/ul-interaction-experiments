@@ -27,7 +27,15 @@ import { useExperimentActive } from '../_host';
 import { midiToFreq, useScale } from '../scale';
 import { useTempo } from '../tempo';
 import { periodMs, SUBDIVISIONS } from './shared';
-import { PITCH_TOP, computeGridYs, fieldLadder, midiFromY, noteEnabled, PitchRuler } from './field';
+import {
+  PITCH_TOP,
+  computeGridYs,
+  fieldLadder,
+  midiFromY,
+  noteEnabled,
+  PitchRuler,
+  RULER_WIDTH,
+} from './field';
 import { useSettingsActions } from '../settings';
 import { playSine } from './voice';
 
@@ -389,6 +397,7 @@ export default function Paths() {
       }
       return; // grabbing a point — don't start a new stroke
     }
+    if (x < RULER_WIDTH) return; // don't start a stroke under the ruler
     dragRef.current = null;
     draftRef.current = [{ x, y }];
     setDraft(draftRef.current.slice());

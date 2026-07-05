@@ -33,6 +33,7 @@ import {
   PITCH_BOTTOM_INSET,
   PITCH_TOP,
   PitchRuler,
+  RULER_WIDTH,
 } from './field';
 import { useSettingsActions } from '../settings';
 import { playSine } from './voice';
@@ -264,6 +265,7 @@ export default function Slingshot() {
   };
 
   const onSlingBegin = (x: number, y: number) => {
+    if (x < RULER_WIDTH) return; // don't sling from under the ruler
     bandRef.current = { ax: x, ay: y, fx: x, fy: y };
     setBand(bandRef.current);
   };

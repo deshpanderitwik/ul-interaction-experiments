@@ -26,7 +26,7 @@ import { useExperimentActive } from '../_host';
 import { midiToFreq, useScale } from '../scale';
 import { useTempo } from '../tempo';
 import { periodMs, SUBDIVISIONS } from './shared';
-import { computeGridYs, fieldLadder, midiFromY, noteEnabled, PitchRuler } from './field';
+import { computeGridYs, fieldLadder, midiFromY, noteEnabled, PitchRuler, RULER_WIDTH } from './field';
 import { useSettingsActions } from '../settings';
 import { playSine } from './voice';
 
@@ -272,6 +272,7 @@ export default function Emitters() {
     }
   };
   const place = (x: number, y: number, kind: Kind) => {
+    if (x < RULER_WIDTH) return; // don't place under the ruler
     if (nodesRef.current.length >= MAX_NODES) return;
     const id = idRef.current++;
     if (kind === 'receiver') seedPassedWaves(id, x, y);

@@ -112,7 +112,7 @@ export function ExperimentHost({
                 accessibilityLabel="Hide controls"
                 style={styles.hide}
               >
-                <Text style={styles.hideIcon}>⌄</Text>
+                <Text style={styles.hideIcon}>👁</Text>
               </Pressable>
             </>
           )}
@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.25)',
   },
-  hideIcon: { color: '#fff', fontSize: 20, lineHeight: 20, marginTop: -2 },
+  hideIcon: { fontSize: 17, lineHeight: 20 },
   // Transparent tap target spanning the top-bar band while chrome is hidden.
   revealStrip: {
     position: 'absolute',

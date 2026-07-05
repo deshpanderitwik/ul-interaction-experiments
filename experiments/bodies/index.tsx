@@ -357,20 +357,6 @@ export default function Bodies() {
           {/* on-grid center line + horizontal drift (early ↔ late) ruler */}
           <View style={styles.centerGuide} pointerEvents="none" />
           <DriftRuler />
-          {/* note-name labels, centered on each body (dark on white when playing) */}
-          <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            {bodies.map((b) => (
-              <Text
-                key={b.id}
-                style={[
-                  styles.label,
-                  { left: b.x - 40, top: b.y - 7, color: b.playing ? '#0a0a0a' : '#fff' },
-                ]}
-              >
-                {noteName(b.midi)}
-              </Text>
-            ))}
-          </View>
         </View>
       </GestureDetector>
 

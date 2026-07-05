@@ -577,18 +577,6 @@ export default function ExtendedGrid() {
               ) : null
             )}
           </Canvas>
-          <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            {bodyViews.map(({ b, isPath, y0 }) =>
-              !isPath && y0 != null ? (
-                <Text
-                  key={b.id}
-                  style={[styles.label, { left: b.x - 40, top: y0 - 7, color: b.playing ? '#0a0a0a' : '#fff' }]}
-                >
-                  {noteName(b.midi)}
-                </Text>
-              ) : null
-            )}
-          </View>
           <View style={styles.centerGuide} pointerEvents="none" />
           <DriftRuler />
         </View>

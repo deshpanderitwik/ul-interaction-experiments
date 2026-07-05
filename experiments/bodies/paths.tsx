@@ -47,7 +47,6 @@ const MIN_PATH_LEN = 60; // ignore taps / tiny scribbles shorter than this
 const MIN_SEG = 6; // min spacing between recorded draw points
 const DEFAULT_SUB = 8; // 1/8-note steps
 const RUNNER_R = 9;
-const PATH_HIT = 30; // max long-press-to-path distance to open a path's sheet
 const HANDLE_R = 11; // endpoint handle radius
 const HANDLE_HIT = 28; // touch radius to grab an endpoint handle
 const SUB_R = 4.5; // per-note sub-point radius
@@ -100,6 +99,7 @@ type PathItem = {
   id: number;
   pts: Pt[]; // note points, one per arp step — the editable path geometry
   notes: number[]; // midi per point
+  enabled: boolean[]; // per-step on/off — a disabled step is silent (runner still passes)
   subdivision: number;
   t0: number; // clock ms at creation — the runner starts at the stroke's beginning
 };
@@ -267,7 +267,8 @@ export default function Paths() {
         } else if (k > entry.k) {
           sched.set(p.id, { k, sig });
           const step = k - Math.floor(p.t0 / P); // steps since the path was drawn
-          fire(p, ((step % S) + S) % S);
+          const idx = ((step % S) + S) % S;
+          if (p.enabled[idx]) fire(p, idx); // disabled steps stay silent; runner still passes
         }
       }
       for (const id of sched.keys()) if (!present.has(id)) sched.delete(id);
@@ -290,24 +291,22 @@ export default function Paths() {
     if (editing != null && !paths.some((p) => p.id === editing)) setEditing(null);
   }, [paths, editing]);
 
-  // Id of the nearest path to a point (within PATH_HIT), or null.
-  const hitPathId = (x: number, y: number): number | null => {
-    let best: number | null = null;
-    let bd = PATH_HIT;
-    for (const p of pathsRef.current) {
-      for (const pt of p.pts) {
-        const d = Math.hypot(x - pt.x, y - pt.y);
-        if (d < bd) {
-          bd = d;
-          best = p.id;
-        }
-      }
-    }
-    return best;
-  };
+  // Long-press: on an endpoint handle → open the subdivision sheet; on an interior
+  // step → toggle that note on/off.
   const onLongPress = (x: number, y: number) => {
-    const id = hitPathId(x, y);
-    if (id != null) setEditing(id);
+    const g = hitGrab(x, y);
+    if (!g) return;
+    if (g.kind === 'warp') {
+      setEditing(g.id);
+    } else {
+      setPaths((prev) =>
+        prev.map((p) =>
+          p.id === g.id
+            ? { ...p, enabled: p.enabled.map((e, i) => (i === g.index ? !e : e)) }
+            : p
+        )
+      );
+    }
   };
   const setSubdivision = (d: number) =>
     setPaths((prev) => prev.map((p) => (p.id === editing ? { ...p, subdivision: d } : p)));
@@ -420,7 +419,14 @@ export default function Paths() {
     const pts = resample(drawn, steps);
     setPaths((prev) => [
       ...prev,
-      { id: idRef.current++, pts, notes: notesFor(pts), subdivision: DEFAULT_SUB, t0: clock.value },
+      {
+        id: idRef.current++,
+        pts,
+        notes: notesFor(pts),
+        enabled: pts.map(() => true),
+        subdivision: DEFAULT_SUB,
+        t0: clock.value,
+      },
     ]);
   };
 
@@ -604,10 +610,22 @@ function PathView({
         strokeCap="round"
         color={selected ? 'rgba(255,120,120,0.85)' : 'rgba(255,255,255,0.4)'}
       />
-      {/* per-note sub-points (interior), draggable for fine adjustments */}
-      {pts.slice(1, -1).map((pt, idx) => (
-        <Circle key={idx} cx={pt.x} cy={pt.y} r={SUB_R} color={subColor} />
-      ))}
+      {/* per-note sub-points (interior): filled = on, hollow = off; drag to move */}
+      {pts.slice(1, -1).map((pt, idx) =>
+        path.enabled[idx + 1] ? (
+          <Circle key={idx} cx={pt.x} cy={pt.y} r={SUB_R} color={subColor} />
+        ) : (
+          <Circle
+            key={idx}
+            cx={pt.x}
+            cy={pt.y}
+            r={SUB_R}
+            style="stroke"
+            strokeWidth={1.5}
+            color="rgba(255,255,255,0.3)"
+          />
+        )
+      )}
       {/* draggable endpoint handles */}
       {a ? (
         <Circle cx={a.x} cy={a.y} r={HANDLE_R} style="stroke" strokeWidth={2} color={handleColor} />
@@ -695,7 +713,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: 10,
   },
-  row: { flexDirection: 'row', gap: 10, marginBottom: 18 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginBottom: 18 },
   subBtn: {
     minWidth: 50,
     paddingHorizontal: 12,

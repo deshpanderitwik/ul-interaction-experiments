@@ -557,7 +557,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     alignSelf: 'center',
   },
-  row: { flexDirection: 'row', gap: 10, marginBottom: 18 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginBottom: 18 },
   subBtn: {
     minWidth: 50,
     paddingHorizontal: 12,

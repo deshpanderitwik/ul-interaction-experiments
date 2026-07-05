@@ -21,12 +21,16 @@ export const MAX_BODIES = 12;
 export const BODY_R = 20; // core radius, px — small so bodies cover fine pitch ground
 export const HIT_R = 32; // touch radius for tap/drag/hold, px
 
-// Pulse subdivisions offered in the properties panel.
+// Pulse subdivisions offered in the properties panel. `d` is the denominator of
+// a whole note; triplets sit between the straight values (e.g. 1/8T = d12 is
+// three per quarter).
 export const SUBDIVISIONS = [
   { label: '1', d: 1 },
   { label: '1/2', d: 2 },
   { label: '1/4', d: 4 },
+  { label: '1/4T', d: 6 },
   { label: '1/8', d: 8 },
+  { label: '1/8T', d: 12 },
   { label: '1/16', d: 16 },
 ] as const;
 

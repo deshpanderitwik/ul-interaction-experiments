@@ -40,7 +40,8 @@ const RING_ALPHA = 0.24;
 const SCHED_MS = 15;
 const NODE_R = 12;
 const MAX_BODIES = 14;
-const LAUNCH_K = 0.16; // pull distance (px) → velocity (px/tick)
+const LAUNCH_K = 0.39; // launch speed = LAUNCH_K * pull^LAUNCH_EXP (px/tick)
+const LAUNCH_EXP = 0.7; // sub-linear: big pulls give diminishing extra speed
 const FRICTION = 0.99; // velocity kept per tick
 const BOUNCE = 0.86; // velocity kept per wall bounce
 const DEATH_SPEED = 1.2; // px/tick below which the body fades and dies
@@ -232,8 +233,13 @@ export default function Slingshot() {
   }, [live, clock, pulses]);
 
   const launch = (b: Band) => {
-    const vx = (b.ax - b.fx) * LAUNCH_K;
-    const vy = (b.ay - b.fy) * LAUNCH_K;
+    const dx = b.ax - b.fx;
+    const dy = b.ay - b.fy;
+    const d = Math.hypot(dx, dy);
+    if (d < 1e-3) return;
+    const speed = LAUNCH_K * Math.pow(d, LAUNCH_EXP);
+    const vx = (dx / d) * speed;
+    const vy = (dy / d) * speed;
     const id = idRef.current++;
     slungRef.current.push({
       id,

@@ -730,6 +730,16 @@ function PropertiesPanel({
         ) : (
           <>
             <Text style={styles.panelTitle}>{noteName(body.midi)}</Text>
+            <View style={styles.actionRow}>
+              <Pressable style={styles.moveBtn} onPress={onMove}>
+                <Text style={styles.moveText}>{body.path ? 'Re-path' : 'Move'}</Text>
+              </Pressable>
+              {body.path ? (
+                <Pressable style={styles.moveBtn} onPress={onClearPath}>
+                  <Text style={styles.moveText}>Clear path</Text>
+                </Pressable>
+              ) : null}
+            </View>
             <Text style={styles.panelLabel}>subdivision</Text>
             <View style={styles.row}>
               {SUBDIVISIONS.map((s) => {
@@ -747,16 +757,6 @@ function PropertiesPanel({
                   </Pressable>
                 );
               })}
-            </View>
-            <View style={styles.actionRow}>
-              <Pressable style={styles.moveBtn} onPress={onMove}>
-                <Text style={styles.moveText}>{body.path ? 'Re-path' : 'Move'}</Text>
-              </Pressable>
-              {body.path ? (
-                <Pressable style={styles.moveBtn} onPress={onClearPath}>
-                  <Text style={styles.moveText}>Clear path</Text>
-                </Pressable>
-              ) : null}
             </View>
             <Pressable style={styles.deleteBtn} onPress={onDelete}>
               <Text style={styles.deleteText}>Delete</Text>

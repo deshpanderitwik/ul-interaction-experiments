@@ -551,6 +551,16 @@ export default function ExtendedGrid() {
         </View>
       </GestureDetector>
 
+      {/* While laying a path, a dedicated full-screen catcher takes every tap and
+          drops a waypoint. It sits above the gesture layer (so taps don't need to
+          pass through the panel overlay) but below the panel's buttons. */}
+      {laying != null ? (
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={(e) => addPathPoint(e.nativeEvent.locationX, e.nativeEvent.locationY)}
+        />
+      ) : null}
+
       {editingBody ? (
         <PropertiesPanel
           body={editingBody}

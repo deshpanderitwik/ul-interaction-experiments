@@ -346,7 +346,7 @@ export default function ExtendedGrid() {
   const onScrollMove = (y: number) => {
     const bottom = heightRef.current - PITCH_BOTTOM_INSET;
     const spacing = (bottom - PITCH_TOP) / Math.max(1, visibleRef.current - 1);
-    const dNotes = Math.round((scrollY0Ref.current - y) / spacing);
+    const dNotes = Math.round((y - scrollY0Ref.current) / spacing); // swipe down → higher notes
     setScrollIndex(Math.max(0, Math.min(maxScrollRef.current, scrollStartRef.current + dNotes)));
   };
   const scrollPan = Gesture.Pan()

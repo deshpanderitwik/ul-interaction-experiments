@@ -1,4 +1,4 @@
-import { Blur, Canvas, Circle, Fill, Group, Line, Shader, Skia, useClock, vec } from '@shopify/react-native-skia';
+import { Blur, Canvas, Circle, Fill, Group, Line, Path, Shader, Skia, useClock, vec } from '@shopify/react-native-skia';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -120,8 +120,17 @@ half4 main(float2 fragcoord) {
 }
 `)!;
 
-type Body = { id: number; x: number; midi: number; subdivision: number; playing: boolean };
-type Fx = { pulse: SharedValue<number> };
+type Waypoint = { x: number; midi: number };
+type Body = {
+  id: number;
+  x: number;
+  midi: number;
+  subdivision: number;
+  playing: boolean;
+  path?: Waypoint[]; // if set (>=2), the body travels through these, playing each
+  pathT0?: number; // clock ms when traversal started
+};
+type Fx = { pulse: SharedValue<number>; px: SharedValue<number>; py: SharedValue<number> };
 type Pulse = { x: number; y: number; t: number; seed: number }; // published to the shader
 type BufPulse = { x: number; midi: number; t: number; seed: number }; // anchored to its note
 
@@ -151,6 +160,9 @@ export default function ExtendedGrid() {
 
   const [bodies, setBodies] = useState<Body[]>([]);
   const [editing, setEditing] = useState<number | null>(null);
+  const [laying, setLaying] = useState<Waypoint[] | null>(null); // path being laid for `editing`
+  const layingRef = useRef<Waypoint[] | null>(null);
+  layingRef.current = laying;
 
   const bodiesRef = useRef(bodies);
   bodiesRef.current = bodies;
@@ -190,11 +202,12 @@ export default function ExtendedGrid() {
     if (editing != null && !bodies.some((b) => b.id === editing)) setEditing(null);
   }, [editing, bodies]);
 
-  const fire = useCallback(
-    (b: Body) => {
-      if (!noteEnabled(b.midi)) return;
-      playSine(midiToFreq(b.midi));
-      const fx = fxRef.current.get(b.id);
+  // Sound a note: play, pop the body, and shed a ripple anchored to the note.
+  const emitNote = useCallback(
+    (bodyId: number, midi: number, x: number) => {
+      if (!noteEnabled(midi)) return;
+      playSine(midiToFreq(midi));
+      const fx = fxRef.current.get(bodyId);
       if (fx) {
         fx.pulse.value = 0;
         fx.pulse.value = withSequence(
@@ -202,12 +215,11 @@ export default function ExtendedGrid() {
           withTiming(0, { duration: 320, easing: Easing.out(Easing.quad) })
         );
       }
-      // Anchor the ripple to the NOTE (its midi + x), not a fixed screen y, so it
-      // moves with the grid when the user scrolls.
-      pulseBufRef.current.push({ x: b.x, midi: b.midi, t: clock.value / 1000, seed: Math.random() });
+      pulseBufRef.current.push({ x, midi, t: clock.value / 1000, seed: Math.random() });
     },
     [clock]
   );
+  const fire = useCallback((b: Body) => emitNote(b.id, b.midi, b.x), [emitNote]);
 
   // Shared-grid scheduler with drift (identical to Bodies), publishing the ripple
   // buffer once per tick so simultaneous bodies all show.
@@ -227,6 +239,32 @@ export default function ExtendedGrid() {
         present.add(b.id);
         if (!b.playing) {
           sched.delete(b.id);
+          continue;
+        }
+        // Path body: glide through its waypoints (one per subdivision), playing
+        // each note as it arrives. Its rendered position rides px/py.
+        if (b.path && b.path.length >= 2 && b.pathT0 != null) {
+          const N = b.path.length;
+          const P = periodMs(b.subdivision, bpm);
+          const stepF = (now - b.pathT0) / P;
+          const step = Math.floor(stepF);
+          const frac = stepF - step;
+          const i0 = ((step % N) + N) % N;
+          const i1 = (i0 + 1) % N;
+          const fx = fxRef.current.get(b.id);
+          if (fx) {
+            const y0 = yForMidi(b.path[i0].midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current) ?? -9999;
+            const y1 = yForMidi(b.path[i1].midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current) ?? -9999;
+            fx.px.value = b.path[i0].x + (b.path[i1].x - b.path[i0].x) * frac;
+            fx.py.value = y0 + (y1 - y0) * frac;
+          }
+          const sig = `path:${b.subdivision}:${bpm}`;
+          const entry = sched.get(b.id);
+          if (entry === undefined || entry.sig !== sig) sched.set(b.id, { k: step, sig });
+          else if (step > entry.k) {
+            sched.set(b.id, { k: step, sig });
+            emitNote(b.id, b.path[i0].midi, b.path[i0].x);
+          }
           continue;
         }
         const P = periodMs(b.subdivision, bpm);
@@ -258,7 +296,7 @@ export default function ExtendedGrid() {
       pulseBufRef.current = [];
       pulses.value = [];
     };
-  }, [live, fire, clock, pulses]);
+  }, [live, fire, emitNote, clock, pulses]);
 
   const midiAtY = (y: number) => midiFromY(y, windowLadder, height);
   const hitId = (x: number, y: number): number | null => {
@@ -271,8 +309,14 @@ export default function ExtendedGrid() {
     return null;
   };
 
+  // While laying a path, a tap on the grid adds a waypoint.
+  const addPathPoint = (x: number, y: number) => {
+    const midi = midiAtY(y);
+    const cx = Math.max(RULER_WIDTH, x);
+    setLaying((prev) => (prev ? [...prev, { x: cx, midi }] : [{ x: cx, midi }]));
+  };
   const addBody = (x: number, y: number) => {
-    if (x < RULER_WIDTH) return;
+    if (layingRef.current || x < RULER_WIDTH) return;
     setBodies((prev) =>
       prev.length >= MAX_BODIES
         ? prev
@@ -280,17 +324,26 @@ export default function ExtendedGrid() {
     );
   };
   const toggleAt = (x: number, y: number) => {
+    if (layingRef.current) {
+      addPathPoint(x, y);
+      return;
+    }
     const id = hitId(x, y);
     if (id == null) return;
     setBodies((prev) => prev.map((b) => (b.id === id ? { ...b, playing: !b.playing } : b)));
   };
   const openPropsAt = (x: number, y: number) => {
+    if (layingRef.current) return;
     const id = hitId(x, y);
     if (id != null) setEditing(id);
   };
   // A drag that lands on a body moves it; a drag on empty grid scrolls the window.
   const dragModeRef = useRef<'body' | 'scroll' | null>(null);
   const onDragBegin = (x: number, y: number) => {
+    if (layingRef.current) {
+      dragModeRef.current = null;
+      return;
+    }
     const id = hitId(x, y);
     if (id != null) {
       draggingRef.current = id;
@@ -369,6 +422,17 @@ export default function ExtendedGrid() {
     setBodies((prev) => prev.filter((b) => b.id !== editing));
     setEditing(null);
   };
+  const startLaying = () => setLaying([]);
+  const cancelLaying = () => setLaying(null);
+  const clearPath = () =>
+    setBodies((prev) => prev.map((b) => (b.id === editing ? { ...b, path: undefined, pathT0: undefined } : b)));
+  const confirmLaying = () => {
+    const pts = laying;
+    setLaying(null);
+    setEditing(null);
+    if (!pts || pts.length < 2) return;
+    setBodies((prev) => prev.map((b) => (b.id === editing ? { ...b, path: pts, pathT0: clock.value } : b)));
+  };
 
   const uniforms = useDerivedValue(() => {
     const pos: number[] = [];
@@ -396,10 +460,15 @@ export default function ExtendedGrid() {
     };
   });
 
-  // Bodies with a visible y (skip those scrolled off-window).
-  const visibleBodies = bodies
-    .map((b) => ({ b, y: yForMidi(b.midi, fullLadder, scroll, visibleCount, height) }))
-    .filter((v): v is { b: Body; y: number } => v.y != null);
+  // One render entry per body. Path bodies always render (position via px/py);
+  // static bodies render only when their note is in the window.
+  const bodyViews = bodies.map((b) => {
+    const isPath = !!(b.path && b.path.length >= 2);
+    const y0 = isPath
+      ? yForMidi(b.path![0].midi, fullLadder, scroll, visibleCount, height) ?? -9999
+      : yForMidi(b.midi, fullLadder, scroll, visibleCount, height);
+    return { b, isPath, y0 };
+  });
 
   return (
     <View style={styles.fill}>
@@ -412,19 +481,45 @@ export default function ExtendedGrid() {
             {gridYs.map((y, i) => (
               <Line key={i} p1={vec(0, y)} p2={vec(width, y)} color="rgba(255,255,255,0.09)" strokeWidth={1} />
             ))}
-            {visibleBodies.map(({ b, y }) => (
-              <BodyView key={b.id} body={b} y={y} register={registerFx} unregister={unregisterFx} />
-            ))}
+            {bodyViews.map(({ b, isPath }) =>
+              isPath ? (
+                <PathLine
+                  key={`p${b.id}`}
+                  points={b.path!}
+                  full={fullLadder}
+                  scroll={scroll}
+                  visible={visibleCount}
+                  height={height}
+                />
+              ) : null
+            )}
+            {laying && laying.length > 0 ? (
+              <PathLine points={laying} full={fullLadder} scroll={scroll} visible={visibleCount} height={height} dots />
+            ) : null}
+            {bodyViews.map(({ b, isPath, y0 }) =>
+              isPath || y0 != null ? (
+                <BodyView
+                  key={b.id}
+                  body={b}
+                  y0={y0 ?? -9999}
+                  isPath={isPath}
+                  register={registerFx}
+                  unregister={unregisterFx}
+                />
+              ) : null
+            )}
           </Canvas>
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            {visibleBodies.map(({ b, y }) => (
-              <Text
-                key={b.id}
-                style={[styles.label, { left: b.x - 40, top: y - 7, color: b.playing ? '#0a0a0a' : '#fff' }]}
-              >
-                {noteName(b.midi)}
-              </Text>
-            ))}
+            {bodyViews.map(({ b, isPath, y0 }) =>
+              !isPath && y0 != null ? (
+                <Text
+                  key={b.id}
+                  style={[styles.label, { left: b.x - 40, top: y0 - 7, color: b.playing ? '#0a0a0a' : '#fff' }]}
+                >
+                  {noteName(b.midi)}
+                </Text>
+              ) : null
+            )}
           </View>
           <View style={styles.centerGuide} pointerEvents="none" />
           <DriftRuler />
@@ -459,7 +554,12 @@ export default function ExtendedGrid() {
       {editingBody ? (
         <PropertiesPanel
           body={editingBody}
+          laying={laying}
           onSubdivision={setSubdivision}
+          onMove={startLaying}
+          onClearPath={clearPath}
+          onConfirm={confirmLaying}
+          onCancel={cancelLaying}
           onDelete={deleteEditing}
           onClose={() => setEditing(null)}
         />
@@ -468,36 +568,92 @@ export default function ExtendedGrid() {
   );
 }
 
+// The faint line a path body travels; `dots` marks the waypoints (used while laying).
+function PathLine({
+  points,
+  full,
+  scroll,
+  visible,
+  height,
+  dots,
+}: {
+  points: Waypoint[];
+  full: number[];
+  scroll: number;
+  visible: number;
+  height: number;
+  dots?: boolean;
+}) {
+  const skPath = useMemo(() => {
+    const p = Skia.Path.Make();
+    let started = false;
+    for (const wp of points) {
+      const y = yForMidi(wp.midi, full, scroll, visible, height);
+      if (y == null) {
+        started = false;
+        continue;
+      }
+      if (!started) {
+        p.moveTo(wp.x, y);
+        started = true;
+      } else p.lineTo(wp.x, y);
+    }
+    return p;
+  }, [points, full, scroll, visible, height]);
+
+  return (
+    <Group>
+      <Path path={skPath} style="stroke" strokeWidth={1.5} strokeJoin="round" color="rgba(255,255,255,0.32)" />
+      {dots
+        ? points.map((wp, i) => {
+            const y = yForMidi(wp.midi, full, scroll, visible, height);
+            return y == null ? null : (
+              <Circle key={i} cx={wp.x} cy={y} r={4.5} color="rgba(255,255,255,0.7)" />
+            );
+          })
+        : null}
+    </Group>
+  );
+}
+
 function BodyView({
   body,
-  y,
+  y0,
+  isPath,
   register,
   unregister,
 }: {
   body: Body;
-  y: number;
+  y0: number;
+  isPath: boolean;
   register: (id: number, fx: Fx) => void;
   unregister: (id: number) => void;
 }) {
   const pulse = useSharedValue(0);
+  const px = useSharedValue(isPath && body.path ? body.path[0].x : body.x);
+  const py = useSharedValue(y0);
   useEffect(() => {
-    register(body.id, { pulse });
+    register(body.id, { pulse, px, py });
     return () => unregister(body.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [body.id]);
 
-  const transform = useDerivedValue(() => [{ scale: 1 + 0.14 * pulse.value }]);
+  const center = useDerivedValue(
+    () => (isPath ? { x: px.value, y: py.value } : { x: body.x, y: y0 }),
+    [isPath, body.x, y0]
+  );
+  const r = useDerivedValue(() => BODY_R * (1 + 0.14 * pulse.value));
   const glowOpacity = useDerivedValue(() => (body.playing ? 0.2 : 0.0) + 0.45 * pulse.value, [body.playing]);
 
   return (
-    <Group transform={transform} origin={{ x: body.x, y }}>
-      <Circle cx={body.x} cy={y} r={BODY_R * 1.1} color="white" opacity={glowOpacity}>
+    <Group>
+      <Circle c={center} r={BODY_R * 1.1} color="white" opacity={glowOpacity}>
         <Blur blur={BODY_R * 0.5} />
       </Circle>
       {body.playing ? (
-        <Circle cx={body.x} cy={y} r={BODY_R} color="white" />
+        <Circle c={center} r={r} color="white" />
       ) : (
-        <Circle cx={body.x} cy={y} r={BODY_R} style="stroke" strokeWidth={2} color="white" opacity={0.5} />
+        <Circle c={center} r={r} style="stroke" strokeWidth={2} color="white" opacity={0.5} />
       )}
     </Group>
   );
@@ -520,41 +676,83 @@ function DriftRuler() {
 
 function PropertiesPanel({
   body,
+  laying,
   onSubdivision,
+  onMove,
+  onClearPath,
+  onConfirm,
+  onCancel,
   onDelete,
   onClose,
 }: {
   body: Body;
+  laying: Waypoint[] | null;
   onSubdivision: (d: number) => void;
+  onMove: () => void;
+  onClearPath: () => void;
+  onConfirm: () => void;
+  onCancel: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
+  // While laying, the rest of the screen must stay tappable (to add points), so
+  // there's no backdrop.
   return (
-    <View style={StyleSheet.absoluteFill}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      {laying == null ? <Pressable style={styles.backdrop} onPress={onClose} /> : null}
       <View style={styles.panel} pointerEvents="box-none">
-        <Text style={styles.panelTitle}>{noteName(body.midi)}</Text>
-        <Text style={styles.panelLabel}>subdivision</Text>
-        <View style={styles.row}>
-          {SUBDIVISIONS.map((s) => {
-            const on = s.d === body.subdivision;
-            return (
-              <Pressable
-                key={s.d}
-                onPress={() => onSubdivision(s.d)}
-                style={[
-                  styles.subBtn,
-                  on ? { backgroundColor: '#fff', borderColor: '#fff' } : { borderColor: 'rgba(255,255,255,0.28)' },
-                ]}
-              >
-                <Text style={[styles.subBtnText, on ? styles.subBtnTextOn : null]}>{s.label}</Text>
+        {laying != null ? (
+          <>
+            <Text style={styles.panelTitle}>Lay a path</Text>
+            <Text style={styles.panelHint}>tap the grid to add points · {laying.length} placed</Text>
+            <View style={styles.confirmRow}>
+              <Pressable style={styles.cancelBtn} onPress={onCancel}>
+                <Text style={styles.cancelText}>Cancel</Text>
               </Pressable>
-            );
-          })}
-        </View>
-        <Pressable style={styles.deleteBtn} onPress={onDelete}>
-          <Text style={styles.deleteText}>Delete</Text>
-        </Pressable>
+              <Pressable
+                style={[styles.confirmBtn, laying.length < 2 && styles.confirmDisabled]}
+                onPress={laying.length >= 2 ? onConfirm : undefined}
+              >
+                <Text style={styles.confirmText}>Confirm</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : (
+          <>
+            <Text style={styles.panelTitle}>{noteName(body.midi)}</Text>
+            <Text style={styles.panelLabel}>subdivision</Text>
+            <View style={styles.row}>
+              {SUBDIVISIONS.map((s) => {
+                const on = s.d === body.subdivision;
+                return (
+                  <Pressable
+                    key={s.d}
+                    onPress={() => onSubdivision(s.d)}
+                    style={[
+                      styles.subBtn,
+                      on ? { backgroundColor: '#fff', borderColor: '#fff' } : { borderColor: 'rgba(255,255,255,0.28)' },
+                    ]}
+                  >
+                    <Text style={[styles.subBtnText, on ? styles.subBtnTextOn : null]}>{s.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.actionRow}>
+              <Pressable style={styles.moveBtn} onPress={onMove}>
+                <Text style={styles.moveText}>{body.path ? 'Re-path' : 'Move'}</Text>
+              </Pressable>
+              {body.path ? (
+                <Pressable style={styles.moveBtn} onPress={onClearPath}>
+                  <Text style={styles.moveText}>Clear path</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <Pressable style={styles.deleteBtn} onPress={onDelete}>
+              <Text style={styles.deleteText}>Delete</Text>
+            </Pressable>
+          </>
+        )}
       </View>
     </View>
   );
@@ -664,4 +862,31 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,90,90,0.7)',
   },
   deleteText: { color: '#ff5a5a', fontSize: 15, fontWeight: '700', letterSpacing: 0.5 },
+  actionRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  moveBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.5)',
+  },
+  moveText: { color: '#fff', fontSize: 15, fontWeight: '700', letterSpacing: 0.5 },
+  panelHint: { color: 'rgba(255,255,255,0.6)', fontSize: 13, marginBottom: 18, textAlign: 'center' },
+  confirmRow: { flexDirection: 'row', gap: 12 },
+  cancelBtn: {
+    paddingVertical: 11,
+    paddingHorizontal: 26,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  cancelText: { color: '#ddd', fontSize: 15, fontWeight: '700', letterSpacing: 0.5 },
+  confirmBtn: {
+    paddingVertical: 11,
+    paddingHorizontal: 30,
+    borderRadius: 12,
+    backgroundColor: '#54f2b0',
+  },
+  confirmDisabled: { backgroundColor: 'rgba(84,242,176,0.3)' },
+  confirmText: { color: '#0a0a0a', fontSize: 15, fontWeight: '700', letterSpacing: 0.5 },
 });

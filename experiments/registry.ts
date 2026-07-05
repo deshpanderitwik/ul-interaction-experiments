@@ -69,6 +69,12 @@ export const experiments: Experiment[] = [
         blurb: 'Drag back and release to fling a body across the grid; it ricochets off the edges, ringing notes as it passes, then fades.',
         load: () => import('./bodies/slingshot'),
       },
+      {
+        id: 'extended',
+        title: 'Extended Grid',
+        blurb: 'Bodies on the full C0–C5 grid; press and drag the note-label column to scroll the visible window up and down.',
+        load: () => import('./bodies/extended'),
+      },
     ],
   },
   {

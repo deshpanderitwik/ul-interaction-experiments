@@ -283,8 +283,14 @@ export default function Emitters() {
   };
   const onLongPress = (x: number, y: number) => {
     const id = hitNode(x, y);
-    if (id != null) setEditing(id);
-    else place(x, y, 'receiver');
+    if (id == null) {
+      place(x, y, 'receiver');
+      return;
+    }
+    const n = nodesRef.current.find((nn) => nn.id === id);
+    if (!n) return;
+    if (n.kind === 'receiver') setNodes((prev) => prev.filter((nn) => nn.id !== id)); // just delete
+    else setEditing(id); // emitter → sheet
   };
   const onDragBegin = (x: number, y: number) => {
     draggingRef.current = hitNode(x, y);

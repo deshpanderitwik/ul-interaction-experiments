@@ -7,8 +7,8 @@ import { scaleMidiLadder } from './shared';
 // scale note, plus the left ruler and note-boundary grid geometry. Defined once
 // so both screens trace the exact same grid.
 
-export const LADDER_MIN = 48; // C3
-export const LADDER_MAX = 72; // C5 (two octaves)
+export const LADDER_MIN = 48; // C2 (Ableton labeling; MIDI 48)
+export const LADDER_MAX = 72; // C4 (two octaves; MIDI 72)
 export const PITCH_TOP = 130; // y of the highest note (kept clear of the top bar / back button)
 export const PITCH_BOTTOM_INSET = 92; // y (from bottom) of the lowest note
 

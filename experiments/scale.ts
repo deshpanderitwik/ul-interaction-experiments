@@ -53,8 +53,10 @@ export function midiToFreq(m: number): number {
   return 440 * Math.pow(2, (m - 69) / 12);
 }
 
+// Octave numbering follows the DAW convention (Ableton/Yamaha): middle C
+// (MIDI 60) = C3. Pitches are unchanged — this only names them.
 export function noteName(midi: number): string {
-  return `${ROOT_NAMES[((midi % 12) + 12) % 12]}${Math.floor(midi / 12) - 1}`;
+  return `${ROOT_NAMES[((midi % 12) + 12) % 12]}${Math.floor(midi / 12) - 2}`;
 }
 
 // All scale-member MIDI notes within [minMidi, maxMidi], as frequencies.

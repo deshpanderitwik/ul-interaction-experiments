@@ -69,6 +69,20 @@ function yForMidi(
   if (pos < 0 || pos > visible - 1) return null;
   return yOfPos(pos, visible, height);
 }
+// Like yForMidi but never null: a note outside the window extrapolates linearly to
+// a y beyond the screen edge, so a path's geometry and the body gliding it keep a
+// continuous position as you scroll (rather than snapping off to infinity).
+function yForMidiExt(
+  midi: number,
+  full: number[],
+  scroll: number,
+  visible: number,
+  height: number
+): number {
+  const idx = full.indexOf(midi);
+  const pos = (idx < 0 ? 0 : idx) - scroll;
+  return yOfPos(pos, visible, height);
+}
 function nearestLadder(full: number[], midi: number): number {
   let best = full[0] ?? midi;
   let bd = Infinity;
@@ -255,8 +269,8 @@ export default function ExtendedGrid() {
           const i1 = (i0 + 1) % N;
           const fx = fxRef.current.get(b.id);
           if (fx) {
-            const y0 = yForMidi(b.path[i0].midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current) ?? -9999;
-            const y1 = yForMidi(b.path[i1].midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current) ?? -9999;
+            const y0 = yForMidiExt(b.path[i0].midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
+            const y1 = yForMidiExt(b.path[i1].midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
             fx.px.value = b.path[i0].x + (b.path[i1].x - b.path[i0].x) * frac;
             fx.py.value = y0 + (y1 - y0) * frac;
           }
@@ -288,8 +302,8 @@ export default function ExtendedGrid() {
       // Recompute each ripple's screen y from the current scroll so it tracks its
       // note; off-window ripples are parked off-screen.
       pulses.value = buf.map((p) => {
-        const py = yForMidi(p.midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
-        return { x: p.x, y: py == null ? -9999 : py, t: p.t, seed: p.seed };
+        const py = yForMidiExt(p.midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
+        return { x: p.x, y: py, t: p.t, seed: p.seed };
       });
     }, SCHED_MS);
     return () => {
@@ -532,7 +546,7 @@ export default function ExtendedGrid() {
   const bodyViews = bodies.map((b) => {
     const isPath = !!(b.path && b.path.length >= 2);
     const y0 = isPath
-      ? yForMidi(b.path![0].midi, fullLadder, scroll, visibleCount, height) ?? -9999
+      ? yForMidiExt(b.path![0].midi, fullLadder, scroll, visibleCount, height)
       : yForMidi(b.midi, fullLadder, scroll, visibleCount, height);
     return { b, isPath, y0 };
   });
@@ -654,20 +668,16 @@ function PathLine({
   dots?: boolean;
   handles?: boolean;
 }) {
+  // Extrapolate every waypoint's y (never null) so the stroke stays a single
+  // continuous polyline as points scroll past the screen edge; Skia clips the
+  // off-screen portion.
   const skPath = useMemo(() => {
     const p = Skia.Path.Make();
-    let started = false;
-    for (const wp of points) {
-      const y = yForMidi(wp.midi, full, scroll, visible, height);
-      if (y == null) {
-        started = false;
-        continue;
-      }
-      if (!started) {
-        p.moveTo(wp.x, y);
-        started = true;
-      } else p.lineTo(wp.x, y);
-    }
+    points.forEach((wp, i) => {
+      const y = yForMidiExt(wp.midi, full, scroll, visible, height);
+      if (i === 0) p.moveTo(wp.x, y);
+      else p.lineTo(wp.x, y);
+    });
     return p;
   }, [points, full, scroll, visible, height]);
 
@@ -675,28 +685,28 @@ function PathLine({
     <Group>
       <Path path={skPath} style="stroke" strokeWidth={1.5} strokeJoin="round" color="rgba(255,255,255,0.32)" />
       {dots
-        ? points.map((wp, i) => {
-            const y = yForMidi(wp.midi, full, scroll, visible, height);
-            return y == null ? null : (
-              <Circle key={i} cx={wp.x} cy={y} r={4.5} color="rgba(255,255,255,0.7)" />
-            );
-          })
+        ? points.map((wp, i) => (
+            <Circle
+              key={i}
+              cx={wp.x}
+              cy={yForMidiExt(wp.midi, full, scroll, visible, height)}
+              r={4.5}
+              color="rgba(255,255,255,0.7)"
+            />
+          ))
         : null}
       {handles
-        ? points.map((wp, i) => {
-            const y = yForMidi(wp.midi, full, scroll, visible, height);
-            return y == null ? null : (
-              <Circle
-                key={i}
-                cx={wp.x}
-                cy={y}
-                r={HANDLE_R}
-                style="stroke"
-                strokeWidth={2}
-                color="rgba(255,255,255,0.6)"
-              />
-            );
-          })
+        ? points.map((wp, i) => (
+            <Circle
+              key={i}
+              cx={wp.x}
+              cy={yForMidiExt(wp.midi, full, scroll, visible, height)}
+              r={HANDLE_R}
+              style="stroke"
+              strokeWidth={2}
+              color="rgba(255,255,255,0.6)"
+            />
+          ))
         : null}
     </Group>
   );

@@ -65,6 +65,10 @@ export function ExperimentHost({
 
   const active = focused && appActive;
 
+  // Chrome (back / record / gear / hide) can be tucked away for a clean capture;
+  // tapping the now-empty top-bar strip brings it back.
+  const [chromeHidden, setChromeHidden] = useState(false);
+
   const [expId, varId] = settingsKey.split('/');
   const exp = getExperiment(expId);
   const variation = getVariation(expId, varId);
@@ -77,19 +81,41 @@ export function ExperimentHost({
       <SettingsProvider id={settingsKey} audio={audio}>
         <View style={styles.fill}>
           {children}
-          <Pressable
-            onPress={() => router.back()}
-            hitSlop={16}
-            accessibilityRole="button"
-            accessibilityLabel="Back to Home"
-            style={styles.back}
-          >
-            <Text style={styles.chevron}>‹</Text>
-          </Pressable>
-          {audio ? (
-            <RecordControl experiment={variation?.title ?? exp?.title ?? 'Experiment'} />
-          ) : null}
-          <SettingsGear />
+          {chromeHidden ? (
+            // The UI is tucked away — a transparent strip over the old top-bar
+            // area brings it back on tap.
+            <Pressable
+              onPress={() => setChromeHidden(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Show controls"
+              style={styles.revealStrip}
+            />
+          ) : (
+            <>
+              <Pressable
+                onPress={() => router.back()}
+                hitSlop={16}
+                accessibilityRole="button"
+                accessibilityLabel="Back to Home"
+                style={styles.back}
+              >
+                <Text style={styles.chevron}>‹</Text>
+              </Pressable>
+              {audio ? (
+                <RecordControl experiment={variation?.title ?? exp?.title ?? 'Experiment'} />
+              ) : null}
+              <SettingsGear />
+              <Pressable
+                onPress={() => setChromeHidden(true)}
+                hitSlop={16}
+                accessibilityRole="button"
+                accessibilityLabel="Hide controls"
+                style={styles.hide}
+              >
+                <Text style={styles.hideIcon}>⌄</Text>
+              </Pressable>
+            </>
+          )}
           <SettingsSheet />
         </View>
       </SettingsProvider>
@@ -118,5 +144,28 @@ const styles = StyleSheet.create({
     lineHeight: 28,
     marginTop: -2,
     marginLeft: -2,
+  },
+  // Sits just left of the gear (gear is right:20, width 40, + 8 gap).
+  hide: {
+    position: 'absolute',
+    top: 56,
+    right: 68,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  hideIcon: { color: '#fff', fontSize: 20, lineHeight: 20, marginTop: -2 },
+  // Transparent tap target spanning the top-bar band while chrome is hidden.
+  revealStrip: {
+    position: 'absolute',
+    top: 44,
+    left: 0,
+    right: 0,
+    height: 68,
   },
 });

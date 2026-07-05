@@ -683,7 +683,6 @@ function PathSheet({
         <Pressable style={styles.deleteBtn} onPress={onDelete}>
           <Text style={styles.deleteText}>Delete</Text>
         </Pressable>
-        <Text style={styles.closeHint}>tap outside to close</Text>
       </View>
     </View>
   );
@@ -735,5 +734,4 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,90,90,0.7)',
   },
   deleteText: { color: '#ff5a5a', fontSize: 15, fontWeight: '700', letterSpacing: 0.5 },
-  closeHint: { color: 'rgba(255,255,255,0.32)', fontSize: 13, letterSpacing: 0.5, marginTop: 16 },
 });

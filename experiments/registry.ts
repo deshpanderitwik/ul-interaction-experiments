@@ -63,6 +63,12 @@ export const experiments: Experiment[] = [
         blurb: 'Double-tap an emitter that pulses waves; long-press a receiver that sounds when a wave reaches it. Rhythm from distance.',
         load: () => import('./bodies/emitters'),
       },
+      {
+        id: 'slingshot',
+        title: 'Slingshot',
+        blurb: 'Drag back and release to fling a body across the grid; it ricochets off the edges, ringing notes as it passes, then fades.',
+        load: () => import('./bodies/slingshot'),
+      },
     ],
   },
   {

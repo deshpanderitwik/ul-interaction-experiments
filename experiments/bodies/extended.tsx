@@ -229,10 +229,7 @@ export default function ExtendedGrid() {
         const P = periodMs(b.subdivision, bpm);
         const k = Math.floor((now - t0Ref.current - driftMs(b.x, P, w)) / P);
         const sig = `${b.subdivision}:${bpm}`;
-        if (draggingRef.current === b.id) {
-          sched.set(b.id, { k, sig });
-          continue;
-        }
+        // (No mute while dragging — a body keeps sounding as you move it.)
         const entry = sched.get(b.id);
         if (entry === undefined || entry.sig !== sig) sched.set(b.id, { k, sig });
         else if (k > entry.k) {

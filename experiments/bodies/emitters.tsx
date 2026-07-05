@@ -251,22 +251,32 @@ export default function Emitters() {
     }
     return null;
   };
-  const place = (x: number, y: number, kind: Kind) =>
-    setNodes((prev) =>
-      prev.length >= MAX_NODES
-        ? prev
-        : [
-            ...prev,
-            {
-              id: idRef.current++,
-              x,
-              y,
-              midi: midiFromY(y, ladderRef.current, heightRef.current),
-              kind,
-              subdivision: DEFAULT_SUB,
-            },
-          ]
-    );
+  // A receiver must only answer wavefronts that reach it AFTER it appears/lands —
+  // never a wave whose front has already swept past its spot. Mark such waves as
+  // already-fired for this receiver so they don't retro-trigger it.
+  const seedPassedWaves = (id: number, x: number, y: number) => {
+    const nowSec = clock.value / 1000;
+    for (const w of wavesRef.current) {
+      const radius = (nowSec - w.t0) * WAVE_SPEED;
+      if (Math.hypot(x - w.x, y - w.y) <= radius) w.fired.add(id);
+    }
+  };
+  const place = (x: number, y: number, kind: Kind) => {
+    if (nodesRef.current.length >= MAX_NODES) return;
+    const id = idRef.current++;
+    if (kind === 'receiver') seedPassedWaves(id, x, y);
+    setNodes((prev) => [
+      ...prev,
+      {
+        id,
+        x,
+        y,
+        midi: midiFromY(y, ladderRef.current, heightRef.current),
+        kind,
+        subdivision: DEFAULT_SUB,
+      },
+    ]);
+  };
   const onDoubleTap = (x: number, y: number) => {
     if (hitNode(x, y) == null) place(x, y, 'emitter');
   };
@@ -288,6 +298,11 @@ export default function Emitters() {
     );
   };
   const onDragEnd = () => {
+    const id = draggingRef.current;
+    if (id != null) {
+      const n = nodesRef.current.find((nn) => nn.id === id);
+      if (n && n.kind === 'receiver') seedPassedWaves(id, n.x, n.y); // don't retro-fire on landing
+    }
     draggingRef.current = null;
   };
 

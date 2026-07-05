@@ -335,7 +335,9 @@ export default function Emitters() {
     });
   const pan = Gesture.Pan()
     .minDistance(8)
-    .onBegin((e) => runOnJS(onDragBegin)(e.x, e.y))
+    // onStart (not onBegin) so a body only mutes once you actually move it —
+    // a long-press that doesn't move keeps it sounding.
+    .onStart((e) => runOnJS(onDragBegin)(e.x, e.y))
     .onUpdate((e) => runOnJS(onDragMove)(e.x, e.y))
     .onFinalize(() => runOnJS(onDragEnd)());
   const gesture = Gesture.Race(pan, longPress, doubleTap);

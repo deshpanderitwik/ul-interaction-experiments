@@ -283,7 +283,9 @@ export default function Bodies() {
     });
   const pan = Gesture.Pan()
     .minDistance(8)
-    .onBegin((e) => runOnJS(onDragBegin)(e.x, e.y))
+    // onStart (not onBegin) so a body only mutes once you actually move it —
+    // a long-press that doesn't move keeps the note sounding.
+    .onStart((e) => runOnJS(onDragBegin)(e.x, e.y))
     .onUpdate((e) => runOnJS(onDragMove)(e.x, e.y))
     .onFinalize(() => runOnJS(onDragEnd)());
   // Race so the first intent to activate wins: move → drag, hold → properties,

@@ -26,7 +26,7 @@ import { useExperimentActive } from '../_host';
 import { midiToFreq, useScale } from '../scale';
 import { useTempo } from '../tempo';
 import { periodMs, SUBDIVISIONS } from './shared';
-import { computeGridYs, fieldLadder, midiFromY, PitchRuler } from './field';
+import { computeGridYs, fieldLadder, midiFromY, noteEnabled, PitchRuler } from './field';
 import { useSettingsActions } from '../settings';
 import { playSine } from './voice';
 
@@ -162,7 +162,7 @@ export default function Emitters() {
 
   // Emitter fires: pluck its own note, pop, and spawn a wave (shader + trigger).
   const emit = useCallback((n: Node, nowSec: number) => {
-    playSine(midiToFreq(n.midi));
+    if (noteEnabled(n.midi)) playSine(midiToFreq(n.midi)); // muted note: silent driver, still waves
     popFx(n.id, 70, 300);
     // accumulate into the JS buffer; the scheduler publishes it once per tick
     pulseBufRef.current.push({ x: n.x, y: n.y, t: nowSec, seed: Math.random() });
@@ -173,6 +173,7 @@ export default function Emitters() {
 
   // Receiver hit by a wave front: sound its note and flash.
   const fireReceiver = useCallback((r: Node) => {
+    if (!noteEnabled(r.midi)) return; // muted note: no sound, no flash
     playSine(midiToFreq(r.midi));
     popFx(r.id, 60, FLASH_MS);
   }, []);
@@ -397,9 +398,10 @@ export default function Emitters() {
               <NodeView key={n.id} node={n} register={registerFx} unregister={unregisterFx} />
             ))}
           </Canvas>
-          <PitchRuler ladder={ladder} height={height} />
         </View>
       </GestureDetector>
+
+      <PitchRuler ladder={ladder} height={height} />
 
       {editingNode ? (
         <NodeSheet

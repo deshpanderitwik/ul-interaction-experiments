@@ -27,7 +27,7 @@ import { useExperimentActive } from '../_host';
 import { midiToFreq, useScale } from '../scale';
 import { useTempo } from '../tempo';
 import { periodMs, SUBDIVISIONS } from './shared';
-import { PITCH_TOP, computeGridYs, fieldLadder, midiFromY, PitchRuler } from './field';
+import { PITCH_TOP, computeGridYs, fieldLadder, midiFromY, noteEnabled, PitchRuler } from './field';
 import { useSettingsActions } from '../settings';
 import { playSine } from './voice';
 
@@ -227,7 +227,7 @@ export default function Paths() {
     (p: PathItem, stepIndex: number) => {
       const midi = p.notes[stepIndex];
       const pt = p.pts[stepIndex];
-      if (midi == null || pt == null) return;
+      if (midi == null || pt == null || !noteEnabled(midi)) return; // muted note
       playSine(midiToFreq(midi));
       const list = pulses.value.slice(-(PULSES - 1));
       list.push({ x: pt.x, y: pt.y, t: clock.value / 1000, seed: Math.random() });
@@ -530,9 +530,10 @@ export default function Paths() {
               />
             ))}
           </Canvas>
-          <PitchRuler ladder={ladder} height={height} />
         </View>
       </GestureDetector>
+
+      <PitchRuler ladder={ladder} height={height} />
 
       {editingPath ? (
         <PathSheet

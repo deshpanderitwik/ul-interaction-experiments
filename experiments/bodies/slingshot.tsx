@@ -25,7 +25,15 @@ import {
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
 import { midiToFreq, useScale } from '../scale';
-import { computeGridYs, fieldLadder, midiFromY, PITCH_BOTTOM_INSET, PITCH_TOP, PitchRuler } from './field';
+import {
+  computeGridYs,
+  fieldLadder,
+  midiFromY,
+  noteEnabled,
+  PITCH_BOTTOM_INSET,
+  PITCH_TOP,
+  PitchRuler,
+} from './field';
 import { useSettingsActions } from '../settings';
 import { playSine } from './voice';
 
@@ -186,7 +194,7 @@ export default function Slingshot() {
         }
 
         const midi = midiFromY(b.y, ld, heightRef.current);
-        if ((midi !== b.lastMidi || bounced) && nowMs - b.lastFire >= MIN_NOTE_MS) {
+        if ((midi !== b.lastMidi || bounced) && nowMs - b.lastFire >= MIN_NOTE_MS && noteEnabled(midi)) {
           playSine(midiToFreq(midi));
           b.lastFire = nowMs;
           pulseBufRef.current.push({ x: b.x, y: b.y, t: nowSec, seed: Math.random() });
@@ -350,9 +358,10 @@ export default function Slingshot() {
               </Group>
             ) : null}
           </Canvas>
-          <PitchRuler ladder={ladder} height={height} />
         </View>
       </GestureDetector>
+
+      <PitchRuler ladder={ladder} height={height} />
     </View>
   );
 }

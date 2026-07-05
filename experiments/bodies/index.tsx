@@ -21,6 +21,7 @@ import {
   fieldLadder,
   midiFromY as pitchAtY,
   computeGridYs,
+  noteEnabled,
   PitchRuler,
 } from './field';
 import { playSine } from './voice';
@@ -148,6 +149,7 @@ export default function Bodies() {
   // Fire a body: sound, pop the body, and shed a ripple from its position.
   const fire = useCallback(
     (b: Body) => {
+      if (!noteEnabled(b.midi)) return; // muted note: no sound, no ripple
       playSine(midiToFreq(b.midi));
       const fx = fxRef.current.get(b.id);
       if (fx) {
@@ -349,8 +351,6 @@ export default function Bodies() {
               <BodyView key={b.id} body={b} register={registerFx} unregister={unregisterFx} />
             ))}
           </Canvas>
-          {/* pitch ruler down the left edge — the field's y→note legend */}
-          <PitchRuler ladder={ladder} height={height} />
           {/* on-grid center line + horizontal drift (early ↔ late) ruler */}
           <View style={styles.centerGuide} pointerEvents="none" />
           <DriftRuler />
@@ -370,6 +370,9 @@ export default function Bodies() {
           </View>
         </View>
       </GestureDetector>
+
+      {/* tappable pitch ruler (outside the gesture area so labels capture taps) */}
+      <PitchRuler ladder={ladder} height={height} />
 
       {editingBody ? (
         <PropertiesPanel

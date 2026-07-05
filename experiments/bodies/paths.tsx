@@ -50,6 +50,8 @@ const RUNNER_R = 9;
 const PATH_HIT = 30; // max long-press-to-path distance to open a path's sheet
 const HANDLE_R = 11; // endpoint handle radius
 const HANDLE_HIT = 28; // touch radius to grab an endpoint handle
+const SUB_R = 4.5; // per-note sub-point radius
+const SUB_HIT = 20; // touch radius to grab a sub-point
 
 // Monochrome ripple shader (a hairline white ring per note on black), the same
 // port used by Bodies. Fed a ring buffer of recent note-fires.
@@ -96,14 +98,18 @@ half4 main(float2 fragcoord) {
 type Pt = { x: number; y: number };
 type PathItem = {
   id: number;
-  raw: Pt[]; // as-drawn points (for the visible stroke)
-  samples: Pt[]; // evenly arc-spaced points (arp steps)
-  notes: number[]; // midi per sample
+  pts: Pt[]; // note points, one per arp step — the editable path geometry
+  notes: number[]; // midi per point
   subdivision: number;
   t0: number; // clock ms at creation — the runner starts at the stroke's beginning
 };
 type Fx = { pulse: SharedValue<number> };
 type Pulse = { x: number; y: number; t: number; seed: number };
+// A grab target under the finger: an endpoint (warps the whole stroke) or an
+// interior note point (moves just that note).
+type Grab =
+  | { id: number; kind: 'warp'; end: 'a' | 'b' }
+  | { id: number; kind: 'sub'; index: number };
 
 function dist(a: Pt, b: Pt): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
@@ -139,6 +145,33 @@ function resample(pts: Pt[], count: number): Pt[] {
   return out;
 }
 
+// A smooth (Catmull-Rom) stroke through the note points, so a sparse polyline
+// still reads as a curve.
+function buildPath(pts: Pt[]) {
+  const p = Skia.Path.Make();
+  if (pts.length === 0) return p;
+  p.moveTo(pts[0].x, pts[0].y);
+  if (pts.length < 3) {
+    for (let i = 1; i < pts.length; i++) p.lineTo(pts[i].x, pts[i].y);
+    return p;
+  }
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] ?? pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2] ?? p2;
+    p.cubicTo(
+      p1.x + (p2.x - p0.x) / 6,
+      p1.y + (p2.y - p0.y) / 6,
+      p2.x - (p3.x - p1.x) / 6,
+      p2.y - (p3.y - p1.y) / 6,
+      p2.x,
+      p2.y
+    );
+  }
+  return p;
+}
+
 export default function Paths() {
   const live = useExperimentActive();
   const scale = useScale();
@@ -158,11 +191,13 @@ export default function Paths() {
   const pathsRef = useRef(paths);
   pathsRef.current = paths;
   const draftRef = useRef<Pt[]>([]);
-  // While dragging an endpoint handle: which path/end, a snapshot of the stroke
-  // at grab time, the grabbed point, and the fixed step count.
-  const dragRef = useRef<{ id: number; end: 'a' | 'b'; base: Pt[]; anchor: Pt; steps: number } | null>(
-    null
-  );
+  // Active point drag. Warp: snapshot of the note points + the grabbed endpoint,
+  // for the lever bend. Sub: the interior note index being moved.
+  const dragRef = useRef<
+    | { id: number; kind: 'warp'; end: 'a' | 'b'; base: Pt[]; anchor: Pt }
+    | { id: number; kind: 'sub'; index: number }
+    | null
+  >(null);
   const tempoRef = useRef(tempo);
   tempoRef.current = tempo;
   const heightRef = useRef(height);
@@ -191,7 +226,7 @@ export default function Paths() {
   const fire = useCallback(
     (p: PathItem, stepIndex: number) => {
       const midi = p.notes[stepIndex];
-      const pt = p.samples[stepIndex];
+      const pt = p.pts[stepIndex];
       if (midi == null || pt == null) return;
       playSine(midiToFreq(midi));
       const list = pulses.value.slice(-(PULSES - 1));
@@ -221,7 +256,7 @@ export default function Paths() {
       const present = new Set<number>();
       for (const p of pathsRef.current) {
         present.add(p.id);
-        const S = p.samples.length;
+        const S = p.pts.length;
         if (S < 1) continue;
         const P = periodMs(p.subdivision, bpm);
         const k = Math.floor(now / P);
@@ -246,7 +281,7 @@ export default function Paths() {
   // Re-pitch every path's notes when the scale (or field height) changes.
   useEffect(() => {
     setPaths((prev) =>
-      prev.map((p) => ({ ...p, notes: p.samples.map((s) => midiFromY(s.y, ladder, height)) }))
+      prev.map((p) => ({ ...p, notes: p.pts.map((s) => midiFromY(s.y, ladder, height)) }))
     );
   }, [ladder, height]);
 
@@ -260,7 +295,7 @@ export default function Paths() {
     let best: number | null = null;
     let bd = PATH_HIT;
     for (const p of pathsRef.current) {
-      for (const pt of p.raw) {
+      for (const pt of p.pts) {
         const d = Math.hypot(x - pt.x, y - pt.y);
         if (d < bd) {
           bd = d;
@@ -281,62 +316,89 @@ export default function Paths() {
     setEditing(null);
   };
 
-  // An endpoint handle near a point (topmost path first), or null.
-  const hitHandle = (x: number, y: number): { id: number; end: 'a' | 'b' } | null => {
+  const notesFor = (pts: Pt[]) => pts.map((p) => midiFromY(p.y, ladderRef.current, heightRef.current));
+
+  // What's under the finger: an endpoint (priority, larger target) or an interior
+  // note point. Topmost path first.
+  const hitGrab = (x: number, y: number): Grab | null => {
     const ps = pathsRef.current;
     for (let i = ps.length - 1; i >= 0; i--) {
-      const r = ps[i].raw;
-      const a = r[0];
-      const b = r[r.length - 1];
-      if (a && Math.hypot(x - a.x, y - a.y) <= HANDLE_HIT) return { id: ps[i].id, end: 'a' };
-      if (b && Math.hypot(x - b.x, y - b.y) <= HANDLE_HIT) return { id: ps[i].id, end: 'b' };
+      const pts = ps[i].pts;
+      const a = pts[0];
+      const b = pts[pts.length - 1];
+      if (a && Math.hypot(x - a.x, y - a.y) <= HANDLE_HIT) return { id: ps[i].id, kind: 'warp', end: 'a' };
+      if (b && Math.hypot(x - b.x, y - b.y) <= HANDLE_HIT) return { id: ps[i].id, kind: 'warp', end: 'b' };
+    }
+    for (let i = ps.length - 1; i >= 0; i--) {
+      const pts = ps[i].pts;
+      for (let j = 1; j < pts.length - 1; j++) {
+        if (Math.hypot(x - pts[j].x, y - pts[j].y) <= SUB_HIT) return { id: ps[i].id, kind: 'sub', index: j };
+      }
     }
     return null;
   };
 
-  // Warp a path by its grabbed endpoint: the far end stays pinned, the grabbed
-  // end fully follows, points in between move proportionally (a lever bend).
-  // Re-resample to the same step count and re-pitch so the runner varies live.
+  // Endpoint warp: far end pinned, grabbed end fully follows, points between move
+  // proportionally (a lever bend). Re-pitches live so the runner varies as you drag.
   const warpPath = (x: number, y: number) => {
     const drag = dragRef.current;
-    if (!drag) return;
+    if (!drag || drag.kind !== 'warp') return;
     const dx = x - drag.anchor.x;
     const dy = y - drag.anchor.y;
     const n = drag.base.length;
-    const newRaw = drag.base.map((pt, i) => {
+    const pts = drag.base.map((pt, i) => {
       const t = n > 1 ? i / (n - 1) : 0;
       const w = drag.end === 'b' ? t : 1 - t;
       return { x: pt.x + w * dx, y: pt.y + w * dy };
     });
-    const samples = resample(newRaw, drag.steps);
-    const notes = samples.map((s) => midiFromY(s.y, ladderRef.current, heightRef.current));
-    setPaths((prev) => prev.map((p) => (p.id === drag.id ? { ...p, raw: newRaw, samples, notes } : p)));
+    setPaths((prev) => prev.map((p) => (p.id === drag.id ? { ...p, pts, notes: notesFor(pts) } : p)));
   };
 
-  // Pan: grab an endpoint handle to reshape a path, otherwise draw a new stroke.
+  // Sub-point move: drag one note point to a new spot (fine, per-note editing).
+  const subMove = (x: number, y: number) => {
+    const drag = dragRef.current;
+    if (!drag || drag.kind !== 'sub') return;
+    setPaths((prev) =>
+      prev.map((p) => {
+        if (p.id !== drag.id) return p;
+        const pts = p.pts.map((pt, idx) => (idx === drag.index ? { x, y } : pt));
+        const notes = p.notes.map((n, idx) =>
+          idx === drag.index ? midiFromY(y, ladderRef.current, heightRef.current) : n
+        );
+        return { ...p, pts, notes };
+      })
+    );
+  };
+
+  // Pan: grab a point to reshape a path, otherwise draw a new stroke.
   const onDrawBegin = (x: number, y: number) => {
-    const h = hitHandle(x, y);
-    if (h) {
-      const p = pathsRef.current.find((pp) => pp.id === h.id);
+    const g = hitGrab(x, y);
+    if (g) {
+      const p = pathsRef.current.find((pp) => pp.id === g.id);
       if (p) {
-        const r = p.raw;
-        dragRef.current = {
-          id: h.id,
-          end: h.end,
-          base: r.map((q) => ({ ...q })),
-          anchor: { ...(h.end === 'a' ? r[0] : r[r.length - 1]) },
-          steps: p.samples.length,
-        };
+        if (g.kind === 'warp') {
+          dragRef.current = {
+            id: g.id,
+            kind: 'warp',
+            end: g.end,
+            base: p.pts.map((q) => ({ ...q })),
+            anchor: { ...(g.end === 'a' ? p.pts[0] : p.pts[p.pts.length - 1]) },
+          };
+        } else {
+          dragRef.current = { id: g.id, kind: 'sub', index: g.index };
+        }
       }
-      return; // grabbing a handle — don't start a new stroke
+      return; // grabbing a point — don't start a new stroke
     }
     dragRef.current = null;
     draftRef.current = [{ x, y }];
     setDraft(draftRef.current.slice());
   };
   const onDrawMove = (x: number, y: number) => {
-    if (dragRef.current) {
-      warpPath(x, y);
+    const drag = dragRef.current;
+    if (drag) {
+      if (drag.kind === 'warp') warpPath(x, y);
+      else subMove(x, y);
       return;
     }
     const d = draftRef.current;
@@ -350,16 +412,15 @@ export default function Paths() {
       dragRef.current = null; // finished reshaping
       return;
     }
-    const pts = draftRef.current;
+    const drawn = draftRef.current;
     draftRef.current = [];
     setDraft([]);
-    if (pts.length < 2 || pathLength(pts) < MIN_PATH_LEN) return;
-    const steps = Math.max(MIN_STEPS, Math.min(MAX_STEPS, Math.round(pathLength(pts) / STEP_PX)));
-    const samples = resample(pts, steps);
-    const notes = samples.map((s) => midiFromY(s.y, ladderRef.current, heightRef.current));
+    if (drawn.length < 2 || pathLength(drawn) < MIN_PATH_LEN) return;
+    const steps = Math.max(MIN_STEPS, Math.min(MAX_STEPS, Math.round(pathLength(drawn) / STEP_PX)));
+    const pts = resample(drawn, steps);
     setPaths((prev) => [
       ...prev,
-      { id: idRef.current++, raw: pts, samples, notes, subdivision: DEFAULT_SUB, t0: clock.value },
+      { id: idRef.current++, pts, notes: notesFor(pts), subdivision: DEFAULT_SUB, t0: clock.value },
     ]);
   };
 
@@ -504,21 +565,13 @@ function PathView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path.id]);
 
-  const skPath = useMemo(() => {
-    const p = Skia.Path.Make();
-    const r = path.raw;
-    if (r.length) {
-      p.moveTo(r[0].x, r[0].y);
-      for (let i = 1; i < r.length; i++) p.lineTo(r[i].x, r[i].y);
-    }
-    return p;
-  }, [path.raw]);
+  const pts = path.pts;
+  const skPath = useMemo(() => buildPath(pts), [pts]);
 
-  const samples = path.samples;
   const sub = path.subdivision;
   const t0 = path.t0;
   const pos = useDerivedValue(() => {
-    const S = samples.length;
+    const S = pts.length;
     if (S < 1) return { x: -100, y: -100 };
     const P = 240000 / (tempo * sub);
     const loopMs = S * P;
@@ -528,17 +581,18 @@ function PathView({
     const i0 = Math.floor(fstep) % S;
     const i1 = (i0 + 1) % S;
     const frac = fstep - Math.floor(fstep);
-    const a = samples[i0];
-    const b = samples[i1];
+    const a = pts[i0];
+    const b = pts[i1];
     return { x: a.x + (b.x - a.x) * frac, y: a.y + (b.y - a.y) * frac };
-  }, [samples, sub, tempo, t0]);
+  }, [pts, sub, tempo, t0]);
 
   const bloomOpacity = useDerivedValue(() => 0.12 + 0.5 * pulse.value);
   const runnerR = useDerivedValue(() => RUNNER_R * (1 + 0.5 * pulse.value));
 
-  const a = path.raw[0];
-  const b = path.raw[path.raw.length - 1];
+  const a = pts[0];
+  const b = pts[pts.length - 1];
   const handleColor = selected ? 'rgba(255,120,120,0.9)' : 'rgba(255,255,255,0.85)';
+  const subColor = selected ? 'rgba(255,120,120,0.8)' : 'rgba(255,255,255,0.55)';
 
   return (
     <Group>
@@ -550,6 +604,10 @@ function PathView({
         strokeCap="round"
         color={selected ? 'rgba(255,120,120,0.85)' : 'rgba(255,255,255,0.4)'}
       />
+      {/* per-note sub-points (interior), draggable for fine adjustments */}
+      {pts.slice(1, -1).map((pt, idx) => (
+        <Circle key={idx} cx={pt.x} cy={pt.y} r={SUB_R} color={subColor} />
+      ))}
       {/* draggable endpoint handles */}
       {a ? (
         <Circle cx={a.x} cy={a.y} r={HANDLE_R} style="stroke" strokeWidth={2} color={handleColor} />

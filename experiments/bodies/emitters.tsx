@@ -44,7 +44,7 @@ import { playSine } from './voice';
 const PULSES = 32; // max concurrent waves the shader draws
 const WAVE_LIFE = 2.4; // wave lifetime, seconds
 const WAVE_SPEED = 260; // px/s — the ring's speed; shared by the shader and the trigger test
-const RING_ALPHA = 0.5;
+const RING_ALPHA = 0.35;
 const SCHED_MS = 15;
 const NODE_R = 18;
 const HIT_R = 34;
@@ -77,10 +77,11 @@ half4 main(float2 fragcoord) {
     float2 d = fragcoord - u_pulses[i];
     float len = length(d);
     float bump = flow(d * 0.012 + float2(seed * 21.0, seed * 13.0), u_time * 0.15).x;
-    float dist = len * (1.0 + 0.03 * bump);
+    float dist = len * (1.0 + 0.05 * bump);
     float r = age * ${WAVE_SPEED}.0;
-    float band = (dist - r) / 2.5;
-    float env = exp(-band * band);
+    float front = (dist - r) / 1.6; // hairline crest
+    float halo = (dist - r) / 15.0; // soft aura behind/around the front
+    float env = exp(-front * front) + 0.4 * exp(-halo * halo);
     float decay = max(0.0, 1.0 - age / ${WAVE_LIFE});
     light += env * decay * ${RING_ALPHA};
   }

@@ -1,4 +1,4 @@
-import { Blur, Canvas, Circle, Fill, Group, Line, Path, Shader, Skia, useClock, vec } from '@shopify/react-native-skia';
+import { Blur, Canvas, Circle, Fill, Group, Line, Path, rect, Shader, Skia, useClock, vec } from '@shopify/react-native-skia';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -565,6 +565,16 @@ export default function ExtendedGrid() {
     return { b, isPath, y0 };
   });
 
+  // Clip the grid content (lines, paths, bodies) to the field — half a row past the
+  // top and bottom notes — so extrapolated off-window geometry doesn't bleed into
+  // the top bar or the drift ruler. The background shader/ripples stay full-screen.
+  const fieldClip = useMemo(() => {
+    const bottom = height - PITCH_BOTTOM_INSET;
+    const step = (bottom - PITCH_TOP) / Math.max(1, visibleCount - 1);
+    const top = PITCH_TOP - step / 2;
+    return rect(0, top, width, bottom + step / 2 - top);
+  }, [width, height, visibleCount]);
+
   return (
     <View style={styles.fill}>
       <GestureDetector gesture={gesture}>
@@ -573,37 +583,39 @@ export default function ExtendedGrid() {
             <Fill>
               <Shader source={source} uniforms={uniforms} />
             </Fill>
-            {gridYs.map((y, i) => (
-              <Line key={i} p1={vec(0, y)} p2={vec(width, y)} color="rgba(255,255,255,0.09)" strokeWidth={1} />
-            ))}
-            {bodyViews.map(({ b, isPath }) =>
-              isPath ? (
-                <PathLine
-                  key={`p${b.id}`}
-                  points={b.path!}
-                  full={fullLadder}
-                  scroll={scroll}
-                  visible={visibleCount}
-                  height={height}
-                  handles
-                />
-              ) : null
-            )}
-            {laying && laying.length > 0 ? (
-              <PathLine points={laying} full={fullLadder} scroll={scroll} visible={visibleCount} height={height} dots />
-            ) : null}
-            {bodyViews.map(({ b, isPath, y0 }) =>
-              isPath || y0 != null ? (
-                <BodyView
-                  key={b.id}
-                  body={b}
-                  y0={y0 ?? -9999}
-                  isPath={isPath}
-                  register={registerFx}
-                  unregister={unregisterFx}
-                />
-              ) : null
-            )}
+            <Group clip={fieldClip}>
+              {gridYs.map((y, i) => (
+                <Line key={i} p1={vec(0, y)} p2={vec(width, y)} color="rgba(255,255,255,0.09)" strokeWidth={1} />
+              ))}
+              {bodyViews.map(({ b, isPath }) =>
+                isPath ? (
+                  <PathLine
+                    key={`p${b.id}`}
+                    points={b.path!}
+                    full={fullLadder}
+                    scroll={scroll}
+                    visible={visibleCount}
+                    height={height}
+                    handles
+                  />
+                ) : null
+              )}
+              {laying && laying.length > 0 ? (
+                <PathLine points={laying} full={fullLadder} scroll={scroll} visible={visibleCount} height={height} dots />
+              ) : null}
+              {bodyViews.map(({ b, isPath, y0 }) =>
+                isPath || y0 != null ? (
+                  <BodyView
+                    key={b.id}
+                    body={b}
+                    y0={y0 ?? -9999}
+                    isPath={isPath}
+                    register={registerFx}
+                    unregister={unregisterFx}
+                  />
+                ) : null
+              )}
+            </Group>
           </Canvas>
           <View style={styles.centerGuide} pointerEvents="none" />
           <DriftRuler />

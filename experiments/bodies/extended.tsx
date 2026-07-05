@@ -121,7 +121,8 @@ half4 main(float2 fragcoord) {
 
 type Body = { id: number; x: number; midi: number; subdivision: number; playing: boolean };
 type Fx = { pulse: SharedValue<number> };
-type Pulse = { x: number; y: number; t: number; seed: number };
+type Pulse = { x: number; y: number; t: number; seed: number }; // published to the shader
+type BufPulse = { x: number; midi: number; t: number; seed: number }; // anchored to its note
 
 export default function ExtendedGrid() {
   const live = useExperimentActive();
@@ -170,7 +171,7 @@ export default function ExtendedGrid() {
   const draggingRef = useRef<number | null>(null);
 
   const pulses = useSharedValue<Pulse[]>([]);
-  const pulseBufRef = useRef<Pulse[]>([]);
+  const pulseBufRef = useRef<BufPulse[]>([]);
   const fxRef = useRef<Map<number, Fx>>(new Map());
   const registerFx = useCallback((id: number, fx: Fx) => {
     fxRef.current.set(id, fx);
@@ -200,8 +201,9 @@ export default function ExtendedGrid() {
           withTiming(0, { duration: 320, easing: Easing.out(Easing.quad) })
         );
       }
-      const y = yForMidi(b.midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
-      if (y != null) pulseBufRef.current.push({ x: b.x, y, t: clock.value / 1000, seed: Math.random() });
+      // Anchor the ripple to the NOTE (its midi + x), not a fixed screen y, so it
+      // moves with the grid when the user scrolls.
+      pulseBufRef.current.push({ x: b.x, midi: b.midi, t: clock.value / 1000, seed: Math.random() });
     },
     [clock]
   );
@@ -242,7 +244,12 @@ export default function ExtendedGrid() {
       let buf = pulseBufRef.current.filter((p) => nowSec - p.t <= LIFE);
       if (buf.length > PULSES) buf = buf.slice(buf.length - PULSES);
       pulseBufRef.current = buf;
-      pulses.value = buf;
+      // Recompute each ripple's screen y from the current scroll so it tracks its
+      // note; off-window ripples are parked off-screen.
+      pulses.value = buf.map((p) => {
+        const py = yForMidi(p.midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
+        return { x: p.x, y: py == null ? -9999 : py, t: p.t, seed: p.seed };
+      });
     }, SCHED_MS);
     return () => {
       clearInterval(handle);

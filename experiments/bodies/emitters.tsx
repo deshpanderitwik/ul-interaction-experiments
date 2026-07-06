@@ -43,8 +43,13 @@ import { playSine } from './voice';
 // fast, far ones echo late, and two receivers make a pattern from their distances.
 
 const PULSES = 32; // max concurrent waves the shader draws
-const WAVE_LIFE = 2.4; // wave lifetime, seconds
 const WAVE_SPEED = 260; // px/s — the ring's speed; shared by the shader and the trigger test
+// A wave must live long enough to cross the whole field, else receivers past its
+// reach (life × speed) never get hit. Derived per-device from the screen diagonal.
+const WAVE_LIFE_MARGIN = 0.35; // extra seconds past reaching the farthest corner
+function waveLifeFor(width: number, height: number) {
+  return Math.hypot(width, height) / WAVE_SPEED + WAVE_LIFE_MARGIN;
+}
 const RING_ALPHA = 0.35;
 const SCHED_MS = 15;
 const NODE_R = 18;
@@ -61,6 +66,7 @@ uniform float u_time;
 uniform float2 u_pulses[${PULSES}];
 uniform float u_pulseTimes[${PULSES}];
 uniform float u_pulseSeed[${PULSES}];
+uniform float u_waveLife;
 
 float2 flow(float2 p, float time) {
   return float2(
@@ -73,7 +79,7 @@ half4 main(float2 fragcoord) {
   float light = 0.0;
   for (int i = 0; i < ${PULSES}; i++) {
     float age = u_time - u_pulseTimes[i];
-    if (age < 0.0 || age > ${WAVE_LIFE}) { continue; }
+    if (age < 0.0 || age > u_waveLife) { continue; }
     float seed = u_pulseSeed[i];
     float2 d = fragcoord - u_pulses[i];
     float len = length(d);
@@ -83,7 +89,7 @@ half4 main(float2 fragcoord) {
     float front = (dist - r) / 1.6; // hairline crest
     float halo = (dist - r) / 15.0; // soft aura behind/around the front
     float env = exp(-front * front) + 0.4 * exp(-halo * halo);
-    float decay = max(0.0, 1.0 - age / ${WAVE_LIFE});
+    float decay = max(0.0, 1.0 - age / u_waveLife);
     light += env * decay * ${RING_ALPHA};
   }
   light = clamp(light, 0.0, 1.0);
@@ -122,6 +128,11 @@ export default function Emitters() {
   heightRef.current = height;
   const idRef = useRef(0);
   const draggingRef = useRef<number | null>(null);
+
+  // Wave lifetime that guarantees the front crosses the whole field on this device.
+  const waveLife = useMemo(() => waveLifeFor(width, height), [width, height]);
+  const waveLifeRef = useRef(waveLife);
+  waveLifeRef.current = waveLife;
 
   const pulses = useSharedValue<Pulse[]>([]); // shader waves (published once per tick)
   const pulseBufRef = useRef<Pulse[]>([]); // authoritative JS-side buffer
@@ -214,7 +225,7 @@ export default function Emitters() {
       const receivers = nodesRef.current.filter((n) => n.kind === 'receiver');
       for (let i = waves.length - 1; i >= 0; i--) {
         const w = waves[i];
-        if (nowSec - w.t0 > WAVE_LIFE) {
+        if (nowSec - w.t0 > waveLifeRef.current) {
           waves.splice(i, 1);
           continue;
         }
@@ -231,7 +242,7 @@ export default function Emitters() {
       // Publish the accumulated wave buffer to the shader in one write — prune
       // dead pulses and cap length. Doing this once per tick (not per emit) is
       // what lets multiple emitters that fire together all show.
-      let buf = pulseBufRef.current.filter((p) => nowSec - p.t <= WAVE_LIFE);
+      let buf = pulseBufRef.current.filter((p) => nowSec - p.t <= waveLifeRef.current);
       if (buf.length > PULSES) buf = buf.slice(buf.length - PULSES);
       pulseBufRef.current = buf;
       pulses.value = buf;
@@ -377,8 +388,9 @@ export default function Emitters() {
       u_pulses: pos,
       u_pulseTimes: times,
       u_pulseSeed: seeds,
+      u_waveLife: waveLife,
     };
-  });
+  }, [width, height, waveLife]);
 
   return (
     <View style={styles.fill}>

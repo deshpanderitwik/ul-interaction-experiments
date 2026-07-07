@@ -113,9 +113,65 @@ scene: plain white circles ("bodies") on black.
 - **Level 3 — link scenes.** Untouched. The Fence dissolve/erode vocabulary is the
   candidate transition grammar.
 
+## Going deeper: grids + bodies — the option space
+
+We've committed to **depth over an orthogonal jump** here. The grids-+-bodies
+family (bodies, paths, emitters & receivers, slingshot, extended grid) has become a
+real substrate — one shared scheduler, drift, the ripple shader, note-masking,
+waypoint paths, spatial persistence — where new mechanics compose cheaply and read
+as *one idea* rather than scattered demos. And the hard part of the thesis (Levels
+1→3, structure without a timeline) is still unclimbed *here*, so depth isn't polish;
+it's the unsolved core.
+
+**What the video length forces.** Target is **1–3 minutes**, not a one-gesture
+clip. A minute-plus needs an **arc** — build → develop → move between sections →
+resolve. So the fruitful avenues aren't more one-off mechanics; they're the ones
+that give the piece **time-development**. Mapped to what a long-form piece needs:
+
+**1 · BUILD — accumulation** _(Level 1 · Persistence/Layering — the backbone)_
+- **Looping / layering ("takes").** Capture what's sounding into a loop, keep
+  adding on top; the piece visibly accumulates. The single biggest unlock — you
+  film it building. Free win: the shared scheduler keeps layers phase-locked.
+- **Freeze & ghost.** Freeze a body's current pattern into a dim background layer,
+  freeing the foreground to play a new voice. Frozen = arrangement, live =
+  performance.
+
+**2 · DEVELOP — transform a scene over time** _(Level 2 → modulation)_
+- **Move the grid, not the bodies.** Transpose / tilt / compress the grid under
+  stationary bodies → everything re-pitches (or re-drifts) at once. Ensemble-wide
+  key change or feel-shift from one gesture. Cheap on Extended Grid's scroll.
+- **Morph the scale / mask.** The note-mask becomes a living chord; slide it
+  minor→Lydian and the same body motion yields new harmony — modulation without
+  touching a body.
+- **Live tempo / phrasing.** A conductor gesture — accelerando/ritardando, swing,
+  rubato — so a long clip breathes instead of ticking.
+
+**3 · MOVE — link scenes into sections** _(Level 3 · Structure ← frontier)_
+- **Rooms / multiple grids.** Each grid is a section; swipe or portal between them,
+  and bodies can travel across. The video becomes a journey through rooms.
+- **Nesting (bodies made of bodies).** Zoom into a body to find a sub-scene you
+  compose; zoom out and it collapses to one voice. Scene-linking via containment —
+  and zoom transitions are cinematic.
+
+**4 · EMERGENCE — surprise & hands-off passages** _(Level 2 aliveness, ensemble-scale)_
+- **Forces between bodies.** Attraction/repulsion, consonance pulls together,
+  crowding pushes apart — the ensemble self-organizes into evolving patterns.
+- **Bodies with agency.** Semi-autonomous wander / seek-consonance / migrate — you
+  garden an ensemble rather than trigger notes.
+- **New grid geometries.** Radial / spiral / hex change position→pitch and how a
+  slingshot body *moves* (orbit vs bounce) — a fresh motion vocabulary on the same
+  premise.
+
+**Proposed order:** **#1 (accumulation)** first — it's the backbone and the thesis
+clip ("a composition builds in front of you"). Then **#2 (move-the-grid
+modulation)** — cheap, extends the scroll code, and instantly gives the piece an
+emotional arc. #1 + #2 alone are enough to shoot a 1–3 min video; #3 and #4 are the
+second act once the core loop feels good.
+
 ## The video
 
-- Length: _TBD_
+- Length: **1–3 minutes** — needs an arc (build → develop → move → resolve), not a
+  single-gesture clip.
 - Format / language: _TBD_
 - Capture: iOS screen recording (screen + audio together). Keep sketches
   capture-ready — clean attract state, no dev chrome.

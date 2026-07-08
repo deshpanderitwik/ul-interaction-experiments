@@ -70,6 +70,12 @@ export const experiments: Experiment[] = [
         load: () => import('./bodies/slingshot'),
       },
       {
+        id: 'slingshot-receivers',
+        title: 'Slingshot & Receivers',
+        blurb: 'Double-tap to place silent receivers, then sling a body that bounces around making no sound of its own — it only rings a note when it strikes a receiver.',
+        load: () => import('./bodies/slingshot-receivers'),
+      },
+      {
         id: 'extended',
         title: 'Extended Grid',
         blurb: 'Bodies on the full C0–C5 grid; press and drag the note-label column to scroll the visible window up and down.',

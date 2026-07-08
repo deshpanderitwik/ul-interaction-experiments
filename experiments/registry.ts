@@ -75,6 +75,12 @@ export const experiments: Experiment[] = [
         blurb: 'Bodies on the full C0–C5 grid; press and drag the note-label column to scroll the visible window up and down.',
         load: () => import('./bodies/extended'),
       },
+      {
+        id: 'radial-drop',
+        title: 'Radial Drop',
+        blurb: 'Extended Grid, but you long-press to drop a body: a radial of subdivisions blooms around your finger — tap one to place it already tuned to that pulse.',
+        load: () => import('./bodies/radial-drop'),
+      },
     ],
   },
   {

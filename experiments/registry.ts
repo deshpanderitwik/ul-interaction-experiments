@@ -72,7 +72,7 @@ export const experiments: Experiment[] = [
       {
         id: 'slingshot-receivers',
         title: 'Slingshot & Receivers',
-        blurb: 'Double-tap to place silent receivers, then sling a body that bounces around making no sound of its own — it only rings a note when it strikes a receiver.',
+        blurb: 'Long-press to place silent receivers, then sling a body that bounces around making no sound of its own — it only rings a note when it strikes a receiver.',
         load: () => import('./bodies/slingshot-receivers'),
       },
       {

@@ -39,12 +39,12 @@ import { useSettingsActions } from '../settings';
 import { playSine } from './voice';
 
 // Bodies · Slingshot & Receivers — a fork of Emitters & Receivers where the driver
-// isn't a clocked emitter but a slung body. Double-tap to place a RECEIVER (silent
-// until struck); drag back on empty grid and release to FLING a body that arcs and
-// bounces like Slingshot — but it makes no sound on its own. It only rings a note
-// when it collides with a receiver, which then sounds its pitch and flashes.
-// Rhythm comes from the geometry of the throw and where the receivers sit.
-// Long-press a receiver to delete it; drag a receiver to move it.
+// isn't a clocked emitter but a slung body. Long-press empty grid to place a
+// RECEIVER (silent until struck); drag back on empty grid and release to FLING a
+// body that arcs and bounces like Slingshot — but it makes no sound on its own. It
+// only rings a note when it collides with a receiver, which then sounds its pitch
+// and flashes. Rhythm comes from the geometry of the throw and where the receivers
+// sit. Long-press a receiver to delete it; drag a receiver to move it.
 
 const PULSES = 24;
 const LIFE = 1.6; // ripple lifetime, s
@@ -311,26 +311,27 @@ export default function SlingshotReceivers() {
       { id: idRef.current++, x, y, midi: midiFromY(y, ladderRef.current, heightRef.current) },
     ]);
   };
-  const onDoubleTap = (x: number, y: number) => {
-    if (hitNode(x, y) == null) placeReceiver(x, y);
-  };
+  // Long-press an empty spot → drop a receiver; long-press a receiver → delete it.
   const onLongPress = (x: number, y: number) => {
     const id = hitNode(x, y);
-    if (id != null) setNodes((prev) => prev.filter((n) => n.id !== id)); // long-press a receiver → delete
+    if (id != null) setNodes((prev) => prev.filter((n) => n.id !== id));
+    else placeReceiver(x, y);
   };
 
-  // A pan grabs a receiver to move it, or (on empty grid) draws the slingshot.
+  // A pan grabs a receiver to move it, or (on empty grid) draws the slingshot. The
+  // band is only shown once the finger actually moves, so a stationary long-press
+  // (to place a receiver) never flashes a slingshot.
   const dragNodeRef = useRef<number | null>(null);
   const onPanBegin = (x: number, y: number) => {
     const id = hitNode(x, y);
     if (id != null) {
       dragNodeRef.current = id;
+      bandRef.current = null;
       return;
     }
     dragNodeRef.current = null;
-    if (x < RULER_WIDTH) return; // don't sling from under the ruler
-    bandRef.current = { ax: x, ay: y, fx: x, fy: y };
-    setBand(bandRef.current);
+    // Record the anchor but don't render the band until there's real movement.
+    bandRef.current = x < RULER_WIDTH ? null : { ax: x, ay: y, fx: x, fy: y };
   };
   const onPanMove = (x: number, y: number) => {
     const id = dragNodeRef.current;
@@ -343,7 +344,7 @@ export default function SlingshotReceivers() {
     }
     if (!bandRef.current) return;
     bandRef.current = { ...bandRef.current, fx: x, fy: y };
-    setBand(bandRef.current);
+    setBand(bandRef.current); // first real move reveals the band
   };
   const onPanEnd = () => {
     if (dragNodeRef.current != null) {
@@ -371,20 +372,13 @@ export default function SlingshotReceivers() {
       if (!live) return;
       runOnJS(onPanEnd)();
     });
-  const doubleTap = Gesture.Tap()
-    .numberOfTaps(2)
-    .maxDuration(280)
-    .onStart((e) => {
-      if (!live) return;
-      runOnJS(onDoubleTap)(e.x, e.y);
-    });
   const longPress = Gesture.LongPress()
     .minDuration(350)
     .onStart((e) => {
       if (!live) return;
       runOnJS(onLongPress)(e.x, e.y);
     });
-  const gesture = Gesture.Race(pan, longPress, doubleTap);
+  const gesture = Gesture.Race(pan, longPress);
 
   const bandPath = useMemo(() => {
     const p = Skia.Path.Make();

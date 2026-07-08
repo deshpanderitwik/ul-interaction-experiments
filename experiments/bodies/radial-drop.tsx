@@ -45,9 +45,24 @@ const HANDLE_R = 8; // drawn radius of a path waypoint handle
 const HANDLE_HIT = 34; // touch radius to grab a waypoint handle
 const RADIAL_R = 92; // radius of the subdivision picker ring
 
+const RADIAL_HIT = 42; // how close the finger must be to a wedge to select it
+
 // Angle of the i-th item on a ring of `count`, starting straight up.
 function radialAngle(i: number, count: number): number {
   return -Math.PI / 2 + (i * 2 * Math.PI) / count;
+}
+// Screen position of wedge `i` around a ring centered at (cx, cy).
+function radialItemPos(i: number, count: number, cx: number, cy: number) {
+  const theta = radialAngle(i, count);
+  return { x: cx + RADIAL_R * Math.cos(theta), y: cy + RADIAL_R * Math.sin(theta) };
+}
+// Keep the ring on screen: nudge its center in from the edges / bars.
+function clampRadialCenter(x: number, y: number, width: number, height: number) {
+  const padX = RADIAL_R + 40;
+  return {
+    cx: Math.max(padX, Math.min(width - padX, x)),
+    cy: Math.max(PITCH_TOP + RADIAL_R, Math.min(height - PITCH_BOTTOM_INSET - RADIAL_R * 0.5, y)),
+  };
 }
 
 function driftMs(x: number, period: number, width: number): number {
@@ -185,9 +200,14 @@ export default function RadialDrop() {
   const [laying, setLaying] = useState<Waypoint[] | null>(null); // path being laid for `editing`
   const layingRef = useRef<Waypoint[] | null>(null);
   layingRef.current = laying;
-  // Where a long-press landed on empty grid; the subdivision radial is open until
-  // the user picks one (drop) or taps outside (cancel).
-  const [placing, setPlacing] = useState<{ x: number; y: number } | null>(null);
+  // The open subdivision radial: `x,y` is the drop point, `cx,cy` the (clamped)
+  // ring center. It lives only while the placing long-press is held; releasing
+  // commits the hovered wedge (if any) and closes it.
+  const [placing, setPlacing] = useState<{ x: number; y: number; cx: number; cy: number } | null>(null);
+  const placingRef = useRef<typeof placing>(null);
+  placingRef.current = placing;
+  const [hoverSub, setHoverSub] = useState<number | null>(null); // subdivision under the finger
+  const hoverRef = useRef<number | null>(null);
 
   const bodiesRef = useRef(bodies);
   bodiesRef.current = bodies;
@@ -387,11 +407,35 @@ export default function RadialDrop() {
         : [...prev, { id: idRef.current++, x, midi: midiAtY(y), subdivision, playing: true }]
     );
   };
-  // The radial picked a subdivision → drop the pending body and close the ring.
-  const pickSubdivision = (subdivision: number) => {
-    const p = placing;
+  // While the placing long-press is held, track which wedge the finger is over.
+  const updateHover = (fx: number, fy: number) => {
+    const p = placingRef.current;
+    if (!p) return;
+    let best: number | null = null;
+    let bestD = RADIAL_HIT;
+    SUBDIVISIONS.forEach((s, i) => {
+      const it = radialItemPos(i, SUBDIVISIONS.length, p.cx, p.cy);
+      const d = Math.hypot(fx - it.x, fy - it.y);
+      if (d < bestD) {
+        bestD = d;
+        best = s.d;
+      }
+    });
+    if (best !== hoverRef.current) {
+      hoverRef.current = best;
+      setHoverSub(best);
+    }
+  };
+  // Releasing the long-press: drop the body on the hovered wedge (if any) and
+  // close the ring.
+  const commitRadial = () => {
+    const p = placingRef.current;
+    const sub = hoverRef.current;
+    hoverRef.current = null;
+    setHoverSub(null);
+    if (!p) return;
     setPlacing(null);
-    if (p) placeBody(p.x, p.y, subdivision);
+    if (sub != null) placeBody(p.x, p.y, sub);
   };
   const toggleAt = (x: number, y: number) => {
     if (layingRef.current) {
@@ -403,14 +447,19 @@ export default function RadialDrop() {
     setBodies((prev) => prev.map((b) => (b.id === id ? { ...b, playing: !b.playing } : b)));
   };
   // Long-press: on a body → its options sheet; on empty grid → open the
-  // subdivision radial for a new drop at that spot.
+  // subdivision radial for a new drop at that spot (held-and-slid, released to pick).
   const onLongPress = (x: number, y: number) => {
     if (layingRef.current) return;
     const id = hitId(x, y);
     if (id != null) {
       setEditing(id);
     } else if (x >= RULER_WIDTH) {
-      setPlacing({ x, y });
+      const { cx, cy } = clampRadialCenter(x, y, widthRef.current, heightRef.current);
+      hoverRef.current = null;
+      setHoverSub(null);
+      const p = { x, y, cx, cy };
+      placingRef.current = p; // available immediately for the first onTouchesMove
+      setPlacing(p);
     }
   };
   // A drag grabs (in priority order) a path waypoint, then a static body, else it
@@ -480,9 +529,17 @@ export default function RadialDrop() {
     });
   const longPress = Gesture.LongPress()
     .minDuration(380)
+    .maxDistance(10000) // allow sliding out to the wedges once the press has activated
     .onStart((e) => {
       if (!live) return;
       runOnJS(onLongPress)(e.x, e.y);
+    })
+    .onTouchesMove((e) => {
+      const t = e.allTouches[0];
+      if (t) runOnJS(updateHover)(t.x, t.y);
+    })
+    .onFinalize(() => {
+      runOnJS(commitRadial)();
     });
   const pan = Gesture.Pan()
     .minDistance(8)
@@ -689,59 +746,37 @@ export default function RadialDrop() {
         />
       ) : null}
 
-      {placing ? (
-        <SubdivisionRadial
-          x={placing.x}
-          y={placing.y}
-          width={width}
-          height={height}
-          onPick={pickSubdivision}
-          onCancel={() => setPlacing(null)}
-        />
-      ) : null}
+      {placing ? <SubdivisionRadial placing={placing} hover={hoverSub} /> : null}
     </View>
   );
 }
 
 // The subdivision picker that blooms on a long-press: a ghost body at the drop
-// point ringed by tappable subdivision chips. Tap a chip to drop; tap outside to
-// cancel. The ring center is nudged inward so it never falls off-screen.
+// point ringed by subdivision wedges. It's a pure visual overlay (pointerEvents
+// none) — the same held finger slides over a wedge to highlight it, and releasing
+// commits it. The wedge under the finger (`hover`) lights up.
 function SubdivisionRadial({
-  x,
-  y,
-  width,
-  height,
-  onPick,
-  onCancel,
+  placing,
+  hover,
 }: {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  onPick: (d: number) => void;
-  onCancel: () => void;
+  placing: { x: number; y: number; cx: number; cy: number };
+  hover: number | null;
 }) {
-  const padX = RADIAL_R + 40;
-  const cx = Math.max(padX, Math.min(width - padX, x));
-  const cy = Math.max(PITCH_TOP + RADIAL_R, Math.min(height - PITCH_BOTTOM_INSET - RADIAL_R * 0.5, y));
+  const { x, y, cx, cy } = placing;
   return (
-    <View style={StyleSheet.absoluteFill}>
-      <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
       {/* ghost of the body about to drop, at the true press point */}
-      <View style={[styles.radialGhost, { left: x - BODY_R, top: y - BODY_R }]} pointerEvents="none" />
+      <View style={[styles.radialGhost, { left: x - BODY_R, top: y - BODY_R }]} />
       {SUBDIVISIONS.map((s, i) => {
-        const theta = radialAngle(i, SUBDIVISIONS.length);
+        const it = radialItemPos(i, SUBDIVISIONS.length, cx, cy);
+        const on = hover === s.d;
         return (
-          <Pressable
+          <View
             key={s.d}
-            onPress={() => onPick(s.d)}
-            style={[
-              styles.radialChip,
-              { left: cx + RADIAL_R * Math.cos(theta) - 30, top: cy + RADIAL_R * Math.sin(theta) - 22 },
-            ]}
+            style={[styles.radialChip, on && styles.radialChipOn, { left: it.x - 30, top: it.y - 22 }]}
           >
-            <Text style={styles.radialChipText}>{s.label}</Text>
-          </Pressable>
+            <Text style={[styles.radialChipText, on && styles.radialChipTextOn]}>{s.label}</Text>
+          </View>
         );
       })}
     </View>
@@ -1136,5 +1171,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: 'rgba(255,255,255,0.5)',
   },
+  radialChipOn: { backgroundColor: '#fff', borderColor: '#fff', transform: [{ scale: 1.12 }] },
   radialChipText: { color: '#fff', fontSize: 15, fontWeight: '700', letterSpacing: 0.3 },
+  radialChipTextOn: { color: '#0a0a0a' },
 });

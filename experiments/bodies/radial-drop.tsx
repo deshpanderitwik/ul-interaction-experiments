@@ -303,7 +303,10 @@ export default function RadialDrop() {
             fx.px.value = b.path[i0].x + (b.path[i1].x - b.path[i0].x) * frac;
             fx.py.value = y0 + (y1 - y0) * frac;
           }
-          const sig = `path:${b.subdivision}:${bpm}`;
+          // pathT0 is part of the signature: (re)starting a path (Move/Extend
+          // resets pathT0) re-aligns the scheduler instead of waiting for `step`
+          // to climb back past the previous traversal's last slot.
+          const sig = `path:${b.subdivision}:${bpm}:${b.pathT0}`;
           const entry = sched.get(b.id);
           if (entry === undefined || entry.sig !== sig) sched.set(b.id, { k: step, sig });
           else if (step > entry.k) {

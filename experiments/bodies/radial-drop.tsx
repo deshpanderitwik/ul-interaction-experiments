@@ -68,6 +68,18 @@ function clampRadialCenter(x: number, y: number, width: number, height: number) 
   };
 }
 
+// What a radial wedge selects: a subdivision denominator, or delete.
+const DELETE = 'delete' as const;
+type RadialSel = number | typeof DELETE;
+type RItem = { key: string; label: string; sel: RadialSel; danger?: boolean };
+// The wedges on the ring. Editing a body adds a ✕ delete wedge at the bottom slot.
+function radialItems(editing: boolean): RItem[] {
+  const subs: RItem[] = SUBDIVISIONS.map((s) => ({ key: `s${s.d}`, label: s.label, sel: s.d }));
+  if (!editing) return subs;
+  const bottom = Math.round((subs.length + 1) / 2); // 8 items → index 4 lands straight down
+  return [...subs.slice(0, bottom), { key: 'del', label: '✕', sel: DELETE, danger: true }, ...subs.slice(bottom)];
+}
+
 function driftMs(x: number, period: number, width: number): number {
   const frac = Math.max(-1, Math.min(1, (x - width / 2) / (width / 2)));
   return frac * MAX_DRIFT_FRAC * period;
@@ -215,8 +227,8 @@ export default function RadialDrop() {
   placingRef.current = placing;
   const [closing, setClosing] = useState(false); // radial is playing its recede-out animation
   const openSeqRef = useRef(0); // bumps each open so the radial remounts and re-springs
-  const [hoverSub, setHoverSub] = useState<number | null>(null); // subdivision under the finger
-  const hoverRef = useRef<number | null>(null);
+  const [hoverSub, setHoverSub] = useState<RadialSel | null>(null); // wedge under the finger
+  const hoverRef = useRef<RadialSel | null>(null);
 
   const bodiesRef = useRef(bodies);
   bodiesRef.current = bodies;
@@ -423,14 +435,15 @@ export default function RadialDrop() {
   const updateHover = (fx: number, fy: number) => {
     const p = placingRef.current;
     if (!p) return;
-    let best: number | null = null;
+    const items = radialItems(p.targetId != null);
+    let best: RadialSel | null = null;
     let bestD = RADIAL_HIT;
-    SUBDIVISIONS.forEach((s, i) => {
-      const it = radialItemPos(i, SUBDIVISIONS.length, p.cx, p.cy);
-      const d = Math.hypot(fx - it.x, fy - it.y);
+    items.forEach((it, i) => {
+      const pos = radialItemPos(i, items.length, p.cx, p.cy);
+      const d = Math.hypot(fx - pos.x, fy - pos.y);
       if (d < bestD) {
         bestD = d;
-        best = s.d;
+        best = it.sel;
       }
     });
     if (best !== hoverRef.current) {
@@ -445,7 +458,9 @@ export default function RadialDrop() {
     const sub = hoverRef.current;
     if (!p) return;
     placingRef.current = null;
-    if (sub != null) {
+    if (sub === DELETE) {
+      if (p.targetId != null) setBodies((prev) => prev.filter((b) => b.id !== p.targetId));
+    } else if (sub != null) {
       if (p.targetId != null) {
         // re-pick an existing body's subdivision
         setBodies((prev) => prev.map((b) => (b.id === p.targetId ? { ...b, subdivision: sub } : b)));
@@ -489,6 +504,17 @@ export default function RadialDrop() {
     const id = hitId(x, y);
     if (id != null) openRadial(x, y, id);
     else if (x >= RULER_WIDTH) openRadial(x, y, null);
+  };
+  // Double-tap a body → start laying its path (seeded with its current spot, or its
+  // existing waypoints to extend). The bottom Done/Cancel bar drives it — no sheet.
+  const onDoubleTap = (x: number, y: number) => {
+    if (layingRef.current) return;
+    const id = hitId(x, y);
+    if (id == null) return;
+    const b = bodiesRef.current.find((bb) => bb.id === id);
+    if (!b) return;
+    setEditing(id);
+    setLaying(b.path && b.path.length >= 2 ? [...b.path] : [{ x: b.x, midi: b.midi }]);
   };
   // A drag grabs (in priority order) a path waypoint, then a static body, else it
   // scrolls the window.
@@ -547,8 +573,8 @@ export default function RadialDrop() {
     waypointDragRef.current = null;
   };
 
-  // Single tap toggles play/pause (or lays a path point). Placement is by
-  // long-press → radial, so there's no double-tap-to-add here.
+  // Single tap toggles play/pause (or lays a path point); double-tap starts path
+  // laying; placement is by long-press → radial.
   const singleTap = Gesture.Tap()
     .maxDuration(250)
     .onStart((e) => {
@@ -569,12 +595,19 @@ export default function RadialDrop() {
     .onFinalize(() => {
       runOnJS(commitRadial)();
     });
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .maxDuration(280)
+    .onStart((e) => {
+      if (!live) return;
+      runOnJS(onDoubleTap)(e.x, e.y);
+    });
   const pan = Gesture.Pan()
     .minDistance(8)
     .onStart((e) => runOnJS(onDragBegin)(e.x, e.y))
     .onUpdate((e) => runOnJS(onDragMove)(e.x, e.y))
     .onFinalize(() => runOnJS(onDragEnd)());
-  const gesture = Gesture.Race(pan, longPress, singleTap);
+  const gesture = Gesture.Race(pan, longPress, Gesture.Exclusive(doubleTap, singleTap));
 
   // Scroll gesture on the ruler column (drag up = higher notes).
   const scrollStartRef = useRef(0);
@@ -605,25 +638,11 @@ export default function RadialDrop() {
     .onUpdate((e) => runOnJS(onScrollMove)(e.y));
   const layingGesture = Gesture.Race(layScrollPan, layTap);
 
-  const editingBody = editing != null ? bodies.find((b) => b.id === editing) : undefined;
-  const setSubdivision = (d: number) =>
-    setBodies((prev) => prev.map((b) => (b.id === editing ? { ...b, subdivision: d } : b)));
-  const deleteEditing = () => {
-    setBodies((prev) => prev.filter((b) => b.id !== editing));
+  // `editing` here tracks which body a path is being laid for (set on double-tap).
+  const cancelLaying = () => {
+    setLaying(null);
     setEditing(null);
   };
-  const toggleMute = () =>
-    setBodies((prev) => prev.map((b) => (b.id === editing ? { ...b, muted: !b.muted } : b)));
-  // Move: begin a fresh path at the body's current spot. Extend: keep the existing
-  // waypoints and let the user append more from the end.
-  const startLaying = () => {
-    const b = bodiesRef.current.find((bb) => bb.id === editing);
-    if (!b) return setLaying([]);
-    setLaying(b.path && b.path.length >= 2 ? [...b.path] : [{ x: b.x, midi: b.midi }]);
-  };
-  const cancelLaying = () => setLaying(null);
-  const clearPath = () =>
-    setBodies((prev) => prev.map((b) => (b.id === editing ? { ...b, path: undefined, pathT0: undefined } : b)));
   const confirmLaying = () => {
     const pts = laying;
     setLaying(null);
@@ -759,19 +778,19 @@ export default function RadialDrop() {
         </GestureDetector>
       ) : null}
 
-      {editingBody ? (
-        <PropertiesPanel
-          body={editingBody}
-          laying={laying}
-          onSubdivision={setSubdivision}
-          onMove={startLaying}
-          onClearPath={clearPath}
-          onConfirm={confirmLaying}
-          onCancel={cancelLaying}
-          onMute={toggleMute}
-          onDelete={deleteEditing}
-          onClose={() => setEditing(null)}
-        />
+      {/* While laying a path, just a Done / Cancel bar at the bottom — no sheet. */}
+      {laying != null ? (
+        <View style={styles.layBar} pointerEvents="box-none">
+          <Pressable style={styles.layCancelBtn} onPress={cancelLaying}>
+            <Text style={styles.layCancelText}>Cancel</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.layDoneBtn, laying.length < 2 && styles.layDoneDisabled]}
+            onPress={laying.length >= 2 ? confirmLaying : undefined}
+          >
+            <Text style={styles.layDoneText}>Done</Text>
+          </Pressable>
+        </View>
       ) : null}
 
       {placing ? (
@@ -805,13 +824,14 @@ function SubdivisionRadial({
   onClosed,
 }: {
   placing: { x: number; y: number; cx: number; cy: number; targetId: number | null };
-  hover: number | null;
+  hover: RadialSel | null;
   closing: boolean;
   ghost: boolean;
   onClosed: () => void;
 }) {
   const { x, y, cx, cy } = placing;
-  const n = SUBDIVISIONS.length;
+  const items = radialItems(placing.targetId != null);
+  const n = items.length;
 
   // The ghost tracks the same in/out timing as the ring core.
   const ghost = useSharedValue(0);
@@ -833,19 +853,20 @@ function SubdivisionRadial({
       {showGhost ? (
         <Animated.View style={[styles.radialGhost, { left: x - BODY_R, top: y - BODY_R }, ghostStyle]} />
       ) : null}
-      {SUBDIVISIONS.map((s, i) => {
-        const it = radialItemPos(i, n, cx, cy);
+      {items.map((item, i) => {
+        const pos = radialItemPos(i, n, cx, cy);
         return (
           <RadialChip
-            key={s.d}
-            label={s.label}
-            tx={it.x}
-            ty={it.y}
+            key={item.key}
+            label={item.label}
+            tx={pos.x}
+            ty={pos.y}
             ox={x} // wedges emanate from the thumb point
             oy={y}
             index={i}
             count={n}
-            on={hover === s.d}
+            on={hover === item.sel}
+            danger={!!item.danger}
             closing={closing}
             // Index 0 lands last on the way out, so it owns the unmount signal.
             onClosed={i === 0 ? onClosed : undefined}
@@ -868,6 +889,7 @@ function RadialChip({
   index,
   count,
   on,
+  danger,
   closing,
   onClosed,
 }: {
@@ -879,6 +901,7 @@ function RadialChip({
   index: number;
   count: number;
   on: boolean;
+  danger?: boolean;
   closing: boolean;
   onClosed?: () => void;
 }) {
@@ -912,9 +935,23 @@ function RadialChip({
 
   return (
     <Animated.View
-      style={[styles.radialChip, on && styles.radialChipOn, { left: tx - 30, top: ty - 22 }, style]}
+      style={[
+        styles.radialChip,
+        danger && styles.radialChipDanger,
+        on && (danger ? styles.radialChipDangerOn : styles.radialChipOn),
+        { left: tx - 30, top: ty - 22 },
+        style,
+      ]}
     >
-      <Text style={[styles.radialChipText, on && styles.radialChipTextOn]}>{label}</Text>
+      <Text
+        style={[
+          styles.radialChipText,
+          danger && styles.radialChipDangerText,
+          on && (danger ? styles.radialChipDangerTextOn : styles.radialChipTextOn),
+        ]}
+      >
+        {label}
+      </Text>
     </Animated.View>
   );
 }
@@ -1041,106 +1078,6 @@ function DriftRuler() {
         <Text style={styles.driftText}>early</Text>
         <Text style={styles.driftText}>grid</Text>
         <Text style={styles.driftText}>late</Text>
-      </View>
-    </View>
-  );
-}
-
-function PropertiesPanel({
-  body,
-  laying,
-  onSubdivision,
-  onMove,
-  onClearPath,
-  onConfirm,
-  onCancel,
-  onMute,
-  onDelete,
-  onClose,
-}: {
-  body: Body;
-  laying: Waypoint[] | null;
-  onSubdivision: (d: number) => void;
-  onMove: () => void;
-  onClearPath: () => void;
-  onConfirm: () => void;
-  onCancel: () => void;
-  onMute: () => void;
-  onDelete: () => void;
-  onClose: () => void;
-}) {
-  // While laying, the rest of the screen must stay tappable (to add points), so
-  // there's no backdrop.
-  return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      {laying == null ? <Pressable style={styles.backdrop} onPress={onClose} /> : null}
-      <View style={styles.panel} pointerEvents="box-none">
-        {laying != null ? (
-          <>
-            <Text style={styles.panelTitle}>{body.path ? 'Extend the path' : 'Lay a path'}</Text>
-            <Text style={styles.panelHint}>
-              {body.path
-                ? `tap the grid to add more stops · ${Math.max(0, laying.length - body.path.length)} added`
-                : `starts at the body · tap the grid to add stops · ${Math.max(0, laying.length - 1)} added`}
-            </Text>
-            <View style={styles.confirmRow}>
-              <Pressable style={styles.cancelBtn} onPress={onCancel}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.confirmBtn, laying.length < 2 && styles.confirmDisabled]}
-                onPress={laying.length >= 2 ? onConfirm : undefined}
-              >
-                <Text style={styles.confirmText}>Confirm</Text>
-              </Pressable>
-            </View>
-          </>
-        ) : (
-          <>
-            <Text style={styles.panelTitle}>{noteName(body.midi)}</Text>
-            <View style={styles.actionRow}>
-              <Pressable style={styles.moveBtn} onPress={onMove}>
-                <Text style={styles.moveText}>{body.path ? 'Extend' : 'Move'}</Text>
-              </Pressable>
-              {body.path ? (
-                <Pressable style={styles.moveBtn} onPress={onClearPath}>
-                  <Text style={styles.moveText}>Clear path</Text>
-                </Pressable>
-              ) : null}
-            </View>
-            <Text style={styles.panelLabel}>subdivision</Text>
-            <View style={styles.row}>
-              {SUBDIVISIONS.map((s) => {
-                const on = s.d === body.subdivision;
-                return (
-                  <Pressable
-                    key={s.d}
-                    onPress={() => onSubdivision(s.d)}
-                    style={[
-                      styles.subBtn,
-                      on ? { backgroundColor: '#fff', borderColor: '#fff' } : { borderColor: 'rgba(255,255,255,0.28)' },
-                    ]}
-                  >
-                    <Text style={[styles.subBtnText, on ? styles.subBtnTextOn : null]}>{s.label}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <View style={styles.deleteRow}>
-              <Pressable
-                style={[styles.muteBtn, body.muted && styles.muteBtnOn]}
-                onPress={onMute}
-              >
-                <Text style={[styles.muteText, body.muted && styles.muteTextOn]}>
-                  {body.muted ? 'Unmute' : 'Mute'}
-                </Text>
-              </Pressable>
-              <Pressable style={styles.deleteBtn} onPress={onDelete}>
-                <Text style={styles.deleteText}>Delete</Text>
-              </Pressable>
-            </View>
-          </>
-        )}
       </View>
     </View>
   );
@@ -1310,4 +1247,34 @@ const styles = StyleSheet.create({
   radialChipOn: { backgroundColor: '#fff', borderColor: '#fff' },
   radialChipText: { color: '#fff', fontSize: 15, fontWeight: '700', letterSpacing: 0.3 },
   radialChipTextOn: { color: '#0a0a0a' },
+  radialChipDanger: { borderColor: 'rgba(255,90,90,0.75)' },
+  radialChipDangerOn: { backgroundColor: '#ff5a5a', borderColor: '#ff5a5a' },
+  radialChipDangerText: { color: '#ff5a5a', fontSize: 18 },
+  radialChipDangerTextOn: { color: '#0a0a0a', fontSize: 18 },
+  layBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 44,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  layCancelBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.4)',
+    backgroundColor: 'rgba(14,14,16,0.92)',
+  },
+  layCancelText: { color: '#ddd', fontSize: 16, fontWeight: '700', letterSpacing: 0.5 },
+  layDoneBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 34,
+    borderRadius: 14,
+    backgroundColor: '#54f2b0',
+  },
+  layDoneDisabled: { backgroundColor: 'rgba(84,242,176,0.3)' },
+  layDoneText: { color: '#0a0a0a', fontSize: 16, fontWeight: '700', letterSpacing: 0.5 },
 });

@@ -74,17 +74,26 @@ const EXTEND = 'extend' as const;
 const EXTEND_ICON = '✎'; // swap freely: ✎ · ↝ · ⋯ · → · ↪
 type RadialSel = number | typeof DELETE | typeof EXTEND;
 type RItem = { key: string; label: string; sel: RadialSel; danger?: boolean };
-// The wedges on the ring. Editing a body adds a ✕ delete wedge at the bottom; a
-// body that already has a path also gets an ✎ extend wedge, the two flanking the
-// bottom center.
+// The wedges on the ring. Editing pins the control wedges (✎ extend when the body
+// has a path, then ✕ delete) at the bottom center; the subdivisions then fill the
+// rest, starting with "1" just to the left of the controls and running clockwise.
 function radialItems(editing: boolean, hasPath: boolean): RItem[] {
   const subs: RItem[] = SUBDIVISIONS.map((s) => ({ key: `s${s.d}`, label: s.label, sel: s.d }));
-  if (!editing) return subs;
-  const del: RItem = { key: 'del', label: '✕', sel: DELETE, danger: true };
-  const bottom = Math.round((subs.length + 1) / 2); // insertion point for the bottom slot(s)
-  if (!hasPath) return [...subs.slice(0, bottom), del, ...subs.slice(bottom)]; // 8 items, delete at bottom
-  const ext: RItem = { key: 'ext', label: EXTEND_ICON, sel: EXTEND };
-  return [...subs.slice(0, bottom), ext, del, ...subs.slice(bottom)]; // 9 items, ext + delete flank the bottom
+  if (!editing) return subs; // placing: subdivisions only, "1" at the top
+  const controls: RItem[] = [];
+  if (hasPath) controls.push({ key: 'ext', label: EXTEND_ICON, sel: EXTEND });
+  controls.push({ key: 'del', label: '✕', sel: DELETE, danger: true });
+
+  const total = subs.length + controls.length;
+  const start = Math.round(total / 2 - controls.length / 2); // first control slot (bottom center)
+  const ring: RItem[] = new Array(total);
+  controls.forEach((c, k) => (ring[(start + k) % total] = c));
+  let slot = (start + controls.length) % total; // the slot just clockwise of the controls
+  subs.forEach((s) => {
+    ring[slot] = s;
+    slot = (slot + 1) % total;
+  });
+  return ring;
 }
 
 function driftMs(x: number, period: number, width: number): number {

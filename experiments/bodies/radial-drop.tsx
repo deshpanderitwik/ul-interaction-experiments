@@ -1,4 +1,4 @@
-import { Blur, Canvas, Circle, Fill, Group, Line, Path, rect, Shader, Skia, useClock, vec } from '@shopify/react-native-skia';
+import { Blur, Canvas, Circle, DashPathEffect, Fill, Group, Line, Path, rect, Shader, Skia, useClock, vec } from '@shopify/react-native-skia';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -732,6 +732,7 @@ export default function RadialDrop() {
                     visible={visibleCount}
                     height={height}
                     handles
+                    dashed={placing?.targetId === b.id} // dashed while its subdivision radial is open
                   />
                 ) : null
               )}
@@ -1052,6 +1053,7 @@ function PathLine({
   height,
   dots,
   handles,
+  dashed,
 }: {
   points: Waypoint[];
   full: number[];
@@ -1060,6 +1062,7 @@ function PathLine({
   height: number;
   dots?: boolean;
   handles?: boolean;
+  dashed?: boolean;
 }) {
   // Extrapolate every waypoint's y (never null) so the stroke stays a single
   // continuous polyline as points scroll past the screen edge; Skia clips the
@@ -1076,7 +1079,15 @@ function PathLine({
 
   return (
     <Group>
-      <Path path={skPath} style="stroke" strokeWidth={1.5} strokeJoin="round" color="rgba(255,255,255,0.32)" />
+      <Path
+        path={skPath}
+        style="stroke"
+        strokeWidth={1.5}
+        strokeJoin="round"
+        color={dashed ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.32)'}
+      >
+        {dashed ? <DashPathEffect intervals={[7, 6]} /> : null}
+      </Path>
       {dots
         ? points.map((wp, i) => (
             <Circle

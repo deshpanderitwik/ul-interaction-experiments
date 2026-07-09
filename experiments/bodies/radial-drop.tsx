@@ -206,7 +206,11 @@ export default function RadialDrop() {
   // The open subdivision radial: `x,y` is the drop point, `cx,cy` the (clamped)
   // ring center. It lives only while the placing long-press is held; releasing
   // commits the hovered wedge (if any) and closes it.
-  const [placing, setPlacing] = useState<{ x: number; y: number; cx: number; cy: number } | null>(null);
+  // `targetId` null = placing a new body; otherwise the radial is re-picking the
+  // subdivision of that existing body.
+  const [placing, setPlacing] = useState<
+    { x: number; y: number; cx: number; cy: number; targetId: number | null } | null
+  >(null);
   const placingRef = useRef<typeof placing>(null);
   placingRef.current = placing;
   const [closing, setClosing] = useState(false); // radial is playing its recede-out animation
@@ -441,7 +445,14 @@ export default function RadialDrop() {
     const sub = hoverRef.current;
     if (!p) return;
     placingRef.current = null;
-    if (sub != null) placeBody(p.x, p.y, sub);
+    if (sub != null) {
+      if (p.targetId != null) {
+        // re-pick an existing body's subdivision
+        setBodies((prev) => prev.map((b) => (b.id === p.targetId ? { ...b, subdivision: sub } : b)));
+      } else {
+        placeBody(p.x, p.y, sub);
+      }
+    }
     setClosing(true); // keep it mounted; the chips stagger back, then unmount
   };
   const onRadialClosed = () => {
@@ -459,23 +470,25 @@ export default function RadialDrop() {
     if (id == null) return;
     setBodies((prev) => prev.map((b) => (b.id === id ? { ...b, playing: !b.playing } : b)));
   };
-  // Long-press: on a body → its options sheet; on empty grid → open the
-  // subdivision radial for a new drop at that spot (held-and-slid, released to pick).
+  // Long-press opens the subdivision radial (held-and-slid, released to pick). On a
+  // body it re-picks that body's subdivision; on empty grid it drops a new body.
+  const openRadial = (x: number, y: number, targetId: number | null) => {
+    const { cx, cy } = clampRadialCenter(x, y, widthRef.current, heightRef.current);
+    // When editing a body, pre-highlight its current subdivision.
+    const seed = targetId != null ? bodiesRef.current.find((b) => b.id === targetId)?.subdivision ?? null : null;
+    hoverRef.current = seed;
+    setHoverSub(seed);
+    openSeqRef.current += 1; // fresh mount → re-run the spring-out
+    const p = { x, y, cx, cy, targetId };
+    placingRef.current = p; // available immediately for the first onTouchesMove
+    setClosing(false);
+    setPlacing(p);
+  };
   const onLongPress = (x: number, y: number) => {
     if (layingRef.current) return;
     const id = hitId(x, y);
-    if (id != null) {
-      setEditing(id);
-    } else if (x >= RULER_WIDTH) {
-      const { cx, cy } = clampRadialCenter(x, y, widthRef.current, heightRef.current);
-      hoverRef.current = null;
-      setHoverSub(null);
-      openSeqRef.current += 1; // fresh mount → re-run the spring-out
-      const p = { x, y, cx, cy };
-      placingRef.current = p; // available immediately for the first onTouchesMove
-      setClosing(false);
-      setPlacing(p);
-    }
+    if (id != null) openRadial(x, y, id);
+    else if (x >= RULER_WIDTH) openRadial(x, y, null);
   };
   // A drag grabs (in priority order) a path waypoint, then a static body, else it
   // scrolls the window.
@@ -767,6 +780,7 @@ export default function RadialDrop() {
           placing={placing}
           hover={hoverSub}
           closing={closing}
+          ghost={placing.targetId == null}
           onClosed={onRadialClosed}
         />
       ) : null}
@@ -787,11 +801,13 @@ function SubdivisionRadial({
   placing,
   hover,
   closing,
+  ghost: showGhost,
   onClosed,
 }: {
-  placing: { x: number; y: number; cx: number; cy: number };
+  placing: { x: number; y: number; cx: number; cy: number; targetId: number | null };
   hover: number | null;
   closing: boolean;
+  ghost: boolean;
   onClosed: () => void;
 }) {
   const { x, y, cx, cy } = placing;
@@ -814,7 +830,9 @@ function SubdivisionRadial({
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <Animated.View style={[styles.radialGhost, { left: x - BODY_R, top: y - BODY_R }, ghostStyle]} />
+      {showGhost ? (
+        <Animated.View style={[styles.radialGhost, { left: x - BODY_R, top: y - BODY_R }, ghostStyle]} />
+      ) : null}
       {SUBDIVISIONS.map((s, i) => {
         const it = radialItemPos(i, n, cx, cy);
         return (

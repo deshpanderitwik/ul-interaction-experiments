@@ -2,12 +2,15 @@ import { Blur, Canvas, Circle, Fill, Group, Line, Path, rect, Shader, Skia, useC
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import {
+import Animated, {
   Easing,
   runOnJS,
+  useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
+  withDelay,
   withSequence,
+  withSpring,
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
@@ -206,6 +209,8 @@ export default function RadialDrop() {
   const [placing, setPlacing] = useState<{ x: number; y: number; cx: number; cy: number } | null>(null);
   const placingRef = useRef<typeof placing>(null);
   placingRef.current = placing;
+  const [closing, setClosing] = useState(false); // radial is playing its recede-out animation
+  const openSeqRef = useRef(0); // bumps each open so the radial remounts and re-springs
   const [hoverSub, setHoverSub] = useState<number | null>(null); // subdivision under the finger
   const hoverRef = useRef<number | null>(null);
 
@@ -429,16 +434,21 @@ export default function RadialDrop() {
       setHoverSub(best);
     }
   };
-  // Releasing the long-press: drop the body on the hovered wedge (if any) and
-  // close the ring.
+  // Releasing the long-press: drop the body on the hovered wedge (if any), then let
+  // the ring play its staggered recede-out (which unmounts it via onRadialClosed).
   const commitRadial = () => {
     const p = placingRef.current;
     const sub = hoverRef.current;
-    hoverRef.current = null;
-    setHoverSub(null);
     if (!p) return;
-    setPlacing(null);
+    placingRef.current = null;
     if (sub != null) placeBody(p.x, p.y, sub);
+    setClosing(true); // keep it mounted; the chips stagger back, then unmount
+  };
+  const onRadialClosed = () => {
+    setPlacing(null);
+    setClosing(false);
+    setHoverSub(null);
+    hoverRef.current = null;
   };
   const toggleAt = (x: number, y: number) => {
     if (layingRef.current) {
@@ -460,8 +470,10 @@ export default function RadialDrop() {
       const { cx, cy } = clampRadialCenter(x, y, widthRef.current, heightRef.current);
       hoverRef.current = null;
       setHoverSub(null);
+      openSeqRef.current += 1; // fresh mount → re-run the spring-out
       const p = { x, y, cx, cy };
       placingRef.current = p; // available immediately for the first onTouchesMove
+      setClosing(false);
       setPlacing(p);
     }
   };
@@ -749,40 +761,143 @@ export default function RadialDrop() {
         />
       ) : null}
 
-      {placing ? <SubdivisionRadial placing={placing} hover={hoverSub} /> : null}
+      {placing ? (
+        <SubdivisionRadial
+          key={openSeqRef.current}
+          placing={placing}
+          hover={hoverSub}
+          closing={closing}
+          onClosed={onRadialClosed}
+        />
+      ) : null}
     </View>
   );
 }
 
+const STAGGER_IN = 34; // ms between successive wedges springing out
+const STAGGER_OUT = 24; // ms between wedges receding back
+
 // The subdivision picker that blooms on a long-press: a ghost body at the drop
 // point ringed by subdivision wedges. It's a pure visual overlay (pointerEvents
 // none) — the same held finger slides over a wedge to highlight it, and releasing
-// commits it. The wedge under the finger (`hover`) lights up.
+// commits it. The wedge under the finger (`hover`) lights up. On open the wedges
+// spring out from the center one by one; on `closing` they stagger back in and the
+// last to land calls `onClosed` so the parent can unmount.
 function SubdivisionRadial({
   placing,
   hover,
+  closing,
+  onClosed,
 }: {
   placing: { x: number; y: number; cx: number; cy: number };
   hover: number | null;
+  closing: boolean;
+  onClosed: () => void;
 }) {
   const { x, y, cx, cy } = placing;
+  const n = SUBDIVISIONS.length;
+
+  // The ghost tracks the same in/out timing as the ring core.
+  const ghost = useSharedValue(0);
+  useEffect(() => {
+    ghost.value = withSpring(1, { damping: 14, stiffness: 190, mass: 0.6 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (closing) ghost.value = withTiming(0, { duration: 150, easing: Easing.in(Easing.quad) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closing]);
+  const ghostStyle = useAnimatedStyle(() => ({
+    opacity: ghost.value,
+    transform: [{ scale: 0.4 + 0.6 * ghost.value }],
+  }));
+
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {/* ghost of the body about to drop, at the true press point */}
-      <View style={[styles.radialGhost, { left: x - BODY_R, top: y - BODY_R }]} />
+      <Animated.View style={[styles.radialGhost, { left: x - BODY_R, top: y - BODY_R }, ghostStyle]} />
       {SUBDIVISIONS.map((s, i) => {
-        const it = radialItemPos(i, SUBDIVISIONS.length, cx, cy);
-        const on = hover === s.d;
+        const it = radialItemPos(i, n, cx, cy);
         return (
-          <View
+          <RadialChip
             key={s.d}
-            style={[styles.radialChip, on && styles.radialChipOn, { left: it.x - 30, top: it.y - 22 }]}
-          >
-            <Text style={[styles.radialChipText, on && styles.radialChipTextOn]}>{s.label}</Text>
-          </View>
+            label={s.label}
+            tx={it.x}
+            ty={it.y}
+            ox={x} // wedges emanate from the thumb point
+            oy={y}
+            index={i}
+            count={n}
+            on={hover === s.d}
+            closing={closing}
+            // Index 0 lands last on the way out, so it owns the unmount signal.
+            onClosed={i === 0 ? onClosed : undefined}
+          />
         );
       })}
     </View>
+  );
+}
+
+// One subdivision wedge. It flies from the ring center out to (tx, ty) on a spring,
+// staggered by its index; when `closing`, it flies back to the center (reverse
+// stagger) and fades to nothing.
+function RadialChip({
+  label,
+  tx,
+  ty,
+  ox,
+  oy,
+  index,
+  count,
+  on,
+  closing,
+  onClosed,
+}: {
+  label: string;
+  tx: number;
+  ty: number;
+  ox: number;
+  oy: number;
+  index: number;
+  count: number;
+  on: boolean;
+  closing: boolean;
+  onClosed?: () => void;
+}) {
+  const a = useSharedValue(0); // 0 = collapsed at center, 1 = seated on the ring
+  useEffect(() => {
+    a.value = withDelay(index * STAGGER_IN, withSpring(1, { damping: 13, stiffness: 200, mass: 0.7 }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!closing) return;
+    a.value = withDelay(
+      (count - 1 - index) * STAGGER_OUT,
+      withTiming(0, { duration: 150, easing: Easing.in(Easing.quad) }, (finished) => {
+        if (finished && onClosed) runOnJS(onClosed)();
+      })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closing]);
+
+  const style = useAnimatedStyle(() => {
+    const inv = 1 - a.value;
+    return {
+      opacity: a.value,
+      transform: [
+        { translateX: (ox - tx) * inv },
+        { translateY: (oy - ty) * inv },
+        { scale: 0.3 + 0.7 * a.value },
+      ],
+    };
+  });
+
+  return (
+    <Animated.View
+      style={[styles.radialChip, on && styles.radialChipOn, { left: tx - 30, top: ty - 22 }, style]}
+    >
+      <Text style={[styles.radialChipText, on && styles.radialChipTextOn]}>{label}</Text>
+    </Animated.View>
   );
 }
 
@@ -1174,7 +1289,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: 'rgba(255,255,255,0.5)',
   },
-  radialChipOn: { backgroundColor: '#fff', borderColor: '#fff', transform: [{ scale: 1.12 }] },
+  radialChipOn: { backgroundColor: '#fff', borderColor: '#fff' },
   radialChipText: { color: '#fff', fontSize: 15, fontWeight: '700', letterSpacing: 0.3 },
   radialChipTextOn: { color: '#0a0a0a' },
 });

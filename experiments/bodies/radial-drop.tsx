@@ -68,16 +68,23 @@ function clampRadialCenter(x: number, y: number, width: number, height: number) 
   };
 }
 
-// What a radial wedge selects: a subdivision denominator, or delete.
+// What a radial wedge selects: a subdivision denominator, delete, or extend-path.
 const DELETE = 'delete' as const;
-type RadialSel = number | typeof DELETE;
+const EXTEND = 'extend' as const;
+const EXTEND_ICON = '✎'; // swap freely: ✎ · ↝ · ⋯ · → · ↪
+type RadialSel = number | typeof DELETE | typeof EXTEND;
 type RItem = { key: string; label: string; sel: RadialSel; danger?: boolean };
-// The wedges on the ring. Editing a body adds a ✕ delete wedge at the bottom slot.
-function radialItems(editing: boolean): RItem[] {
+// The wedges on the ring. Editing a body adds a ✕ delete wedge at the bottom; a
+// body that already has a path also gets an ✎ extend wedge, the two flanking the
+// bottom center.
+function radialItems(editing: boolean, hasPath: boolean): RItem[] {
   const subs: RItem[] = SUBDIVISIONS.map((s) => ({ key: `s${s.d}`, label: s.label, sel: s.d }));
   if (!editing) return subs;
-  const bottom = Math.round((subs.length + 1) / 2); // 8 items → index 4 lands straight down
-  return [...subs.slice(0, bottom), { key: 'del', label: '✕', sel: DELETE, danger: true }, ...subs.slice(bottom)];
+  const del: RItem = { key: 'del', label: '✕', sel: DELETE, danger: true };
+  const bottom = Math.round((subs.length + 1) / 2); // insertion point for the bottom slot(s)
+  if (!hasPath) return [...subs.slice(0, bottom), del, ...subs.slice(bottom)]; // 8 items, delete at bottom
+  const ext: RItem = { key: 'ext', label: EXTEND_ICON, sel: EXTEND };
+  return [...subs.slice(0, bottom), ext, del, ...subs.slice(bottom)]; // 9 items, ext + delete flank the bottom
 }
 
 function driftMs(x: number, period: number, width: number): number {
@@ -221,7 +228,7 @@ export default function RadialDrop() {
   // `targetId` null = placing a new body; otherwise the radial is re-picking the
   // subdivision of that existing body.
   const [placing, setPlacing] = useState<
-    { x: number; y: number; cx: number; cy: number; targetId: number | null } | null
+    { x: number; y: number; cx: number; cy: number; targetId: number | null; hasPath: boolean } | null
   >(null);
   const placingRef = useRef<typeof placing>(null);
   placingRef.current = placing;
@@ -437,7 +444,7 @@ export default function RadialDrop() {
   const updateHover = (fx: number, fy: number) => {
     const p = placingRef.current;
     if (!p) return;
-    const items = radialItems(p.targetId != null);
+    const items = radialItems(p.targetId != null, p.hasPath);
     let best: RadialSel | null = null;
     let bestD = RADIAL_HIT;
     items.forEach((it, i) => {
@@ -462,6 +469,8 @@ export default function RadialDrop() {
     placingRef.current = null;
     if (sub === DELETE) {
       if (p.targetId != null) setBodies((prev) => prev.filter((b) => b.id !== p.targetId));
+    } else if (sub === EXTEND) {
+      if (p.targetId != null) beginLayingFor(p.targetId); // append more waypoints
     } else if (sub != null) {
       if (p.targetId != null) {
         // re-pick an existing body's subdivision
@@ -491,12 +500,13 @@ export default function RadialDrop() {
   // body it re-picks that body's subdivision; on empty grid it drops a new body.
   const openRadial = (x: number, y: number, targetId: number | null) => {
     const { cx, cy } = clampRadialCenter(x, y, widthRef.current, heightRef.current);
-    // When editing a body, pre-highlight its current subdivision.
-    const seed = targetId != null ? bodiesRef.current.find((b) => b.id === targetId)?.subdivision ?? null : null;
+    const body = targetId != null ? bodiesRef.current.find((b) => b.id === targetId) : undefined;
+    const seed = body?.subdivision ?? null; // pre-highlight the body's current subdivision
+    const hasPath = !!(body?.path && body.path.length >= 2);
     hoverRef.current = seed;
     setHoverSub(seed);
     openSeqRef.current += 1; // fresh mount → re-run the spring-out
-    const p = { x, y, cx, cy, targetId };
+    const p = { x, y, cx, cy, targetId, hasPath };
     placingRef.current = p; // available immediately for the first onTouchesMove
     setClosing(false);
     setPlacing(p);
@@ -507,18 +517,21 @@ export default function RadialDrop() {
     if (id != null) openRadial(x, y, id);
     else if (x >= RULER_WIDTH) openRadial(x, y, null);
   };
-  // Double-tap a body → start laying its path (seeded with its current spot, or its
-  // existing waypoints to extend). The bottom Done/Cancel bar drives it — no sheet.
-  const onDoubleTap = (x: number, y: number) => {
-    if (layingRef.current) return;
-    const id = hitId(x, y);
-    if (id == null) return;
+  // Start laying a body's path (seeded with its current spot, or its existing
+  // waypoints to extend). Driven by the bottom Done/Cancel bar — no sheet.
+  const beginLayingFor = (id: number) => {
     const b = bodiesRef.current.find((bb) => bb.id === id);
     if (!b) return;
     laySeqRef.current += 1; // fresh mount → re-run the buttons' rise-in
     setLayClosing(false);
     setEditing(id);
     setLaying(b.path && b.path.length >= 2 ? [...b.path] : [{ x: b.x, midi: b.midi }]);
+  };
+  // Double-tap a body → start laying its path.
+  const onDoubleTap = (x: number, y: number) => {
+    if (layingRef.current) return;
+    const id = hitId(x, y);
+    if (id != null) beginLayingFor(id);
   };
   // A drag grabs (in priority order) a path waypoint, then a static body, else it
   // scrolls the window.
@@ -848,14 +861,14 @@ function SubdivisionRadial({
   ghost: showGhost,
   onClosed,
 }: {
-  placing: { x: number; y: number; cx: number; cy: number; targetId: number | null };
+  placing: { x: number; y: number; cx: number; cy: number; targetId: number | null; hasPath: boolean };
   hover: RadialSel | null;
   closing: boolean;
   ghost: boolean;
   onClosed: () => void;
 }) {
   const { x, y, cx, cy } = placing;
-  const items = radialItems(placing.targetId != null);
+  const items = radialItems(placing.targetId != null, placing.hasPath);
   const n = items.length;
 
   // The ghost tracks the same in/out timing as the ring core.

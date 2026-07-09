@@ -1356,8 +1356,8 @@ const styles = StyleSheet.create({
   },
   layIconDisabled: { opacity: 0.35 },
   layIconText: { fontSize: 24, fontWeight: '800', marginTop: -1 },
-  layDoneBtn: { backgroundColor: '#54f2b0', borderColor: '#54f2b0' },
-  layDoneText: { color: '#0a0a0a' },
+  layDoneBtn: { backgroundColor: 'rgba(14,14,16,0.92)', borderColor: 'rgba(255,255,255,0.4)' },
+  layDoneText: { color: '#fff' },
   layCancelBtn: { backgroundColor: 'rgba(14,14,16,0.92)', borderColor: 'rgba(255,255,255,0.4)' },
   layCancelText: { color: '#fff' },
 });

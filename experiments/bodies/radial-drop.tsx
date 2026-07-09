@@ -77,12 +77,15 @@ type RItem = { key: string; label: string; sel: RadialSel; danger?: boolean };
 // The wedges on the ring. Editing pins the control wedges (✎ extend when the body
 // has a path, then ✕ delete) at the bottom center; the subdivisions then fill the
 // rest, starting with "1" just to the left of the controls and running clockwise.
+// Placing (no controls) uses the same ordering, so "1" sits at the bottom-left and
+// runs clockwise with the bottom-center left empty.
 function radialItems(editing: boolean, hasPath: boolean): RItem[] {
   const subs: RItem[] = SUBDIVISIONS.map((s) => ({ key: `s${s.d}`, label: s.label, sel: s.d }));
-  if (!editing) return subs; // placing: subdivisions only, "1" at the top
   const controls: RItem[] = [];
-  if (hasPath) controls.push({ key: 'ext', label: EXTEND_ICON, sel: EXTEND });
-  controls.push({ key: 'del', label: '✕', sel: DELETE, danger: true });
+  if (editing) {
+    if (hasPath) controls.push({ key: 'ext', label: EXTEND_ICON, sel: EXTEND });
+    controls.push({ key: 'del', label: '✕', sel: DELETE, danger: true });
+  }
 
   const total = subs.length + controls.length;
   const start = Math.round(total / 2 - controls.length / 2); // first control slot (bottom center)

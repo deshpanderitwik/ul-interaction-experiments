@@ -227,6 +227,8 @@ export default function RadialDrop() {
   placingRef.current = placing;
   const [closing, setClosing] = useState(false); // radial is playing its recede-out animation
   const openSeqRef = useRef(0); // bumps each open so the radial remounts and re-springs
+  const [layClosing, setLayClosing] = useState(false); // the Done/Cancel bar is animating out
+  const laySeqRef = useRef(0); // bumps each laying start so the bar remounts and re-animates
   const [hoverSub, setHoverSub] = useState<RadialSel | null>(null); // wedge under the finger
   const hoverRef = useRef<RadialSel | null>(null);
 
@@ -513,6 +515,8 @@ export default function RadialDrop() {
     if (id == null) return;
     const b = bodiesRef.current.find((bb) => bb.id === id);
     if (!b) return;
+    laySeqRef.current += 1; // fresh mount → re-run the buttons' rise-in
+    setLayClosing(false);
     setEditing(id);
     setLaying(b.path && b.path.length >= 2 ? [...b.path] : [{ x: b.x, midi: b.midi }]);
   };
@@ -639,17 +643,26 @@ export default function RadialDrop() {
   const layingGesture = Gesture.Race(layScrollPan, layTap);
 
   // `editing` here tracks which body a path is being laid for (set on double-tap).
+  // Both end laying by nulling it but keep the bar mounted (layClosing) so its
+  // buttons can animate out before unmounting (via onLayClosed).
   const cancelLaying = () => {
+    if (laying == null) return;
     setLaying(null);
     setEditing(null);
+    setLayClosing(true);
   };
   const confirmLaying = () => {
+    if (laying == null) return;
     const pts = laying;
+    const targetId = editing;
     setLaying(null);
     setEditing(null);
-    if (!pts || pts.length < 2) return;
-    setBodies((prev) => prev.map((b) => (b.id === editing ? { ...b, path: pts, pathT0: clock.value } : b)));
+    setLayClosing(true);
+    if (pts.length >= 2) {
+      setBodies((prev) => prev.map((b) => (b.id === targetId ? { ...b, path: pts, pathT0: clock.value } : b)));
+    }
   };
+  const onLayClosed = () => setLayClosing(false);
 
   const uniforms = useDerivedValue(() => {
     const pos: number[] = [];
@@ -778,18 +791,29 @@ export default function RadialDrop() {
         </GestureDetector>
       ) : null}
 
-      {/* While laying a path, just a Done / Cancel bar at the bottom — no sheet. */}
-      {laying != null ? (
-        <View style={styles.layBar} pointerEvents="box-none">
-          <Pressable style={styles.layCancelBtn} onPress={cancelLaying}>
-            <Text style={styles.layCancelText}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.layDoneBtn, laying.length < 2 && styles.layDoneDisabled]}
-            onPress={laying.length >= 2 ? confirmLaying : undefined}
-          >
-            <Text style={styles.layDoneText}>Done</Text>
-          </Pressable>
+      {/* While laying a path, just a Done / Cancel icon bar at the bottom — no sheet.
+          Tick (done) on the left, cross (cancel) on the right; each rises in from
+          below one at a time and drops back out the same way. */}
+      {laying != null || layClosing ? (
+        <View style={styles.layBar} pointerEvents={laying != null ? 'box-none' : 'none'}>
+          <LayIconButton
+            key={`done-${laySeqRef.current}`}
+            kind="done"
+            index={0}
+            count={2}
+            disabled={laying != null && laying.length < 2}
+            closing={laying == null}
+            onPress={confirmLaying}
+            onClosed={onLayClosed} // index 0 lands last on the way out → owns the unmount
+          />
+          <LayIconButton
+            key={`cancel-${laySeqRef.current}`}
+            kind="cancel"
+            index={1}
+            count={2}
+            closing={laying == null}
+            onPress={cancelLaying}
+          />
         </View>
       ) : null}
 
@@ -952,6 +976,67 @@ function RadialChip({
       >
         {label}
       </Text>
+    </Animated.View>
+  );
+}
+
+// A path-laying control (tick = done, cross = cancel). It rises in from below,
+// staggered by index; when `closing` it drops back down (reverse stagger) and the
+// index-0 button (which lands last) signals unmount via onClosed.
+function LayIconButton({
+  kind,
+  index,
+  count,
+  disabled,
+  closing,
+  onPress,
+  onClosed,
+}: {
+  kind: 'done' | 'cancel';
+  index: number;
+  count: number;
+  disabled?: boolean;
+  closing: boolean;
+  onPress: () => void;
+  onClosed?: () => void;
+}) {
+  const a = useSharedValue(0);
+  useEffect(() => {
+    a.value = withDelay(index * STAGGER_IN, withSpring(1, { damping: 13, stiffness: 200, mass: 0.7 }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!closing) return;
+    a.value = withDelay(
+      (count - 1 - index) * STAGGER_OUT,
+      withTiming(0, { duration: 150, easing: Easing.in(Easing.quad) }, (finished) => {
+        if (finished && onClosed) runOnJS(onClosed)();
+      })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closing]);
+
+  const style = useAnimatedStyle(() => ({
+    opacity: a.value,
+    transform: [{ translateY: 34 * (1 - a.value) }, { scale: 0.6 + 0.4 * a.value }],
+  }));
+
+  const isDone = kind === 'done';
+  return (
+    <Animated.View style={style}>
+      <Pressable
+        disabled={disabled}
+        onPress={onPress}
+        style={[
+          styles.layIconBtn,
+          isDone ? styles.layDoneBtn : styles.layCancelBtn,
+          disabled && styles.layIconDisabled,
+        ]}
+      >
+        <Text style={[styles.layIconText, isDone ? styles.layDoneText : styles.layCancelText]}>
+          {isDone ? '✓' : '✕'}
+        </Text>
+      </Pressable>
     </Animated.View>
   );
 }
@@ -1258,23 +1343,21 @@ const styles = StyleSheet.create({
     bottom: 44,
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 12,
+    alignItems: 'center',
+    gap: 20,
   },
-  layCancelBtn: {
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 14,
+  layIconBtn: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.4)',
-    backgroundColor: 'rgba(14,14,16,0.92)',
   },
-  layCancelText: { color: '#ddd', fontSize: 16, fontWeight: '700', letterSpacing: 0.5 },
-  layDoneBtn: {
-    paddingVertical: 12,
-    paddingHorizontal: 34,
-    borderRadius: 14,
-    backgroundColor: '#54f2b0',
-  },
-  layDoneDisabled: { backgroundColor: 'rgba(84,242,176,0.3)' },
-  layDoneText: { color: '#0a0a0a', fontSize: 16, fontWeight: '700', letterSpacing: 0.5 },
+  layIconDisabled: { opacity: 0.35 },
+  layIconText: { fontSize: 24, fontWeight: '800', marginTop: -1 },
+  layDoneBtn: { backgroundColor: '#54f2b0', borderColor: '#54f2b0' },
+  layDoneText: { color: '#0a0a0a' },
+  layCancelBtn: { backgroundColor: 'rgba(14,14,16,0.92)', borderColor: 'rgba(255,255,255,0.4)' },
+  layCancelText: { color: '#fff' },
 });

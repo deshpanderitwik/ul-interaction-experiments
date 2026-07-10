@@ -918,7 +918,7 @@ export default function BentPaths() {
                 ) : null
               )}
               {laying && laying.length > 0 ? (
-                <PathLine points={laying} full={fullLadder} scroll={scroll} visible={visibleCount} height={height} dots />
+                <PathLine points={laying} full={fullLadder} scroll={scroll} visible={visibleCount} height={height} dots dashed />
               ) : null}
               {bodyViews.map(({ b, isPath, y0 }) =>
                 isPath || y0 != null ? (

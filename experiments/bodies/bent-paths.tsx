@@ -911,7 +911,8 @@ export default function BentPaths() {
                       visible={visibleCount}
                       height={height}
                       handles
-                      dashed={placing?.targetId === b.id} // dashed while its subdivision radial is open
+                      // dashed while its subdivision radial is open OR while it's being extended/laid
+                      dashed={placing?.targetId === b.id || (laying != null && editing === b.id)}
                     />
                   )
                 ) : null

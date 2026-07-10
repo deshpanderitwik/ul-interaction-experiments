@@ -87,6 +87,12 @@ export const experiments: Experiment[] = [
         blurb: 'Extended Grid, but you long-press to drop a body: a radial of subdivisions blooms around your finger — tap one to place it already tuned to that pulse.',
         load: () => import('./bodies/radial-drop'),
       },
+      {
+        id: 'bent-paths',
+        title: 'Bent Paths',
+        blurb: 'Radial Drop, but press-drag a path’s length to pluck it like a string: it bows to your finger and the body rides the bend, then snaps back with a twang on release.',
+        load: () => import('./bodies/bent-paths'),
+      },
     ],
   },
   {

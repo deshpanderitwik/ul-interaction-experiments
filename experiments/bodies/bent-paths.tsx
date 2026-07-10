@@ -294,6 +294,9 @@ export default function BentPaths() {
   const bendS = useSharedValue(0); // pluck amount: 1 held, springs through 0 on release
   const bendOx = useSharedValue(0); // finger offset from the rest grab point
   const bendOy = useSharedValue(0);
+  // Shape: 0 = the pluck triangle (peaked at the grab), 1 = the smooth fundamental
+  // (half-sine). Held at 0, eases to 1 on release as the pointy higher modes decay.
+  const bendMorph = useSharedValue(0);
 
   const pulses = useSharedValue<Pulse[]>([]);
   const pulseBufRef = useRef<BufPulse[]>([]);
@@ -634,6 +637,7 @@ export default function BentPaths() {
       bendRestRef.current = { gx: seg.gx, gy: seg.gy };
       bendOx.value = 0;
       bendOy.value = 0;
+      bendMorph.value = 0; // held as the pointy pluck shape peaked at the grab
       bendS.value = 1; // held taut (also cancels any prior twang spring)
       // Freeze the body's clock phase so it can resume exactly here, and fade it out.
       const b = bodiesRef.current.find((bb) => bb.id === seg.bodyId);
@@ -701,6 +705,8 @@ export default function BentPaths() {
       // is underdamped so the segment whips past and oscillates; when it finally
       // settles we drop the bent rendering.
       resumeBody();
+      // The pluck relaxes into the smooth fundamental as the sharp higher modes die.
+      bendMorph.value = withTiming(1, { duration: 240, easing: Easing.out(Easing.quad) });
       bendS.value = withSpring(0, { damping: 4.5, stiffness: 260, mass: 0.5 }, (finished) => {
         'worklet';
         if (finished) runOnJS(endBendRender)();
@@ -872,6 +878,7 @@ export default function BentPaths() {
                       bendS={bendS}
                       bendOx={bendOx}
                       bendOy={bendOy}
+                      bendMorph={bendMorph}
                     />
                   ) : (
                     <PathLine
@@ -1281,6 +1288,7 @@ function BentPathLine({
   bendS,
   bendOx,
   bendOy,
+  bendMorph,
 }: {
   points: Waypoint[];
   j: number;
@@ -1292,6 +1300,7 @@ function BentPathLine({
   bendS: SharedValue<number>;
   bendOx: SharedValue<number>;
   bendOy: SharedValue<number>;
+  bendMorph: SharedValue<number>;
 }) {
   const rest = useMemo(
     () => points.map((wp) => ({ x: wp.x, y: yForMidiExt(wp.midi, full, scroll, visible, height) })),
@@ -1300,20 +1309,38 @@ function BentPathLine({
 
   const path = useDerivedValue(() => {
     const p = Skia.Path.Make();
-    const dx = bendOx.value * bendS.value;
-    const dy = bendOy.value * bendS.value;
-    // Grab point rides the current segment (fraction t) so it tracks the grid on
-    // scroll; the finger offset (dx, dy) is added on top and twangs away.
-    const gx = rest[j].x + (rest[j + 1].x - rest[j].x) * t + dx;
-    const gy = rest[j].y + (rest[j + 1].y - rest[j].y) * t + dy;
+    const amp = bendS.value;
+    const ox = bendOx.value;
+    const oy = bendOy.value;
+    const m = bendMorph.value; // 0 = pluck triangle at t, 1 = fundamental half-sine
+    const ax = rest[j].x;
+    const ay = rest[j].y;
+    const bx = rest[j + 1].x;
+    const by = rest[j + 1].y;
+
     p.moveTo(rest[0].x, rest[0].y);
     for (let k = 1; k < rest.length; k++) {
       if (k - 1 === j) {
-        // The plucked segment bows as a smooth curve (rubber band): a quadratic whose
-        // control point places the curve's midpoint on the displaced grab point.
-        const cx = 2 * gx - (rest[k - 1].x + rest[k].x) / 2;
-        const cy = 2 * gy - (rest[k - 1].y + rest[k].y) / 2;
-        p.quadTo(cx, cy, rest[k].x, rest[k].y);
+        // Sample the plucked segment: each point displaces along the pull vector by
+        // the shape φ(s). φ blends a rounded pluck-triangle peaked at the grab (t) —
+        // so the string follows the finger where it was pulled — toward a smooth
+        // half-sine as it relaxes to the fundamental vibration.
+        const M = 20;
+        for (let s0 = 1; s0 <= M; s0++) {
+          const s = s0 / M;
+          let tri;
+          if (t <= 0 || t >= 1) tri = 0;
+          else if (s <= t) {
+            const u = s / t;
+            tri = u * u * (3 - 2 * u);
+          } else {
+            const u = (1 - s) / (1 - t);
+            tri = u * u * (3 - 2 * u);
+          }
+          const fund = Math.sin(Math.PI * s);
+          const sh = (tri + (fund - tri) * m) * amp;
+          p.lineTo(ax + (bx - ax) * s + ox * sh, ay + (by - ay) * s + oy * sh);
+        }
       } else {
         p.lineTo(rest[k].x, rest[k].y);
       }

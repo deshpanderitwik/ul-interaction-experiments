@@ -36,9 +36,9 @@ import { playSine } from './voice';
 // immediately rides the bent shape, and on release the path snaps back with a
 // decaying oscillation (twang) while the body resumes on the original path.
 
-const PULSES = 24;
-const LIFE = 1.1; // shorter — rings fade before sweeping the whole field
-const RING_ALPHA = 0.24;
+const PULSES = 32; // headroom for many small pings at once
+const LIFE = 0.5; // each ping dies quickly
+const RING_ALPHA = 0.28;
 const SCHED_MS = 15;
 const MAX_DRIFT_FRAC = 0.18;
 const EXT_MIN = 24; // C0 (Ableton labeling)
@@ -186,8 +186,8 @@ half4 main(float2 fragcoord) {
     float len = length(d);
     float bump = flow(d * 0.012 + float2(seed * 21.0, seed * 13.0), u_time * 0.15).x;
     float dist = len * (1.0 + 0.06 * bump);
-    float speed = 150.0 + seed * 50.0;
-    float width = 1.2;
+    float speed = 120.0 + seed * 30.0; // max radius ~ speed*LIFE ≈ 60–75px: close to the body
+    float width = 1.4;
     float r = age * speed;
     float band = (dist - r) / width;
     float env = exp(-band * band);
@@ -215,7 +215,7 @@ type Body = {
 };
 type Fx = { pulse: SharedValue<number>; px: SharedValue<number>; py: SharedValue<number>; op: SharedValue<number> };
 type Pulse = { x: number; y: number; t: number; seed: number }; // published to the shader
-type BufPulse = { id: number; x: number; midi: number; t: number; seed: number }; // anchored to its note; id = emitting body
+type BufPulse = { x: number; midi: number; t: number; seed: number }; // anchored to its note
 
 export default function BentPaths() {
   const live = useExperimentActive();
@@ -331,19 +331,9 @@ export default function BentPaths() {
           withTiming(0, { duration: 320, easing: Easing.out(Easing.quad) })
         );
       }
-      // One live ring per body: restart this body's ring instead of stacking a new
-      // one, so fast/many bodies stay legible instead of a crisscross of waves.
-      const now = clock.value / 1000;
-      const buf = pulseBufRef.current;
-      const existing = buf.find((p) => p.id === bodyId);
-      if (existing) {
-        existing.x = x;
-        existing.midi = midi;
-        existing.t = now;
-        existing.seed = Math.random();
-      } else {
-        buf.push({ id: bodyId, x, midi, t: now, seed: Math.random() });
-      }
+      // A ring per fire, but each is small and short-lived (see LIFE / speed), so
+      // every subdivision pings and they read as tight local pulses, not waves.
+      pulseBufRef.current.push({ x, midi, t: clock.value / 1000, seed: Math.random() });
     },
     [clock]
   );

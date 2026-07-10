@@ -285,7 +285,9 @@ export default function BentPaths() {
   // Bend (pluck) state. `bend` (state) picks which body renders bent + carries the
   // plucked segment (index j) and its rest grab point; the shared values drive the
   // grab vertex's displacement each frame (only that one segment bends).
-  const [bend, setBend] = useState<{ bodyId: number; j: number; gx: number; gy: number } | null>(null);
+  // `t` is the grab fraction along segment j — a note-relative anchor, so the bend
+  // (and its twang) tracks the segment as the grid scrolls instead of a fixed pixel.
+  const [bend, setBend] = useState<{ bodyId: number; j: number; t: number } | null>(null);
   const bendActiveRef = useRef<{ bodyId: number; j: number } | null>(null); // scheduler suppresses this body
   const bendRestRef = useRef({ gx: 0, gy: 0 }); // rest position of the grabbed point
   const bendPhaseRef = useRef(0); // clock phase at grab, to resume exactly where it froze
@@ -467,9 +469,9 @@ export default function BentPaths() {
   const hitPathSegment = (
     x: number,
     y: number
-  ): { bodyId: number; j: number; gx: number; gy: number } | null => {
+  ): { bodyId: number; j: number; t: number; gx: number; gy: number } | null => {
     const bs = bodiesRef.current;
-    let best: { bodyId: number; j: number; gx: number; gy: number } | null = null;
+    let best: { bodyId: number; j: number; t: number; gx: number; gy: number } | null = null;
     let bestD = BEND_HIT;
     for (let i = bs.length - 1; i >= 0; i--) {
       const b = bs[i];
@@ -481,7 +483,7 @@ export default function BentPaths() {
         const pr = projectToSeg(x, y, b.path[j].x, ay, b.path[j + 1].x, by);
         if (pr.d < bestD) {
           bestD = pr.d;
-          best = { bodyId: b.id, j, gx: pr.cx, gy: pr.cy };
+          best = { bodyId: b.id, j, t: pr.t, gx: pr.cx, gy: pr.cy };
         }
       }
     }
@@ -639,7 +641,7 @@ export default function BentPaths() {
       const fx = fxRef.current.get(seg.bodyId);
       if (fx) fx.op.value = withTiming(0, { duration: 130 });
       dragModeRef.current = 'bend';
-      setBend({ bodyId: seg.bodyId, j: seg.j, gx: seg.gx, gy: seg.gy });
+      setBend({ bodyId: seg.bodyId, j: seg.j, t: seg.t });
       return;
     }
     const id = hitStaticBody(x, y);
@@ -862,8 +864,7 @@ export default function BentPaths() {
                       key={`p${b.id}`}
                       points={b.path!}
                       j={bend.j}
-                      gx={bend.gx}
-                      gy={bend.gy}
+                      t={bend.t}
                       full={fullLadder}
                       scroll={scroll}
                       visible={visibleCount}
@@ -1272,8 +1273,7 @@ function PathLine({
 function BentPathLine({
   points,
   j,
-  gx,
-  gy,
+  t,
   full,
   scroll,
   visible,
@@ -1284,8 +1284,7 @@ function BentPathLine({
 }: {
   points: Waypoint[];
   j: number;
-  gx: number;
-  gy: number;
+  t: number;
   full: number[];
   scroll: number;
   visible: number;
@@ -1303,20 +1302,24 @@ function BentPathLine({
     const p = Skia.Path.Make();
     const dx = bendOx.value * bendS.value;
     const dy = bendOy.value * bendS.value;
+    // Grab point rides the current segment (fraction t) so it tracks the grid on
+    // scroll; the finger offset (dx, dy) is added on top and twangs away.
+    const gx = rest[j].x + (rest[j + 1].x - rest[j].x) * t + dx;
+    const gy = rest[j].y + (rest[j + 1].y - rest[j].y) * t + dy;
     p.moveTo(rest[0].x, rest[0].y);
     for (let k = 1; k < rest.length; k++) {
       if (k - 1 === j) {
         // The plucked segment bows as a smooth curve (rubber band): a quadratic whose
         // control point places the curve's midpoint on the displaced grab point.
-        const cx = 2 * (gx + dx) - (rest[k - 1].x + rest[k].x) / 2;
-        const cy = 2 * (gy + dy) - (rest[k - 1].y + rest[k].y) / 2;
+        const cx = 2 * gx - (rest[k - 1].x + rest[k].x) / 2;
+        const cy = 2 * gy - (rest[k - 1].y + rest[k].y) / 2;
         p.quadTo(cx, cy, rest[k].x, rest[k].y);
       } else {
         p.lineTo(rest[k].x, rest[k].y);
       }
     }
     return p;
-  }, [rest, j, gx, gy]);
+  }, [rest, j, t]);
 
   return (
     <Group>

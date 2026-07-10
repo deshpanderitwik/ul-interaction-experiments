@@ -37,7 +37,7 @@ import { playSine } from './voice';
 // decaying oscillation (twang) while the body resumes on the original path.
 
 const PULSES = 24;
-const LIFE = 1.6;
+const LIFE = 1.1; // shorter — rings fade before sweeping the whole field
 const RING_ALPHA = 0.24;
 const SCHED_MS = 15;
 const MAX_DRIFT_FRAC = 0.18;
@@ -186,7 +186,7 @@ half4 main(float2 fragcoord) {
     float len = length(d);
     float bump = flow(d * 0.012 + float2(seed * 21.0, seed * 13.0), u_time * 0.15).x;
     float dist = len * (1.0 + 0.06 * bump);
-    float speed = 200.0 + seed * 70.0;
+    float speed = 150.0 + seed * 50.0;
     float width = 1.2;
     float r = age * speed;
     float band = (dist - r) / width;
@@ -215,7 +215,7 @@ type Body = {
 };
 type Fx = { pulse: SharedValue<number>; px: SharedValue<number>; py: SharedValue<number>; op: SharedValue<number> };
 type Pulse = { x: number; y: number; t: number; seed: number }; // published to the shader
-type BufPulse = { x: number; midi: number; t: number; seed: number }; // anchored to its note
+type BufPulse = { id: number; x: number; midi: number; t: number; seed: number }; // anchored to its note; id = emitting body
 
 export default function BentPaths() {
   const live = useExperimentActive();
@@ -331,7 +331,19 @@ export default function BentPaths() {
           withTiming(0, { duration: 320, easing: Easing.out(Easing.quad) })
         );
       }
-      pulseBufRef.current.push({ x, midi, t: clock.value / 1000, seed: Math.random() });
+      // One live ring per body: restart this body's ring instead of stacking a new
+      // one, so fast/many bodies stay legible instead of a crisscross of waves.
+      const now = clock.value / 1000;
+      const buf = pulseBufRef.current;
+      const existing = buf.find((p) => p.id === bodyId);
+      if (existing) {
+        existing.x = x;
+        existing.midi = midi;
+        existing.t = now;
+        existing.seed = Math.random();
+      } else {
+        buf.push({ id: bodyId, x, midi, t: now, seed: Math.random() });
+      }
     },
     [clock]
   );

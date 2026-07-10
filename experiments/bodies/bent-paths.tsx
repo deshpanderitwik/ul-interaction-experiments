@@ -290,6 +290,7 @@ export default function BentPaths() {
   const [bend, setBend] = useState<{ bodyId: number; j: number; t: number } | null>(null);
   const bendActiveRef = useRef<{ bodyId: number; j: number } | null>(null); // scheduler suppresses this body
   const bendRestRef = useRef({ gx: 0, gy: 0 }); // rest position of the grabbed point
+  const bendCapRef = useRef(120); // max stretch (px) — tension saturates the pull here
   const bendPhaseRef = useRef(0); // clock phase at grab, to resume exactly where it froze
   const bendS = useSharedValue(0); // pluck amount: 1 held, springs through 0 on release
   const bendOx = useSharedValue(0); // finger offset from the rest grab point
@@ -635,6 +636,15 @@ export default function BentPaths() {
     if (seg) {
       bendActiveRef.current = { bodyId: seg.bodyId, j: seg.j };
       bendRestRef.current = { gx: seg.gx, gy: seg.gy };
+      // Max stretch scales with the segment's length — more material, more give.
+      const sb = bodiesRef.current.find((bb) => bb.id === seg.bodyId);
+      const ay = sb?.path ? wpY(sb.path[seg.j].midi) : null;
+      const by = sb?.path ? wpY(sb.path[seg.j + 1].midi) : null;
+      const segLen =
+        sb?.path && ay != null && by != null
+          ? Math.hypot(sb.path[seg.j + 1].x - sb.path[seg.j].x, by - ay)
+          : 160;
+      bendCapRef.current = Math.max(70, segLen * 0.6);
       bendOx.value = 0;
       bendOy.value = 0;
       bendMorph.value = 0; // held as the pointy pluck shape peaked at the grab
@@ -665,8 +675,20 @@ export default function BentPaths() {
       return;
     }
     if (dragModeRef.current === 'bend') {
-      bendOx.value = x - bendRestRef.current.gx;
-      bendOy.value = y - bendRestRef.current.gy;
+      // Tension: track the finger for small pulls, then saturate toward a max stretch
+      // (tanh) so the elastic resists more the further it's pulled.
+      const rx = x - bendRestRef.current.gx;
+      const ry = y - bendRestRef.current.gy;
+      const r = Math.hypot(rx, ry);
+      if (r > 0.001) {
+        const cap = bendCapRef.current;
+        const scaled = (cap * Math.tanh(r / cap)) / r;
+        bendOx.value = rx * scaled;
+        bendOy.value = ry * scaled;
+      } else {
+        bendOx.value = 0;
+        bendOy.value = 0;
+      }
       return;
     }
     if (dragModeRef.current === 'waypoint') {

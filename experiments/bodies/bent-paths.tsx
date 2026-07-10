@@ -49,13 +49,6 @@ const HANDLE_HIT = 34; // touch radius to grab a waypoint handle
 const BEND_HIT = 26; // touch distance to grab a path's length for bending
 const RADIAL_R = 92; // radius of the subdivision picker ring
 
-// Plucked-string envelope: 0 at the pinned ends (p=0, p=last), 1 at the grab index
-// `gi`; a triangular bulge in between. 0 outside the open string.
-function pluckEnv(p: number, gi: number, last: number): number {
-  'worklet';
-  if (last <= 0 || gi <= 0 || gi >= last || p <= 0 || p >= last) return 0;
-  return p <= gi ? p / gi : (last - p) / (last - gi);
-}
 // Nearest point on segment AB to P → { d: distance, t: fraction along AB }.
 function projectToSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
   const abx = bx - ax;
@@ -220,7 +213,7 @@ type Body = {
   pathT0?: number; // clock ms when traversal started
   muted?: boolean; // silent but still alive (keeps its place / keeps gliding)
 };
-type Fx = { pulse: SharedValue<number>; px: SharedValue<number>; py: SharedValue<number> };
+type Fx = { pulse: SharedValue<number>; px: SharedValue<number>; py: SharedValue<number>; op: SharedValue<number> };
 type Pulse = { x: number; y: number; t: number; seed: number }; // published to the shader
 type BufPulse = { x: number; midi: number; t: number; seed: number }; // anchored to its note
 
@@ -290,11 +283,12 @@ export default function BentPaths() {
   const draggingRef = useRef<number | null>(null);
 
   // Bend (pluck) state. `bend` (state) picks which body renders bent + carries the
-  // grab index for the envelope; the shared values drive the deformation each frame
-  // (scheduler reads them for the body, BentPathLine for the line).
-  const [bend, setBend] = useState<{ bodyId: number; gi: number } | null>(null);
-  const bendActiveRef = useRef<{ bodyId: number; gi: number } | null>(null);
+  // plucked segment (index j) and its rest grab point; the shared values drive the
+  // grab vertex's displacement each frame (only that one segment bends).
+  const [bend, setBend] = useState<{ bodyId: number; j: number; gx: number; gy: number } | null>(null);
+  const bendActiveRef = useRef<{ bodyId: number; j: number } | null>(null); // scheduler suppresses this body
   const bendRestRef = useRef({ gx: 0, gy: 0 }); // rest position of the grabbed point
+  const bendPhaseRef = useRef(0); // clock phase at grab, to resume exactly where it froze
   const bendS = useSharedValue(0); // pluck amount: 1 held, springs through 0 on release
   const bendOx = useSharedValue(0); // finger offset from the rest grab point
   const bendOy = useSharedValue(0);
@@ -360,6 +354,9 @@ export default function BentPaths() {
         // Path body: glide through its waypoints (one per subdivision), playing
         // each note as it arrives. Its rendered position rides px/py.
         if (b.path && b.path.length >= 2 && b.pathT0 != null) {
+          // While this path is being plucked (and twanging), the body is frozen and
+          // silent — faded out — until the twang settles and it resumes.
+          if (bendActiveRef.current?.bodyId === b.id) continue;
           const N = b.path.length;
           const P = periodMs(b.subdivision, bpm);
           const stepF = (now - b.pathT0) / P;
@@ -371,18 +368,8 @@ export default function BentPaths() {
           if (fx) {
             const y0 = yForMidiExt(b.path[i0].midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
             const y1 = yForMidiExt(b.path[i1].midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
-            let px = b.path[i0].x + (b.path[i1].x - b.path[i0].x) * frac;
-            let py = y0 + (y1 - y0) * frac;
-            // If this path is being plucked, ride the bend: add the deformation at
-            // the body's continuous arc index (i0 + frac).
-            const bnd = bendActiveRef.current;
-            if (bnd && bnd.bodyId === b.id) {
-              const e = pluckEnv(i0 + frac, bnd.gi, N - 1) * bendS.value;
-              px += bendOx.value * e;
-              py += bendOy.value * e;
-            }
-            fx.px.value = px;
-            fx.py.value = py;
+            fx.px.value = b.path[i0].x + (b.path[i1].x - b.path[i0].x) * frac;
+            fx.py.value = y0 + (y1 - y0) * frac;
           }
           // pathT0 is part of the signature: (re)starting a path (Move/Extend
           // resets pathT0) re-aligns the scheduler instead of waiting for `step`
@@ -476,13 +463,13 @@ export default function BentPaths() {
     return null;
   };
   // A grab on a path's LENGTH (an open segment between waypoints) for plucking. Returns
-  // the body, the continuous grab index (j + t), and the rest position of that point.
+  // the body, the segment index j, and the rest position of the grabbed point.
   const hitPathSegment = (
     x: number,
     y: number
-  ): { bodyId: number; gi: number; gx: number; gy: number } | null => {
+  ): { bodyId: number; j: number; gx: number; gy: number } | null => {
     const bs = bodiesRef.current;
-    let best: { bodyId: number; gi: number; gx: number; gy: number } | null = null;
+    let best: { bodyId: number; j: number; gx: number; gy: number } | null = null;
     let bestD = BEND_HIT;
     for (let i = bs.length - 1; i >= 0; i--) {
       const b = bs[i];
@@ -494,7 +481,7 @@ export default function BentPaths() {
         const pr = projectToSeg(x, y, b.path[j].x, ay, b.path[j + 1].x, by);
         if (pr.d < bestD) {
           bestD = pr.d;
-          best = { bodyId: b.id, gi: j + pr.t, gx: pr.cx, gy: pr.cy };
+          best = { bodyId: b.id, j, gx: pr.cx, gy: pr.cy };
         }
       }
     }
@@ -610,7 +597,16 @@ export default function BentPaths() {
     const id = hitId(x, y);
     if (id != null) beginLayingFor(id);
   };
-  const clearBend = () => {
+  // After the twang settles: resume the body exactly where it froze and fade it in.
+  const resumeAfterTwang = () => {
+    const bnd = bendActiveRef.current;
+    if (bnd) {
+      setBodies((prev) =>
+        prev.map((b) => (b.id === bnd.bodyId ? { ...b, pathT0: clock.value - bendPhaseRef.current } : b))
+      );
+      const fx = fxRef.current.get(bnd.bodyId);
+      if (fx) fx.op.value = withTiming(1, { duration: 220 });
+    }
     bendActiveRef.current = null;
     setBend(null);
   };
@@ -631,13 +627,19 @@ export default function BentPaths() {
     }
     const seg = hitPathSegment(x, y);
     if (seg) {
-      bendActiveRef.current = { bodyId: seg.bodyId, gi: seg.gi };
+      if (bendActiveRef.current) resumeAfterTwang(); // clean up any still-twanging pluck first
+      bendActiveRef.current = { bodyId: seg.bodyId, j: seg.j };
       bendRestRef.current = { gx: seg.gx, gy: seg.gy };
       bendOx.value = 0;
       bendOy.value = 0;
       bendS.value = 1; // held taut (also cancels any prior twang spring)
+      // Freeze the body's clock phase so it can resume exactly here, and fade it out.
+      const b = bodiesRef.current.find((bb) => bb.id === seg.bodyId);
+      if (b && b.pathT0 != null) bendPhaseRef.current = clock.value - b.pathT0;
+      const fx = fxRef.current.get(seg.bodyId);
+      if (fx) fx.op.value = withTiming(0, { duration: 130 });
       dragModeRef.current = 'bend';
-      setBend({ bodyId: seg.bodyId, gi: seg.gi });
+      setBend({ bodyId: seg.bodyId, j: seg.j, gx: seg.gx, gy: seg.gy });
       return;
     }
     const id = hitStaticBody(x, y);
@@ -684,11 +686,20 @@ export default function BentPaths() {
   const onDragEnd = () => {
     if (dragModeRef.current === 'bend') {
       dragModeRef.current = null;
+      // Sound the two notes at the ends of the plucked segment.
+      const bnd = bendActiveRef.current;
+      if (bnd) {
+        const b = bodiesRef.current.find((bb) => bb.id === bnd.bodyId);
+        const a = b?.path?.[bnd.j];
+        const c = b?.path?.[bnd.j + 1];
+        if (b && a) emitNote(b.id, a.midi, a.x);
+        if (b && c) emitNote(b.id, c.midi, c.x);
+      }
       // Twang: spring the pluck amount back to 0, underdamped so it whips past and
-      // oscillates. The body keeps riding it (scheduler reads bendS) until it settles.
+      // oscillates; when it settles, the body resumes and fades back in.
       bendS.value = withSpring(0, { damping: 4.5, stiffness: 260, mass: 0.5 }, (finished) => {
         'worklet';
-        if (finished) runOnJS(clearBend)();
+        if (finished) runOnJS(resumeAfterTwang)();
       });
       return;
     }
@@ -848,7 +859,9 @@ export default function BentPaths() {
                     <BentPathLine
                       key={`p${b.id}`}
                       points={b.path!}
-                      gi={bend.gi}
+                      j={bend.j}
+                      gx={bend.gx}
+                      gy={bend.gy}
                       full={fullLadder}
                       scroll={scroll}
                       visible={visibleCount}
@@ -1251,13 +1264,14 @@ function PathLine({
   );
 }
 
-// The path while it's being plucked: a live derived stroke that displaces each
-// waypoint by the plucked-string envelope (peaked at the grab index `gi`) times the
-// finger offset and the animated pluck amount. Rest positions + per-waypoint
-// envelope are precomputed on JS; the worklet just does the arithmetic each frame.
+// The path while it's being plucked: only the grabbed segment (j → j+1) bends. Its
+// two endpoints stay pinned; a grab vertex is inserted between them and displaced by
+// the finger offset times the animated pluck amount (which twangs to 0 on release).
 function BentPathLine({
   points,
-  gi,
+  j,
+  gx,
+  gy,
   full,
   scroll,
   visible,
@@ -1267,7 +1281,9 @@ function BentPathLine({
   bendOy,
 }: {
   points: Waypoint[];
-  gi: number;
+  j: number;
+  gx: number;
+  gy: number;
   full: number[];
   scroll: number;
   visible: number;
@@ -1280,25 +1296,18 @@ function BentPathLine({
     () => points.map((wp) => ({ x: wp.x, y: yForMidiExt(wp.midi, full, scroll, visible, height) })),
     [points, full, scroll, visible, height]
   );
-  const env = useMemo(() => {
-    const last = points.length - 1;
-    return points.map((_, k) => pluckEnv(k, gi, last));
-  }, [points, gi]);
 
   const path = useDerivedValue(() => {
     const p = Skia.Path.Make();
-    const s = bendS.value;
-    const ox = bendOx.value;
-    const oy = bendOy.value;
+    const dx = bendOx.value * bendS.value;
+    const dy = bendOy.value * bendS.value;
     for (let k = 0; k < rest.length; k++) {
-      const e = env[k] * s;
-      const x = rest[k].x + ox * e;
-      const y = rest[k].y + oy * e;
-      if (k === 0) p.moveTo(x, y);
-      else p.lineTo(x, y);
+      if (k === 0) p.moveTo(rest[k].x, rest[k].y);
+      else p.lineTo(rest[k].x, rest[k].y);
+      if (k === j) p.lineTo(gx + dx, gy + dy); // the plucked grab vertex, after wp[j]
     }
     return p;
-  }, [rest, env]);
+  }, [rest, j, gx, gy]);
 
   return <Path path={path} style="stroke" strokeWidth={1.6} strokeJoin="round" color="rgba(255,255,255,0.65)" />;
 }
@@ -1319,8 +1328,9 @@ function BodyView({
   const pulse = useSharedValue(0);
   const px = useSharedValue(isPath && body.path ? body.path[0].x : body.x);
   const py = useSharedValue(y0);
+  const op = useSharedValue(1); // fades to 0 while this body's path is being plucked
   useEffect(() => {
-    register(body.id, { pulse, px, py });
+    register(body.id, { pulse, px, py, op });
     return () => unregister(body.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [body.id]);
@@ -1332,20 +1342,22 @@ function BodyView({
   const r = useDerivedValue(() => BODY_R * (1 + 0.14 * pulse.value));
   const muted = !!body.muted;
   const glowOpacity = useDerivedValue(
-    () => (muted ? 0.0 : (body.playing ? 0.2 : 0.0) + 0.45 * pulse.value),
+    () => op.value * (muted ? 0.0 : (body.playing ? 0.2 : 0.0) + 0.45 * pulse.value),
     [body.playing, muted]
   );
+  const coreOpacity = useDerivedValue(() => op.value * (muted ? 0.3 : 1), [muted]);
+  const ringOpacity = useDerivedValue(() => op.value * (muted ? 0.22 : 0.5), [muted]);
 
-  // A muted body reads dimmer — still on screen (and gliding), just silent.
+  // A muted body reads dimmer; a plucked one fades out entirely (op) and back in.
   return (
     <Group>
       <Circle c={center} r={BODY_R * 1.1} color="white" opacity={glowOpacity}>
         <Blur blur={BODY_R * 0.5} />
       </Circle>
       {body.playing ? (
-        <Circle c={center} r={r} color="white" opacity={muted ? 0.3 : 1} />
+        <Circle c={center} r={r} color="white" opacity={coreOpacity} />
       ) : (
-        <Circle c={center} r={r} style="stroke" strokeWidth={2} color="white" opacity={muted ? 0.22 : 0.5} />
+        <Circle c={center} r={r} style="stroke" strokeWidth={2} color="white" opacity={ringOpacity} />
       )}
     </Group>
   );

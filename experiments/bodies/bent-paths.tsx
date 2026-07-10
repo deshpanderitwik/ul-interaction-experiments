@@ -612,7 +612,7 @@ export default function BentPaths() {
       prev.map((b) => (b.id === bnd.bodyId ? { ...b, pathT0: clock.value - bendPhaseRef.current } : b))
     );
     const fx = fxRef.current.get(bnd.bodyId);
-    if (fx) fx.op.value = withTiming(1, { duration: 130 });
+    if (fx) fx.op.value = withTiming(1, { duration: 340, easing: Easing.out(Easing.cubic) });
     bendActiveRef.current = null;
   };
   // When the twang finally settles: drop the bent rendering (back to the plain path).
@@ -653,7 +653,7 @@ export default function BentPaths() {
       const b = bodiesRef.current.find((bb) => bb.id === seg.bodyId);
       if (b && b.pathT0 != null) bendPhaseRef.current = clock.value - b.pathT0;
       const fx = fxRef.current.get(seg.bodyId);
-      if (fx) fx.op.value = withTiming(0, { duration: 130 });
+      if (fx) fx.op.value = withTiming(0, { duration: 300, easing: Easing.inOut(Easing.cubic) });
       dragModeRef.current = 'bend';
       setBend({ bodyId: seg.bodyId, j: seg.j, t: seg.t });
       return;
@@ -1409,7 +1409,10 @@ function BodyView({
     () => (isPath ? { x: px.value, y: py.value } : { x: body.x, y: y0 }),
     [isPath, body.x, y0]
   );
-  const r = useDerivedValue(() => BODY_R * (1 + 0.14 * pulse.value));
+  // Fade couples opacity with a gentle scale so the body implodes out / blooms in
+  // rather than hard-cutting (op is 1 normally, so no change outside a pluck).
+  const r = useDerivedValue(() => BODY_R * (1 + 0.14 * pulse.value) * (0.45 + 0.55 * op.value));
+  const glowR = useDerivedValue(() => BODY_R * 1.1 * (0.45 + 0.55 * op.value));
   const muted = !!body.muted;
   const glowOpacity = useDerivedValue(
     () => op.value * (muted ? 0.0 : (body.playing ? 0.2 : 0.0) + 0.45 * pulse.value),
@@ -1421,7 +1424,7 @@ function BodyView({
   // A muted body reads dimmer; a plucked one fades out entirely (op) and back in.
   return (
     <Group>
-      <Circle c={center} r={BODY_R * 1.1} color="white" opacity={glowOpacity}>
+      <Circle c={center} r={glowR} color="white" opacity={glowOpacity}>
         <Blur blur={BODY_R * 0.5} />
       </Circle>
       {body.playing ? (

@@ -597,19 +597,20 @@ export default function BentPaths() {
     const id = hitId(x, y);
     if (id != null) beginLayingFor(id);
   };
-  // After the twang settles: resume the body exactly where it froze and fade it in.
-  const resumeAfterTwang = () => {
+  // Resume the body right away (on release): unfreeze it exactly where it froze and
+  // fade it back in — the string keeps twanging on its own behind it.
+  const resumeBody = () => {
     const bnd = bendActiveRef.current;
-    if (bnd) {
-      setBodies((prev) =>
-        prev.map((b) => (b.id === bnd.bodyId ? { ...b, pathT0: clock.value - bendPhaseRef.current } : b))
-      );
-      const fx = fxRef.current.get(bnd.bodyId);
-      if (fx) fx.op.value = withTiming(1, { duration: 220 });
-    }
+    if (!bnd) return;
+    setBodies((prev) =>
+      prev.map((b) => (b.id === bnd.bodyId ? { ...b, pathT0: clock.value - bendPhaseRef.current } : b))
+    );
+    const fx = fxRef.current.get(bnd.bodyId);
+    if (fx) fx.op.value = withTiming(1, { duration: 130 });
     bendActiveRef.current = null;
-    setBend(null);
   };
+  // When the twang finally settles: drop the bent rendering (back to the plain path).
+  const endBendRender = () => setBend(null);
   // A drag grabs (in priority order) a path waypoint, then a path's length (to
   // bend/pluck it), then a static body, else it scrolls the window.
   const dragModeRef = useRef<'body' | 'waypoint' | 'bend' | 'scroll' | null>(null);
@@ -627,7 +628,6 @@ export default function BentPaths() {
     }
     const seg = hitPathSegment(x, y);
     if (seg) {
-      if (bendActiveRef.current) resumeAfterTwang(); // clean up any still-twanging pluck first
       bendActiveRef.current = { bodyId: seg.bodyId, j: seg.j };
       bendRestRef.current = { gx: seg.gx, gy: seg.gy };
       bendOx.value = 0;
@@ -695,11 +695,13 @@ export default function BentPaths() {
         if (b && a) emitNote(b.id, a.midi, a.x);
         if (b && c) emitNote(b.id, c.midi, c.x);
       }
-      // Twang: spring the pluck amount back to 0, underdamped so it whips past and
-      // oscillates; when it settles, the body resumes and fades back in.
+      // Body comes back immediately; the string keeps twanging behind it. The spring
+      // is underdamped so the segment whips past and oscillates; when it finally
+      // settles we drop the bent rendering.
+      resumeBody();
       bendS.value = withSpring(0, { damping: 4.5, stiffness: 260, mass: 0.5 }, (finished) => {
         'worklet';
-        if (finished) runOnJS(resumeAfterTwang)();
+        if (finished) runOnJS(endBendRender)();
       });
       return;
     }
@@ -1301,15 +1303,30 @@ function BentPathLine({
     const p = Skia.Path.Make();
     const dx = bendOx.value * bendS.value;
     const dy = bendOy.value * bendS.value;
-    for (let k = 0; k < rest.length; k++) {
-      if (k === 0) p.moveTo(rest[k].x, rest[k].y);
-      else p.lineTo(rest[k].x, rest[k].y);
-      if (k === j) p.lineTo(gx + dx, gy + dy); // the plucked grab vertex, after wp[j]
+    p.moveTo(rest[0].x, rest[0].y);
+    for (let k = 1; k < rest.length; k++) {
+      if (k - 1 === j) {
+        // The plucked segment bows as a smooth curve (rubber band): a quadratic whose
+        // control point places the curve's midpoint on the displaced grab point.
+        const cx = 2 * (gx + dx) - (rest[k - 1].x + rest[k].x) / 2;
+        const cy = 2 * (gy + dy) - (rest[k - 1].y + rest[k].y) / 2;
+        p.quadTo(cx, cy, rest[k].x, rest[k].y);
+      } else {
+        p.lineTo(rest[k].x, rest[k].y);
+      }
     }
     return p;
   }, [rest, j, gx, gy]);
 
-  return <Path path={path} style="stroke" strokeWidth={1.6} strokeJoin="round" color="rgba(255,255,255,0.65)" />;
+  return (
+    <Group>
+      <Path path={path} style="stroke" strokeWidth={1.6} strokeJoin="round" color="rgba(255,255,255,0.65)" />
+      {/* anchor handles stay put (pinned) through the twang */}
+      {rest.map((pt, k) => (
+        <Circle key={k} cx={pt.x} cy={pt.y} r={HANDLE_R} style="stroke" strokeWidth={2} color="rgba(255,255,255,0.6)" />
+      ))}
+    </Group>
+  );
 }
 
 function BodyView({

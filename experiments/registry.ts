@@ -93,6 +93,12 @@ export const experiments: Experiment[] = [
         blurb: 'Radial Drop, but press-drag a path’s length to pluck it like a string: it bows to your finger and the body rides the bend, then snaps back with a twang on release.',
         load: () => import('./bodies/bent-paths'),
       },
+      {
+        id: 'path-explorations',
+        title: 'Path Explorations',
+        blurb: 'Bent Paths, plus interior waypoints you can flip to “dynamic” — each cycle they wander to a neighboring note (within ±2), so the body improvises variations around the path.',
+        load: () => import('./bodies/path-explorations'),
+      },
     ],
   },
   {

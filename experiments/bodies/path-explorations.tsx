@@ -113,7 +113,10 @@ type Placing = {
 // runs clockwise with the bottom-center left empty.
 function radialItems(p: Placing): RItem[] {
   if (p.mode === 'subpt') {
-    return [{ key: 'del', label: '✕', sel: DELETE, danger: true }]; // sub-point: delete only
+    return [
+      { key: 'ext', label: EXTEND_ICON, sel: EXTEND }, // append more points to the sub-path
+      { key: 'del', label: '✕', sel: DELETE, danger: true },
+    ];
   }
   if (p.mode === 'dyn') {
     return [
@@ -738,6 +741,7 @@ export default function PathExplorations() {
     placingRef.current = null;
     if (p.mode === 'subpt') {
       if (p.spt && sub === DELETE) deleteSubPoint(p.spt);
+      else if (p.spt && sub === EXTEND) beginSubLaying(p.spt.bodyId, p.spt.wpIndex); // append more points
       setClosing(true);
       return;
     }

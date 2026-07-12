@@ -603,14 +603,28 @@ export default function PathExplorations() {
     return null;
   };
   // A waypoint handle under the finger (for reshaping a laid path). Topmost first.
+  // A sub-path node is grabbed at its FIXED home (where its origin handle is drawn),
+  // not its current animated spot — otherwise the origin is a moving target and the
+  // grab falls through to the bend/segment test. Other nodes are grabbed where drawn.
   const hitWaypoint = (x: number, y: number): { bodyId: number; index: number } | null => {
     const bs = bodiesRef.current;
     for (let i = bs.length - 1; i >= 0; i--) {
       const b = bs[i];
       if (!(b.path && b.path.length >= 2)) continue;
       for (let j = 0; j < b.path.length; j++) {
-        const pos = wpPosEff(b.id, b.path[j], j);
-        if (pos && Math.hypot(x - pos.x, y - pos.y) <= HANDLE_HIT) return { bodyId: b.id, index: j };
+        const wp = b.path[j];
+        let hx: number;
+        let hy: number | null;
+        if (wp.sub && wp.sub.length) {
+          hx = wp.x;
+          hy = wpY(wp.midi);
+        } else {
+          const pos = wpPosEff(b.id, wp, j);
+          if (!pos) continue;
+          hx = pos.x;
+          hy = pos.y;
+        }
+        if (hy != null && Math.hypot(x - hx, y - hy) <= HANDLE_HIT) return { bodyId: b.id, index: j };
       }
     }
     return null;

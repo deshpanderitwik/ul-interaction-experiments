@@ -1728,20 +1728,25 @@ function SubGhost({
   visible: number;
   height: number;
 }) {
+  // The full point list, origin included, so every point on the trajectory gets a handle.
+  const pts = useMemo(() => [home, ...sub], [home, sub]);
   const skPath = useMemo(() => {
     const p = Skia.Path.Make();
-    p.moveTo(home.x, yForMidiExt(home.midi, full, scroll, visible, height));
-    sub.forEach((sp) => p.lineTo(sp.x, yForMidiExt(sp.midi, full, scroll, visible, height)));
+    pts.forEach((pt, i) => {
+      const y = yForMidiExt(pt.midi, full, scroll, visible, height);
+      if (i === 0) p.moveTo(pt.x, y);
+      else p.lineTo(pt.x, y);
+    });
     return p;
-  }, [home, sub, full, scroll, visible, height]);
+  }, [pts, full, scroll, visible, height]);
   return (
     <Group>
       <Path path={skPath} style="stroke" strokeWidth={1.2} strokeJoin="round" color="rgba(255,255,255,0.18)" />
-      {sub.map((sp, i) => (
+      {pts.map((pt, i) => (
         <Circle
           key={i}
-          cx={sp.x}
-          cy={yForMidiExt(sp.midi, full, scroll, visible, height)}
+          cx={pt.x}
+          cy={yForMidiExt(pt.midi, full, scroll, visible, height)}
           r={5}
           style="stroke"
           strokeWidth={1.5}

@@ -966,7 +966,7 @@ export default function PathExplorations() {
       setBodies((prev) =>
         prev.map((b) =>
           b.id === wp.bodyId && b.path
-            ? { ...b, path: b.path.map((p, idx) => (idx === wp.index ? { x: cx, midi } : p)) }
+            ? { ...b, path: b.path.map((p, idx) => (idx === wp.index ? { ...p, x: cx, midi } : p)) }
             : b
         )
       );

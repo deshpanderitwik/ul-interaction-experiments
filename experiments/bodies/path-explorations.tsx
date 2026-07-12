@@ -347,7 +347,7 @@ export default function PathExplorations() {
     if (hi < 0) return wp.midi;
     return full[Math.max(0, Math.min(full.length - 1, hi + off))];
   };
-  // Advance a dynamic waypoint's wander one step (±1), bounded to ±2 from home.
+  // Advance one dynamic waypoint's wander one step (±1), bounded to ±2 from home.
   const advanceWander = (bodyId: number, index: number) => {
     const key = `${bodyId}:${index}`;
     let off = dynOffRef.current.get(key) ?? 0;
@@ -355,7 +355,19 @@ export default function PathExplorations() {
     else if (off <= -2) off += 1;
     else off += Math.random() < 0.5 ? -1 : 1;
     dynOffRef.current.set(key, off);
-    setDynTick((t) => t + 1); // re-render so the node visibly hops to its new note
+  };
+  // Re-roll all of a path's dynamic nodes (called at cycle start), then re-render
+  // once so the nodes visibly hop to their new positions ahead of the body.
+  const rerollDynamic = (b: Body) => {
+    if (!b.path) return;
+    let any = false;
+    b.path.forEach((wp, i) => {
+      if (wp.dyn) {
+        advanceWander(b.id, i);
+        any = true;
+      }
+    });
+    if (any) setDynTick((t) => t + 1);
   };
 
   // Keep bodies on the current scale (snap to nearest note) when the scale changes.
@@ -421,14 +433,15 @@ export default function PathExplorations() {
           const frac = stepF - step;
           const i0 = ((step % N) + N) % N;
           const i1 = (i0 + 1) % N;
-          // On each fresh arrival at a waypoint, advance a dynamic point's wander so
-          // it plays (and the body glides to) a neighboring scale note this pass.
           const sig = `path:${b.subdivision}:${bpm}:${b.pathT0}`;
           const entry = sched.get(b.id);
           if (entry === undefined || entry.sig !== sig) sched.set(b.id, { k: step, sig });
           else if (step > entry.k) {
             sched.set(b.id, { k: step, sig });
-            if (b.path[i0].dyn) advanceWander(b.id, i0);
+            // At the start of each cycle re-roll all this path's dynamic nodes, so they
+            // move to their new spots as the cycle begins — visible before the body
+            // reaches them.
+            if (i0 === 0) rerollDynamic(b);
             if (!b.muted) emitNote(b.id, effMidi(b.id, b.path[i0], i0), b.path[i0].x);
           }
           const fx = fxRef.current.get(b.id);

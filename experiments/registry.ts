@@ -102,6 +102,14 @@ export const experiments: Experiment[] = [
     ],
   },
   {
+    id: 'drums',
+    title: 'Drums',
+    blurb: 'An eight-step kick sequencer stacked vertically: tap a step to place a kick; the playhead falls down the column, looping the bar. Hello world for drums.',
+    accent: '#ff6b6b',
+    audio: true,
+    load: () => import('./drums'),
+  },
+  {
     id: 'fence',
     title: 'Fence',
     blurb: 'A study in shaders — drag to move a glow across a live UV field.',

@@ -229,9 +229,11 @@ half4 main(float2 fragcoord) {
 }
 `)!;
 
-// dyn: wanders to a random neighbor each cycle. sub: a laid note sequence the node
-// steps through each cycle (deterministic variation). sub takes precedence over dyn.
-type Waypoint = { x: number; midi: number; dyn?: boolean; sub?: number[] };
+// dyn: wanders to a random neighbor each cycle. sub: a laid sequence of points the
+// node steps through each cycle (moving in BOTH x and pitch to exactly where each
+// point was placed). sub takes precedence over dyn.
+type SubPoint = { x: number; midi: number };
+type Waypoint = { x: number; midi: number; dyn?: boolean; sub?: SubPoint[] };
 type Body = {
   id: number;
   x: number;
@@ -343,24 +345,26 @@ export default function PathExplorations() {
     fxRef.current.delete(id);
   }, []);
 
-  // Effective note of a waypoint this cycle: a sub-path node steps through its laid
-  // note sequence; a dynamic node shifts its home note by its current wander offset;
-  // a static node stays home.
-  const effMidi = (bodyId: number, wp: Waypoint, index: number): number => {
+  // Effective position of a waypoint this cycle: a sub-path node moves to its laid
+  // point (both x and pitch, exactly where the user placed it); a dynamic node keeps
+  // its x but shifts its pitch by its current wander offset; a static node stays home.
+  const effPoint = (bodyId: number, wp: Waypoint, index: number): { x: number; midi: number } => {
     const key = `${bodyId}:${index}`;
     if (wp.sub && wp.sub.length > 0) {
       const n = wp.sub.length;
       const idx = ((subIdxRef.current.get(key) ?? 0) % n + n) % n;
-      return wp.sub[idx];
+      return { x: wp.sub[idx].x, midi: wp.sub[idx].midi };
     }
-    if (!wp.dyn) return wp.midi;
+    if (!wp.dyn) return { x: wp.x, midi: wp.midi };
     const off = dynOffRef.current.get(key) ?? 0;
-    if (off === 0) return wp.midi;
+    if (off === 0) return { x: wp.x, midi: wp.midi };
     const full = fullRef.current;
     const hi = full.indexOf(wp.midi);
-    if (hi < 0) return wp.midi;
-    return full[Math.max(0, Math.min(full.length - 1, hi + off))];
+    if (hi < 0) return { x: wp.x, midi: wp.midi };
+    return { x: wp.x, midi: full[Math.max(0, Math.min(full.length - 1, hi + off))] };
   };
+  const effMidi = (bodyId: number, wp: Waypoint, index: number): number =>
+    effPoint(bodyId, wp, index).midi;
   // Advance one dynamic waypoint's wander one step (±1), bounded to ±2 from home.
   const advanceWander = (bodyId: number, index: number) => {
     const key = `${bodyId}:${index}`;
@@ -460,15 +464,18 @@ export default function PathExplorations() {
             // move to their new spots as the cycle begins — visible before the body
             // reaches them.
             if (i0 === 0) rerollDynamic(b);
-            if (!b.muted) emitNote(b.id, effMidi(b.id, b.path[i0], i0), b.path[i0].x);
+            if (!b.muted) {
+              const ep = effPoint(b.id, b.path[i0], i0);
+              emitNote(b.id, ep.midi, ep.x);
+            }
           }
           const fx = fxRef.current.get(b.id);
           if (fx) {
-            const m0 = effMidi(b.id, b.path[i0], i0);
-            const m1 = effMidi(b.id, b.path[i1], i1);
-            const y0 = yForMidiExt(m0, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
-            const y1 = yForMidiExt(m1, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
-            fx.px.value = b.path[i0].x + (b.path[i1].x - b.path[i0].x) * frac;
+            const p0 = effPoint(b.id, b.path[i0], i0);
+            const p1 = effPoint(b.id, b.path[i1], i1);
+            const y0 = yForMidiExt(p0.midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
+            const y1 = yForMidiExt(p1.midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
+            fx.px.value = p0.x + (p1.x - p0.x) * frac;
             fx.py.value = y0 + (y1 - y0) * frac;
           }
           continue;
@@ -510,6 +517,13 @@ export default function PathExplorations() {
   // Screen y of a waypoint at its CURRENT (possibly wandered) note, so hit-tests
   // land where a dynamic node is actually drawn.
   const wpYeff = (bodyId: number, wp: Waypoint, index: number) => wpY(effMidi(bodyId, wp, index));
+  // Screen position (x + y) of a waypoint at its CURRENT effective spot, so hit-tests
+  // land where a moving (dynamic / sub-path) node is actually drawn. Null if off-window.
+  const wpPosEff = (bodyId: number, wp: Waypoint, index: number): { x: number; y: number } | null => {
+    const ep = effPoint(bodyId, wp, index);
+    const y = wpY(ep.midi);
+    return y == null ? null : { x: ep.x, y };
+  };
   // Tap/hold hit-test: a path body is hit at its gliding dot OR at any waypoint;
   // a static body at its note position. Topmost first.
   const hitId = (x: number, y: number): number | null => {
@@ -520,8 +534,8 @@ export default function PathExplorations() {
         const fx = fxRef.current.get(b.id);
         if (fx && Math.hypot(x - fx.px.value, y - fx.py.value) <= GRAB_R) return b.id;
         for (let j = 0; j < b.path.length; j++) {
-          const wy = wpYeff(b.id, b.path[j], j);
-          if (wy != null && Math.hypot(x - b.path[j].x, y - wy) <= GRAB_R) return b.id;
+          const pos = wpPosEff(b.id, b.path[j], j);
+          if (pos && Math.hypot(x - pos.x, y - pos.y) <= GRAB_R) return b.id;
         }
       } else {
         const by = wpY(b.midi);
@@ -549,8 +563,8 @@ export default function PathExplorations() {
       const b = bs[i];
       if (!(b.path && b.path.length >= 2)) continue;
       for (let j = 0; j < b.path.length; j++) {
-        const wy = wpYeff(b.id, b.path[j], j);
-        if (wy != null && Math.hypot(x - b.path[j].x, y - wy) <= HANDLE_HIT) return { bodyId: b.id, index: j };
+        const pos = wpPosEff(b.id, b.path[j], j);
+        if (pos && Math.hypot(x - pos.x, y - pos.y) <= HANDLE_HIT) return { bodyId: b.id, index: j };
       }
     }
     return null;
@@ -568,10 +582,10 @@ export default function PathExplorations() {
       const b = bs[i];
       if (!(b.path && b.path.length >= 2)) continue;
       for (let j = 0; j < b.path.length - 1; j++) {
-        const ay = wpYeff(b.id, b.path[j], j);
-        const by = wpYeff(b.id, b.path[j + 1], j + 1);
-        if (ay == null || by == null) continue;
-        const pr = projectToSeg(x, y, b.path[j].x, ay, b.path[j + 1].x, by);
+        const pa = wpPosEff(b.id, b.path[j], j);
+        const pb = wpPosEff(b.id, b.path[j + 1], j + 1);
+        if (!pa || !pb) continue;
+        const pr = projectToSeg(x, y, pa.x, pa.y, pb.x, pb.y);
         if (pr.d < bestD) {
           bestD = pr.d;
           best = { bodyId: b.id, j, t: pr.t, gx: pr.cx, gy: pr.cy };
@@ -735,7 +749,7 @@ export default function PathExplorations() {
     setLayClosing(false);
     setEditing(null);
     setSubTarget({ bodyId, index });
-    setLaying(wp?.sub && wp.sub.length ? wp.sub.map((m) => ({ x: wp.x, midi: m })) : []);
+    setLaying(wp?.sub && wp.sub.length ? wp.sub.map((sp) => ({ x: sp.x, midi: sp.midi })) : []);
   };
   // Double-tap a body → start laying its path.
   const onDoubleTap = (x: number, y: number) => {
@@ -968,7 +982,7 @@ export default function PathExplorations() {
     // The node stays home (x) but steps through these notes each cycle.
     if (st) {
       if (pts.length >= 1) {
-        const seq = pts.map((p) => p.midi);
+        const seq = pts.map((p) => ({ x: p.x, midi: p.midi }));
         setBodies((prev) =>
           prev.map((b) =>
             b.id === st.bodyId && b.path
@@ -1017,9 +1031,15 @@ export default function PathExplorations() {
   // static bodies render only when their note is in the window.
   const bodyViews = bodies.map((b) => {
     const isPath = !!(b.path && b.path.length >= 2);
-    // Effective path: dynamic waypoints render at their current wandered note, so a
-    // dynamic node visibly hops when its note changes (and the body rides the moved line).
-    const effPath = isPath ? b.path!.map((wp, i) => ({ ...wp, midi: effMidi(b.id, wp, i) })) : undefined;
+    // Effective path: dynamic/sub-path waypoints render at their current effective
+    // spot (x + note), so a moving node visibly hops to exactly where it's headed and
+    // the body rides the moved line.
+    const effPath = isPath
+      ? b.path!.map((wp, i) => {
+          const ep = effPoint(b.id, wp, i);
+          return { ...wp, x: ep.x, midi: ep.midi };
+        })
+      : undefined;
     const y0 = isPath
       ? yForMidiExt(effPath![0].midi, fullLadder, scroll, visibleCount, height)
       : yForMidi(b.midi, fullLadder, scroll, visibleCount, height);

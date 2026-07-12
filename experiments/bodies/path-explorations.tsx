@@ -88,8 +88,9 @@ const DELETE = 'delete' as const;
 const EXTEND = 'extend' as const;
 const STATIC = 'static' as const;
 const DYNAMIC = 'dynamic' as const;
+const SUBEDIT = 'subedit' as const;
 const EXTEND_ICON = '✎'; // swap freely: ✎ · ↝ · ⋯ · → · ↪
-type RadialSel = number | typeof DELETE | typeof EXTEND | typeof STATIC | typeof DYNAMIC;
+type RadialSel = number | typeof DELETE | typeof EXTEND | typeof STATIC | typeof DYNAMIC | typeof SUBEDIT;
 type RItem = { key: string; label: string; sel: RadialSel; danger?: boolean };
 // The open radial. `mode` 'sub' = subdivision/edit radial (targets a body); 'dyn' =
 // static/dynamic radial (targets an interior waypoint).
@@ -113,6 +114,7 @@ function radialItems(p: Placing): RItem[] {
     return [
       { key: 'static', label: '📌', sel: STATIC }, // pinned in place
       { key: 'dynamic', label: '🎲', sel: DYNAMIC }, // wanders each cycle
+      { key: 'subedit', label: '✏️', sel: SUBEDIT }, // lay a note sequence it steps through
     ];
   }
   const editing = p.targetId != null;
@@ -227,7 +229,9 @@ half4 main(float2 fragcoord) {
 }
 `)!;
 
-type Waypoint = { x: number; midi: number; dyn?: boolean }; // dyn: wanders each cycle
+// dyn: wanders to a random neighbor each cycle. sub: a laid note sequence the node
+// steps through each cycle (deterministic variation). sub takes precedence over dyn.
+type Waypoint = { x: number; midi: number; dyn?: boolean; sub?: number[] };
 type Body = {
   id: number;
   x: number;
@@ -277,6 +281,7 @@ export default function PathExplorations() {
   // `targetId` null = placing a new body; otherwise the radial is re-picking the
   // subdivision of that existing body.
   const [placing, setPlacing] = useState<Placing | null>(null);
+  const [subTarget, setSubTarget] = useState<{ bodyId: number; index: number } | null>(null); // node whose sub-path is being laid
   const [, setDynTick] = useState(0); // bumped when a dynamic node wanders → re-render
   const placingRef = useRef<typeof placing>(null);
   placingRef.current = placing;
@@ -308,6 +313,8 @@ export default function PathExplorations() {
   // Current wander offset (in scale-ladder steps, bounded ±2) for each dynamic
   // waypoint, keyed `${bodyId}:${index}`. Advanced by the scheduler on each pass.
   const dynOffRef = useRef<Map<string, number>>(new Map());
+  // Current step index into a sub-path node's note sequence, same keying.
+  const subIdxRef = useRef<Map<string, number>>(new Map());
 
   // Bend (pluck) state. `bend` (state) picks which body renders bent + carries the
   // plucked segment (index j) and its rest grab point; the shared values drive the
@@ -336,11 +343,18 @@ export default function PathExplorations() {
     fxRef.current.delete(id);
   }, []);
 
-  // Effective note of a waypoint = its home note shifted by its current wander
-  // offset along the scale ladder (offset is 0 for static points).
+  // Effective note of a waypoint this cycle: a sub-path node steps through its laid
+  // note sequence; a dynamic node shifts its home note by its current wander offset;
+  // a static node stays home.
   const effMidi = (bodyId: number, wp: Waypoint, index: number): number => {
+    const key = `${bodyId}:${index}`;
+    if (wp.sub && wp.sub.length > 0) {
+      const n = wp.sub.length;
+      const idx = ((subIdxRef.current.get(key) ?? 0) % n + n) % n;
+      return wp.sub[idx];
+    }
     if (!wp.dyn) return wp.midi;
-    const off = dynOffRef.current.get(`${bodyId}:${index}`) ?? 0;
+    const off = dynOffRef.current.get(key) ?? 0;
     if (off === 0) return wp.midi;
     const full = fullRef.current;
     const hi = full.indexOf(wp.midi);
@@ -362,7 +376,11 @@ export default function PathExplorations() {
     if (!b.path) return;
     let any = false;
     b.path.forEach((wp, i) => {
-      if (wp.dyn) {
+      if (wp.sub && wp.sub.length > 0) {
+        const key = `${b.id}:${i}`;
+        subIdxRef.current.set(key, (subIdxRef.current.get(key) ?? 0) + 1); // step the sequence
+        any = true;
+      } else if (wp.dyn) {
         advanceWander(b.id, i);
         any = true;
       }
@@ -606,17 +624,23 @@ export default function PathExplorations() {
     if (!p) return;
     placingRef.current = null;
     if (p.mode === 'dyn') {
-      if (p.wp && (sub === STATIC || sub === DYNAMIC)) {
+      const wp = p.wp;
+      if (wp && sub === SUBEDIT) {
+        beginSubLaying(wp.bodyId, wp.index); // lay a note sequence for this node
+        setClosing(true);
+        return;
+      }
+      if (wp && (sub === STATIC || sub === DYNAMIC)) {
         const on = sub === DYNAMIC;
-        const wp = p.wp;
         setBodies((prev) =>
           prev.map((b) =>
             b.id === wp.bodyId && b.path
-              ? { ...b, path: b.path.map((w, k) => (k === wp.index ? { ...w, dyn: on } : w)) }
+              ? { ...b, path: b.path.map((w, k) => (k === wp.index ? { ...w, dyn: on, sub: undefined } : w)) }
               : b
           )
         );
-        if (!on) dynOffRef.current.delete(`${wp.bodyId}:${wp.index}`); // settle back home
+        dynOffRef.current.delete(`${wp.bodyId}:${wp.index}`); // settle back home
+        subIdxRef.current.delete(`${wp.bodyId}:${wp.index}`);
       }
       setClosing(true);
       return;
@@ -669,12 +693,9 @@ export default function PathExplorations() {
   // Static / dynamic radial for an interior waypoint.
   const openDynRadial = (x: number, y: number, bodyId: number, index: number) => {
     const { cx, cy } = clampRadialCenter(x, y, widthRef.current, heightRef.current);
-    const b = bodiesRef.current.find((bb) => bb.id === bodyId);
-    const on = !!b?.path?.[index]?.dyn;
-    openRadialWith(
-      { x, y, cx, cy, mode: 'dyn', targetId: null, hasPath: false, wp: { bodyId, index } },
-      on ? DYNAMIC : STATIC
-    );
+    const wp = bodiesRef.current.find((bb) => bb.id === bodyId)?.path?.[index];
+    const seed = wp?.sub && wp.sub.length ? SUBEDIT : wp?.dyn ? DYNAMIC : STATIC;
+    openRadialWith({ x, y, cx, cy, mode: 'dyn', targetId: null, hasPath: false, wp: { bodyId, index } }, seed);
   };
   // Long-press: a terminal waypoint (or the body) opens the subdivision radial; an
   // interior waypoint opens the static/dynamic radial; empty grid places a new body.
@@ -702,6 +723,19 @@ export default function PathExplorations() {
     setLayClosing(false);
     setEditing(id);
     setLaying(b.path && b.path.length >= 2 ? [...b.path] : [{ x: b.x, midi: b.midi }]);
+  };
+  // Start laying an interior node's sub-path (a note sequence it steps through each
+  // cycle). Uses the same Done/Cancel bar + tap-to-lay catcher as a body path, but
+  // `subTarget` (not `editing`) marks it so confirm applies the notes to that node.
+  // Seeded with the node's existing sub notes (stacked at its x) so you can extend
+  // them, else empty.
+  const beginSubLaying = (bodyId: number, index: number) => {
+    const wp = bodiesRef.current.find((bb) => bb.id === bodyId)?.path?.[index];
+    laySeqRef.current += 1; // fresh mount → re-run the buttons' rise-in
+    setLayClosing(false);
+    setEditing(null);
+    setSubTarget({ bodyId, index });
+    setLaying(wp?.sub && wp.sub.length ? wp.sub.map((m) => ({ x: wp.x, midi: m })) : []);
   };
   // Double-tap a body → start laying its path.
   const onDoubleTap = (x: number, y: number) => {
@@ -918,15 +952,35 @@ export default function PathExplorations() {
     if (laying == null) return;
     setLaying(null);
     setEditing(null);
+    setSubTarget(null);
     setLayClosing(true);
   };
   const confirmLaying = () => {
     if (laying == null) return;
     const pts = laying;
+    const st = subTarget;
     const targetId = editing;
     setLaying(null);
     setEditing(null);
+    setSubTarget(null);
     setLayClosing(true);
+    // Laying a node's sub-path: capture the tapped notes as its sequence (>=1 note).
+    // The node stays home (x) but steps through these notes each cycle.
+    if (st) {
+      if (pts.length >= 1) {
+        const seq = pts.map((p) => p.midi);
+        setBodies((prev) =>
+          prev.map((b) =>
+            b.id === st.bodyId && b.path
+              ? { ...b, path: b.path.map((w, k) => (k === st.index ? { ...w, sub: seq, dyn: false } : w)) }
+              : b
+          )
+        );
+        subIdxRef.current.delete(`${st.bodyId}:${st.index}`); // restart the sequence from the top
+        dynOffRef.current.delete(`${st.bodyId}:${st.index}`);
+      }
+      return;
+    }
     if (pts.length >= 2) {
       setBodies((prev) => prev.map((b) => (b.id === targetId ? { ...b, path: pts, pathT0: clock.value } : b)));
     }
@@ -1024,7 +1078,8 @@ export default function PathExplorations() {
                       dashed={
                         placing?.targetId === b.id ||
                         placing?.wp?.bodyId === b.id ||
-                        (laying != null && editing === b.id)
+                        (laying != null && editing === b.id) ||
+                        subTarget?.bodyId === b.id
                       }
                     />
                   )
@@ -1096,7 +1151,7 @@ export default function PathExplorations() {
             kind="done"
             index={0}
             count={2}
-            disabled={laying != null && laying.length < 2}
+            disabled={laying != null && laying.length < (subTarget ? 1 : 2)}
             closing={laying == null}
             onPress={confirmLaying}
             onClosed={onLayClosed} // index 0 lands last on the way out → owns the unmount
@@ -1400,6 +1455,15 @@ function PathLine({
             if (terminal) {
               // Terminals: solid discs — long-press for the subdivision / move radial.
               return <Circle key={i} cx={wp.x} cy={cy} r={HANDLE_R} color="rgba(255,255,255,0.85)" />;
+            }
+            if (wp.sub && wp.sub.length) {
+              // Sub-path node: concentric rings — it steps through a laid note sequence.
+              return (
+                <Group key={i}>
+                  <Circle cx={wp.x} cy={cy} r={HANDLE_R} style="stroke" strokeWidth={2} color="rgba(255,255,255,0.6)" />
+                  <Circle cx={wp.x} cy={cy} r={HANDLE_R * 0.5} style="stroke" strokeWidth={1.5} color="rgba(255,255,255,0.8)" />
+                </Group>
+              );
             }
             if (wp.dyn) {
               // Dynamic interior point: a filled dot inside its ring — it wanders.

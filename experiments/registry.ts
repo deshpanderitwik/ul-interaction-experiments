@@ -96,7 +96,7 @@ export const experiments: Experiment[] = [
       {
         id: 'path-explorations',
         title: 'Path Explorations',
-        blurb: 'Bent Paths, plus interior waypoints you can flip to “dynamic” — each cycle they wander to a neighboring note (within ±2), so the body improvises variations around the path.',
+        blurb: 'Bent Paths, plus interior waypoints you can make “dynamic” (each cycle they wander to a neighboring note) or hand a laid sub-sequence of notes to step through — so the body improvises variations around the path.',
         load: () => import('./bodies/path-explorations'),
       },
     ],

@@ -231,7 +231,8 @@ half4 main(float2 fragcoord) {
 
 // dyn: wanders to a random neighbor each cycle. sub: a laid sequence of points the
 // node steps through each cycle (moving in BOTH x and pitch to exactly where each
-// point was placed). sub takes precedence over dyn.
+// point was placed) — cycling home → point1 → point2 → … → home, so it always
+// returns to where the sub-path started. sub takes precedence over dyn.
 type SubPoint = { x: number; midi: number };
 type Waypoint = { x: number; midi: number; dyn?: boolean; sub?: SubPoint[] };
 type Body = {
@@ -358,15 +359,18 @@ export default function PathExplorations() {
     nodeAnimRef.current.delete(id);
   }, []);
 
-  // Effective position of a waypoint this cycle: a sub-path node moves to its laid
-  // point (both x and pitch, exactly where the user placed it); a dynamic node keeps
-  // its x but shifts its pitch by its current wander offset; a static node stays home.
+  // Effective position of a waypoint this cycle: a sub-path node steps through its
+  // home point THEN each laid point (so it always returns to where the sub-path
+  // started), moving in both x and pitch to exactly where each point sits; a dynamic
+  // node keeps its x but shifts its pitch by its wander offset; a static node stays home.
   const effPoint = (bodyId: number, wp: Waypoint, index: number): { x: number; midi: number } => {
     const key = `${bodyId}:${index}`;
     if (wp.sub && wp.sub.length > 0) {
-      const n = wp.sub.length;
+      const n = wp.sub.length + 1; // step 0 = home, steps 1..n = the laid points
       const idx = ((subIdxRef.current.get(key) ?? 0) % n + n) % n;
-      return { x: wp.sub[idx].x, midi: wp.sub[idx].midi };
+      if (idx === 0) return { x: wp.x, midi: wp.midi };
+      const sp = wp.sub[idx - 1];
+      return { x: sp.x, midi: sp.midi };
     }
     if (!wp.dyn) return { x: wp.x, midi: wp.midi };
     const off = dynOffRef.current.get(key) ?? 0;

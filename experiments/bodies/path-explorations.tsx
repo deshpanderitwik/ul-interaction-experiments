@@ -93,16 +93,18 @@ const EXTEND_ICON = '✎'; // swap freely: ✎ · ↝ · ⋯ · → · ↪
 type RadialSel = number | typeof DELETE | typeof EXTEND | typeof STATIC | typeof DYNAMIC | typeof SUBEDIT;
 type RItem = { key: string; label: string; sel: RadialSel; danger?: boolean };
 // The open radial. `mode` 'sub' = subdivision/edit radial (targets a body); 'dyn' =
-// static/dynamic radial (targets an interior waypoint).
+// static/dynamic radial (targets an interior waypoint); 'subpt' = delete-only radial
+// for a single sub-path point.
 type Placing = {
   x: number;
   y: number;
   cx: number;
   cy: number;
-  mode: 'sub' | 'dyn';
+  mode: 'sub' | 'dyn' | 'subpt';
   targetId: number | null; // sub: body id (null = placing a new body)
   hasPath: boolean; // sub
   wp?: { bodyId: number; index: number }; // dyn: the waypoint being edited
+  spt?: { bodyId: number; wpIndex: number; subIndex: number }; // subpt: the point being edited
 };
 // The wedges on the ring. Editing pins the control wedges (✎ extend when the body
 // has a path, then ✕ delete) at the bottom center; the subdivisions then fill the
@@ -110,6 +112,9 @@ type Placing = {
 // Placing (no controls) uses the same ordering, so "1" sits at the bottom-left and
 // runs clockwise with the bottom-center left empty.
 function radialItems(p: Placing): RItem[] {
+  if (p.mode === 'subpt') {
+    return [{ key: 'del', label: '✕', sel: DELETE, danger: true }]; // sub-point: delete only
+  }
   if (p.mode === 'dyn') {
     return [
       { key: 'static', label: '📌', sel: STATIC }, // pinned in place
@@ -610,6 +615,28 @@ export default function PathExplorations() {
     }
     return null;
   };
+  // A sub-path point handle under the finger (draggable to reshape a node's sub-path;
+  // long-press for delete-only). Topmost first.
+  const hitSubPoint = (
+    x: number,
+    y: number
+  ): { bodyId: number; wpIndex: number; subIndex: number } | null => {
+    const bs = bodiesRef.current;
+    for (let i = bs.length - 1; i >= 0; i--) {
+      const b = bs[i];
+      if (!(b.path && b.path.length >= 2)) continue;
+      for (let wi = 0; wi < b.path.length; wi++) {
+        const sub = b.path[wi].sub;
+        if (!sub) continue;
+        for (let si = 0; si < sub.length; si++) {
+          const sy = wpY(sub[si].midi);
+          if (sy != null && Math.hypot(x - sub[si].x, y - sy) <= HANDLE_HIT)
+            return { bodyId: b.id, wpIndex: wi, subIndex: si };
+        }
+      }
+    }
+    return null;
+  };
   // A grab on a path's LENGTH (an open segment between waypoints) for plucking. Returns
   // the body, the segment index j, and the rest position of the grabbed point.
   const hitPathSegment = (
@@ -651,6 +678,23 @@ export default function PathExplorations() {
         : [...prev, { id: idRef.current++, x, midi: midiAtY(y), subdivision, playing: true }]
     );
   };
+  // Remove one sub-path point. If it was the node's last, the node reverts to static.
+  const deleteSubPoint = (spt: { bodyId: number; wpIndex: number; subIndex: number }) => {
+    setBodies((prev) =>
+      prev.map((b) => {
+        if (b.id !== spt.bodyId || !b.path) return b;
+        return {
+          ...b,
+          path: b.path.map((wp, wi) => {
+            if (wi !== spt.wpIndex || !wp.sub) return wp;
+            const nextSub = wp.sub.filter((_, si) => si !== spt.subIndex);
+            return nextSub.length > 0 ? { ...wp, sub: nextSub } : { ...wp, sub: undefined };
+          }),
+        };
+      })
+    );
+    subIdxRef.current.delete(`${spt.bodyId}:${spt.wpIndex}`); // restart the sequence
+  };
   // While the placing long-press is held, track which wedge the finger is over.
   const updateHover = (fx: number, fy: number) => {
     const p = placingRef.current;
@@ -678,6 +722,11 @@ export default function PathExplorations() {
     const sub = hoverRef.current;
     if (!p) return;
     placingRef.current = null;
+    if (p.mode === 'subpt') {
+      if (p.spt && sub === DELETE) deleteSubPoint(p.spt);
+      setClosing(true);
+      return;
+    }
     if (p.mode === 'dyn') {
       const wp = p.wp;
       if (wp && sub === SUBEDIT) {
@@ -752,10 +801,25 @@ export default function PathExplorations() {
     const seed = wp?.sub && wp.sub.length ? SUBEDIT : wp?.dyn ? DYNAMIC : STATIC;
     openRadialWith({ x, y, cx, cy, mode: 'dyn', targetId: null, hasPath: false, wp: { bodyId, index } }, seed);
   };
-  // Long-press: a terminal waypoint (or the body) opens the subdivision radial; an
-  // interior waypoint opens the static/dynamic radial; empty grid places a new body.
+  // Delete-only radial for a single sub-path point (its only long-press action).
+  const openSubPtRadial = (
+    x: number,
+    y: number,
+    spt: { bodyId: number; wpIndex: number; subIndex: number }
+  ) => {
+    const { cx, cy } = clampRadialCenter(x, y, widthRef.current, heightRef.current);
+    openRadialWith({ x, y, cx, cy, mode: 'subpt', targetId: null, hasPath: false, spt }, null);
+  };
+  // Long-press: a sub-path point opens delete-only; a terminal waypoint (or the body)
+  // opens the subdivision radial; an interior waypoint opens the static/dynamic radial;
+  // empty grid places a new body.
   const onLongPress = (x: number, y: number) => {
     if (layingRef.current) return;
+    const spt = hitSubPoint(x, y);
+    if (spt) {
+      openSubPtRadial(x, y, spt);
+      return;
+    }
     const wp = hitWaypoint(x, y);
     if (wp) {
       const b = bodiesRef.current.find((bb) => bb.id === wp.bodyId);
@@ -814,11 +878,19 @@ export default function PathExplorations() {
   const endBendRender = () => setBend(null);
   // A drag grabs (in priority order) a path waypoint, then a path's length (to
   // bend/pluck it), then a static body, else it scrolls the window.
-  const dragModeRef = useRef<'body' | 'waypoint' | 'bend' | 'scroll' | null>(null);
+  const dragModeRef = useRef<'body' | 'waypoint' | 'subpoint' | 'bend' | 'scroll' | null>(null);
   const waypointDragRef = useRef<{ bodyId: number; index: number } | null>(null);
+  const subDragRef = useRef<{ bodyId: number; wpIndex: number; subIndex: number } | null>(null);
   const onDragBegin = (x: number, y: number) => {
     if (layingRef.current) {
       dragModeRef.current = null;
+      return;
+    }
+    // Sub-path points win over everything (they're the fine handles you reshape).
+    const spt = hitSubPoint(x, y);
+    if (spt) {
+      subDragRef.current = spt;
+      dragModeRef.current = 'subpoint';
       return;
     }
     const wp = hitWaypoint(x, y);
@@ -900,6 +972,27 @@ export default function PathExplorations() {
       );
       return;
     }
+    if (dragModeRef.current === 'subpoint') {
+      const sp = subDragRef.current;
+      if (!sp) return;
+      const cx = Math.max(RULER_WIDTH, x);
+      const midi = midiAtY(y);
+      setBodies((prev) =>
+        prev.map((b) =>
+          b.id === sp.bodyId && b.path
+            ? {
+                ...b,
+                path: b.path.map((wp, wi) =>
+                  wi === sp.wpIndex && wp.sub
+                    ? { ...wp, sub: wp.sub.map((pt, si) => (si === sp.subIndex ? { x: cx, midi } : pt)) }
+                    : wp
+                ),
+              }
+            : b
+        )
+      );
+      return;
+    }
     const id = draggingRef.current;
     if (id == null) return;
     const cx = Math.max(RULER_WIDTH, x);
@@ -933,6 +1026,7 @@ export default function PathExplorations() {
     draggingRef.current = null;
     dragModeRef.current = null;
     waypointDragRef.current = null;
+    subDragRef.current = null;
   };
 
   // Single tap toggles play/pause (or lays a path point); double-tap starts path
@@ -1190,6 +1284,24 @@ export default function PathExplorations() {
                   />
                 );
               })}
+              {/* Lighter ghost of each sub-path node's trajectory, with draggable handles. */}
+              {bodies.map((b) =>
+                b.path && b.path.length >= 2
+                  ? b.path.map((wp, i) =>
+                      wp.sub && wp.sub.length > 0 ? (
+                        <SubGhost
+                          key={`sg${b.id}-${i}`}
+                          home={{ x: wp.x, midi: wp.midi }}
+                          sub={wp.sub}
+                          full={fullLadder}
+                          scroll={scroll}
+                          visible={visibleCount}
+                          height={height}
+                        />
+                      ) : null
+                    )
+                  : null
+              )}
               {(() => {
                 if (laying == null) return null;
                 // Sub-path preview grows from the source node (dashed); a body path
@@ -1593,6 +1705,49 @@ function PathLine({
             );
           })
         : null}
+    </Group>
+  );
+}
+
+// The lighter "ghost" trajectory of a node's sub-path: a faint line from the node's
+// home through each laid point, with a draggable hollow handle at every point — so you
+// can see exactly where the node will travel and reshape it. Purely spatial; positions
+// come from yForMidiExt so it persists as the grid scrolls.
+function SubGhost({
+  home,
+  sub,
+  full,
+  scroll,
+  visible,
+  height,
+}: {
+  home: { x: number; midi: number };
+  sub: SubPoint[];
+  full: number[];
+  scroll: number;
+  visible: number;
+  height: number;
+}) {
+  const skPath = useMemo(() => {
+    const p = Skia.Path.Make();
+    p.moveTo(home.x, yForMidiExt(home.midi, full, scroll, visible, height));
+    sub.forEach((sp) => p.lineTo(sp.x, yForMidiExt(sp.midi, full, scroll, visible, height)));
+    return p;
+  }, [home, sub, full, scroll, visible, height]);
+  return (
+    <Group>
+      <Path path={skPath} style="stroke" strokeWidth={1.2} strokeJoin="round" color="rgba(255,255,255,0.18)" />
+      {sub.map((sp, i) => (
+        <Circle
+          key={i}
+          cx={sp.x}
+          cy={yForMidiExt(sp.midi, full, scroll, visible, height)}
+          r={5}
+          style="stroke"
+          strokeWidth={1.5}
+          color="rgba(255,255,255,0.45)"
+        />
+      ))}
     </Group>
   );
 }

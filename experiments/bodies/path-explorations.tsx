@@ -111,8 +111,8 @@ type Placing = {
 function radialItems(p: Placing): RItem[] {
   if (p.mode === 'dyn') {
     return [
-      { key: 'static', label: 'static', sel: STATIC },
-      { key: 'dynamic', label: 'dynamic', sel: DYNAMIC },
+      { key: 'static', label: '📌', sel: STATIC }, // pinned in place
+      { key: 'dynamic', label: '🎲', sel: DYNAMIC }, // wanders each cycle
     ];
   }
   const editing = p.targetId != null;
@@ -277,6 +277,7 @@ export default function PathExplorations() {
   // `targetId` null = placing a new body; otherwise the radial is re-picking the
   // subdivision of that existing body.
   const [placing, setPlacing] = useState<Placing | null>(null);
+  const [, setDynTick] = useState(0); // bumped when a dynamic node wanders → re-render
   const placingRef = useRef<typeof placing>(null);
   placingRef.current = placing;
   const [closing, setClosing] = useState(false); // radial is playing its recede-out animation
@@ -354,6 +355,7 @@ export default function PathExplorations() {
     else if (off <= -2) off += 1;
     else off += Math.random() < 0.5 ? -1 : 1;
     dynOffRef.current.set(key, off);
+    setDynTick((t) => t + 1); // re-render so the node visibly hops to its new note
   };
 
   // Keep bodies on the current scale (snap to nearest note) when the scale changes.
@@ -474,6 +476,9 @@ export default function PathExplorations() {
   const midiAtY = (y: number) => midiFromY(y, windowLadder, height);
   const wpY = (midi: number) =>
     yForMidi(midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
+  // Screen y of a waypoint at its CURRENT (possibly wandered) note, so hit-tests
+  // land where a dynamic node is actually drawn.
+  const wpYeff = (bodyId: number, wp: Waypoint, index: number) => wpY(effMidi(bodyId, wp, index));
   // Tap/hold hit-test: a path body is hit at its gliding dot OR at any waypoint;
   // a static body at its note position. Topmost first.
   const hitId = (x: number, y: number): number | null => {
@@ -483,9 +488,9 @@ export default function PathExplorations() {
       if (b.path && b.path.length >= 2) {
         const fx = fxRef.current.get(b.id);
         if (fx && Math.hypot(x - fx.px.value, y - fx.py.value) <= GRAB_R) return b.id;
-        for (const wp of b.path) {
-          const wy = wpY(wp.midi);
-          if (wy != null && Math.hypot(x - wp.x, y - wy) <= GRAB_R) return b.id;
+        for (let j = 0; j < b.path.length; j++) {
+          const wy = wpYeff(b.id, b.path[j], j);
+          if (wy != null && Math.hypot(x - b.path[j].x, y - wy) <= GRAB_R) return b.id;
         }
       } else {
         const by = wpY(b.midi);
@@ -513,7 +518,7 @@ export default function PathExplorations() {
       const b = bs[i];
       if (!(b.path && b.path.length >= 2)) continue;
       for (let j = 0; j < b.path.length; j++) {
-        const wy = wpY(b.path[j].midi);
+        const wy = wpYeff(b.id, b.path[j], j);
         if (wy != null && Math.hypot(x - b.path[j].x, y - wy) <= HANDLE_HIT) return { bodyId: b.id, index: j };
       }
     }
@@ -532,8 +537,8 @@ export default function PathExplorations() {
       const b = bs[i];
       if (!(b.path && b.path.length >= 2)) continue;
       for (let j = 0; j < b.path.length - 1; j++) {
-        const ay = wpY(b.path[j].midi);
-        const by = wpY(b.path[j + 1].midi);
+        const ay = wpYeff(b.id, b.path[j], j);
+        const by = wpYeff(b.id, b.path[j + 1], j + 1);
         if (ay == null || by == null) continue;
         const pr = projectToSeg(x, y, b.path[j].x, ay, b.path[j + 1].x, by);
         if (pr.d < bestD) {
@@ -945,10 +950,13 @@ export default function PathExplorations() {
   // static bodies render only when their note is in the window.
   const bodyViews = bodies.map((b) => {
     const isPath = !!(b.path && b.path.length >= 2);
+    // Effective path: dynamic waypoints render at their current wandered note, so a
+    // dynamic node visibly hops when its note changes (and the body rides the moved line).
+    const effPath = isPath ? b.path!.map((wp, i) => ({ ...wp, midi: effMidi(b.id, wp, i) })) : undefined;
     const y0 = isPath
-      ? yForMidiExt(b.path![0].midi, fullLadder, scroll, visibleCount, height)
+      ? yForMidiExt(effPath![0].midi, fullLadder, scroll, visibleCount, height)
       : yForMidi(b.midi, fullLadder, scroll, visibleCount, height);
-    return { b, isPath, y0 };
+    return { b, isPath, y0, effPath };
   });
 
   // Clip the grid content (lines, paths, bodies) to the field — half a row past the
@@ -973,12 +981,12 @@ export default function PathExplorations() {
               {gridYs.map((y, i) => (
                 <Line key={i} p1={vec(0, y)} p2={vec(width, y)} color="rgba(255,255,255,0.09)" strokeWidth={1} />
               ))}
-              {bodyViews.map(({ b, isPath }) =>
+              {bodyViews.map(({ b, isPath, effPath }) =>
                 isPath ? (
                   bend?.bodyId === b.id ? (
                     <BentPathLine
                       key={`p${b.id}`}
-                      points={b.path!}
+                      points={effPath!}
                       j={bend.j}
                       t={bend.t}
                       full={fullLadder}
@@ -993,7 +1001,7 @@ export default function PathExplorations() {
                   ) : (
                     <PathLine
                       key={`p${b.id}`}
-                      points={b.path!}
+                      points={effPath!}
                       full={fullLadder}
                       scroll={scroll}
                       visible={visibleCount}

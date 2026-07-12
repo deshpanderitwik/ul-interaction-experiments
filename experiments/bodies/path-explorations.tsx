@@ -1036,6 +1036,14 @@ export default function PathExplorations() {
     return rect(0, top, width, bottom + step / 2 - top);
   }, [width, height, visibleCount]);
 
+  // While laying a node's sub-path, the source waypoint anchors the preview so the
+  // laid note sequence reads as a dashed line growing out of that node.
+  const subSource = useMemo<Waypoint | null>(() => {
+    if (!subTarget) return null;
+    const wp = bodies.find((b) => b.id === subTarget.bodyId)?.path?.[subTarget.index];
+    return wp ? { x: wp.x, midi: wp.midi } : null;
+  }, [subTarget, bodies]);
+
   return (
     <View style={styles.fill}>
       <GestureDetector gesture={gesture}>
@@ -1078,16 +1086,24 @@ export default function PathExplorations() {
                       dashed={
                         placing?.targetId === b.id ||
                         placing?.wp?.bodyId === b.id ||
-                        (laying != null && editing === b.id) ||
-                        subTarget?.bodyId === b.id
+                        (laying != null && editing === b.id)
                       }
+                      // grayed back while one of its nodes' sub-paths is being laid,
+                      // so it's clear which parent path the sub-path belongs to
+                      dim={subTarget?.bodyId === b.id}
                     />
                   )
                 ) : null
               )}
-              {laying && laying.length > 0 ? (
-                <PathLine points={laying} full={fullLadder} scroll={scroll} visible={visibleCount} height={height} dots dashed />
-              ) : null}
+              {(() => {
+                if (laying == null) return null;
+                // Sub-path preview grows from the source node (dashed); a body path
+                // preview is just its own points.
+                const preview = subSource ? [subSource, ...laying] : laying;
+                return preview.length > 0 ? (
+                  <PathLine points={preview} full={fullLadder} scroll={scroll} visible={visibleCount} height={height} dots dashed />
+                ) : null;
+              })()}
               {bodyViews.map(({ b, isPath, y0 }) =>
                 isPath || y0 != null ? (
                   <BodyView
@@ -1403,6 +1419,7 @@ function PathLine({
   dots,
   handles,
   dashed,
+  dim,
 }: {
   points: Waypoint[];
   full: number[];
@@ -1412,6 +1429,7 @@ function PathLine({
   dots?: boolean;
   handles?: boolean;
   dashed?: boolean;
+  dim?: boolean; // grayed back (e.g. the parent path while a node's sub-path is laid)
 }) {
   // Extrapolate every waypoint's y (never null) so the stroke stays a single
   // continuous polyline as points scroll past the screen edge; Skia clips the
@@ -1427,7 +1445,7 @@ function PathLine({
   }, [points, full, scroll, visible, height]);
 
   return (
-    <Group>
+    <Group opacity={dim ? 0.25 : 1}>
       <Path
         path={skPath}
         style="stroke"

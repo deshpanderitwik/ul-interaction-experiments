@@ -245,6 +245,10 @@ type Body = {
   muted?: boolean; // silent but still alive (keeps its place / keeps gliding)
 };
 type Fx = { pulse: SharedValue<number>; px: SharedValue<number>; py: SharedValue<number>; op: SharedValue<number> };
+// Animated positions for a path's nodes so moving (dynamic / sub) nodes ease to their
+// new spot on each hop instead of hard-cutting. Positions are stored as flat pairs
+// [x, ladderIndex] per node and interpolated from → to as p goes 0 → 1.
+type NodeAnim = { from: SharedValue<number[]>; to: SharedValue<number[]>; p: SharedValue<number> };
 type Pulse = { x: number; y: number; t: number; seed: number }; // published to the shader
 type BufPulse = { x: number; midi: number; t: number; seed: number }; // anchored to its note
 
@@ -284,7 +288,6 @@ export default function PathExplorations() {
   // subdivision of that existing body.
   const [placing, setPlacing] = useState<Placing | null>(null);
   const [subTarget, setSubTarget] = useState<{ bodyId: number; index: number } | null>(null); // node whose sub-path is being laid
-  const [, setDynTick] = useState(0); // bumped when a dynamic node wanders → re-render
   const placingRef = useRef<typeof placing>(null);
   placingRef.current = placing;
   const [closing, setClosing] = useState(false); // radial is playing its recede-out animation
@@ -344,6 +347,16 @@ export default function PathExplorations() {
   const unregisterFx = useCallback((id: number) => {
     fxRef.current.delete(id);
   }, []);
+  // Per-path animated node positions. The child (AnimatedPathLine) creates and
+  // registers these; the scheduler drives them on each hop, and the child keeps them
+  // in sync with edits/scale itself.
+  const nodeAnimRef = useRef<Map<number, NodeAnim>>(new Map());
+  const registerNodeAnim = useCallback((id: number, a: NodeAnim) => {
+    nodeAnimRef.current.set(id, a);
+  }, []);
+  const unregisterNodeAnim = useCallback((id: number) => {
+    nodeAnimRef.current.delete(id);
+  }, []);
 
   // Effective position of a waypoint this cycle: a sub-path node moves to its laid
   // point (both x and pitch, exactly where the user placed it); a dynamic node keeps
@@ -363,8 +376,35 @@ export default function PathExplorations() {
     if (hi < 0) return { x: wp.x, midi: wp.midi };
     return { x: wp.x, midi: full[Math.max(0, Math.min(full.length - 1, hi + off))] };
   };
-  const effMidi = (bodyId: number, wp: Waypoint, index: number): number =>
-    effPoint(bodyId, wp, index).midi;
+  // A note's row index in the full ladder (used as a scroll-independent y source so
+  // an animated node keeps a continuous vertical position as the grid scrolls).
+  const ladderIdxOf = (midi: number): number => {
+    const i = fullRef.current.indexOf(midi);
+    return i < 0 ? 0 : i;
+  };
+  // Flat [x, ladderIndex] pairs for every node at its current effective spot.
+  const computeTargets = (b: Body): number[] => {
+    const arr: number[] = [];
+    if (!b.path) return arr;
+    b.path.forEach((wp, i) => {
+      const ep = effPoint(b.id, wp, i);
+      arr.push(ep.x, ladderIdxOf(ep.midi));
+    });
+    return arr;
+  };
+  // Ease this path's nodes from their previous spots to their new ones (called after
+  // a re-roll bumps the offsets): snapshot the old target as `from`, set the new
+  // `to`, and run p 0 → 1. The line + handles read from/to/p on the UI thread.
+  const triggerNodeHop = (b: Body) => {
+    const na = nodeAnimRef.current.get(b.id);
+    if (!na) return;
+    const targets = computeTargets(b);
+    const prev = na.to.value;
+    na.from.value = prev.length === targets.length ? prev : targets;
+    na.to.value = targets;
+    na.p.value = 0;
+    na.p.value = withTiming(1, { duration: 240, easing: Easing.out(Easing.cubic) });
+  };
   // Advance one dynamic waypoint's wander one step (±1), bounded to ±2 from home.
   const advanceWander = (bodyId: number, index: number) => {
     const key = `${bodyId}:${index}`;
@@ -374,8 +414,8 @@ export default function PathExplorations() {
     else off += Math.random() < 0.5 ? -1 : 1;
     dynOffRef.current.set(key, off);
   };
-  // Re-roll all of a path's dynamic nodes (called at cycle start), then re-render
-  // once so the nodes visibly hop to their new positions ahead of the body.
+  // Re-roll all of a path's dynamic / sub nodes (called at cycle start), then ease
+  // them to their new spots (ahead of the body) via the node-hop animation.
   const rerollDynamic = (b: Body) => {
     if (!b.path) return;
     let any = false;
@@ -389,7 +429,7 @@ export default function PathExplorations() {
         any = true;
       }
     });
-    if (any) setDynTick((t) => t + 1);
+    if (any) triggerNodeHop(b);
   };
 
   // Keep bodies on the current scale (snap to nearest note) when the scale changes.
@@ -514,9 +554,6 @@ export default function PathExplorations() {
   const midiAtY = (y: number) => midiFromY(y, windowLadder, height);
   const wpY = (midi: number) =>
     yForMidi(midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
-  // Screen y of a waypoint at its CURRENT (possibly wandered) note, so hit-tests
-  // land where a dynamic node is actually drawn.
-  const wpYeff = (bodyId: number, wp: Waypoint, index: number) => wpY(effMidi(bodyId, wp, index));
   // Screen position (x + y) of a waypoint at its CURRENT effective spot, so hit-tests
   // land where a moving (dynamic / sub-path) node is actually drawn. Null if off-window.
   const wpPosEff = (bodyId: number, wp: Waypoint, index: number): { x: number; y: number } | null => {
@@ -1043,7 +1080,21 @@ export default function PathExplorations() {
     const y0 = isPath
       ? yForMidiExt(effPath![0].midi, fullLadder, scroll, visibleCount, height)
       : yForMidi(b.midi, fullLadder, scroll, visibleCount, height);
-    return { b, isPath, y0, effPath };
+    // A path with any moving (dynamic / sub) interior node renders through the
+    // animated line so hops ease; otherwise the plain static line is fine.
+    const last = isPath ? b.path!.length - 1 : 0;
+    const moving =
+      isPath && b.path!.some((wp, i) => i !== 0 && i !== last && (!!wp.dyn || !!(wp.sub && wp.sub.length)));
+    // Node kinds (0 terminal, 1 static, 2 dynamic, 3 sub) + flat [x, ladderIndex]
+    // targets, for the animated line.
+    const kinds = isPath
+      ? b.path!.map((wp, i) =>
+          i === 0 || i === last ? 0 : wp.sub && wp.sub.length ? 3 : wp.dyn ? 2 : 1
+        )
+      : undefined;
+    const targets =
+      isPath && effPath ? effPath.flatMap((wp) => [wp.x, ladderIdxOf(wp.midi)]) : undefined;
+    return { b, isPath, y0, effPath, moving, kinds, targets };
   });
 
   // Clip the grid content (lines, paths, bodies) to the field — half a row past the
@@ -1076,9 +1127,18 @@ export default function PathExplorations() {
               {gridYs.map((y, i) => (
                 <Line key={i} p1={vec(0, y)} p2={vec(width, y)} color="rgba(255,255,255,0.09)" strokeWidth={1} />
               ))}
-              {bodyViews.map(({ b, isPath, effPath }) =>
-                isPath ? (
-                  bend?.bodyId === b.id ? (
+              {bodyViews.map(({ b, isPath, effPath, moving, kinds, targets }) => {
+                if (!isPath) return null;
+                // dashed while a radial targeting it is open OR while being extended/laid
+                const dashed =
+                  placing?.targetId === b.id ||
+                  placing?.wp?.bodyId === b.id ||
+                  (laying != null && editing === b.id);
+                // grayed back while one of its nodes' sub-paths is being laid, so it's
+                // clear which parent path the sub-path belongs to
+                const dim = subTarget?.bodyId === b.id;
+                if (bend?.bodyId === b.id) {
+                  return (
                     <BentPathLine
                       key={`p${b.id}`}
                       points={effPath!}
@@ -1093,28 +1153,39 @@ export default function PathExplorations() {
                       bendOy={bendOy}
                       bendMorph={bendMorph}
                     />
-                  ) : (
-                    <PathLine
+                  );
+                }
+                if (moving) {
+                  return (
+                    <AnimatedPathLine
                       key={`p${b.id}`}
-                      points={effPath!}
-                      full={fullLadder}
+                      bodyId={b.id}
+                      kinds={kinds!}
+                      targets={targets!}
                       scroll={scroll}
                       visible={visibleCount}
                       height={height}
-                      handles
-                      // dashed while a radial targeting it is open OR while being extended/laid
-                      dashed={
-                        placing?.targetId === b.id ||
-                        placing?.wp?.bodyId === b.id ||
-                        (laying != null && editing === b.id)
-                      }
-                      // grayed back while one of its nodes' sub-paths is being laid,
-                      // so it's clear which parent path the sub-path belongs to
-                      dim={subTarget?.bodyId === b.id}
+                      dashed={dashed}
+                      dim={dim}
+                      register={registerNodeAnim}
+                      unregister={unregisterNodeAnim}
                     />
-                  )
-                ) : null
-              )}
+                  );
+                }
+                return (
+                  <PathLine
+                    key={`p${b.id}`}
+                    points={effPath!}
+                    full={fullLadder}
+                    scroll={scroll}
+                    visible={visibleCount}
+                    height={height}
+                    handles
+                    dashed={dashed}
+                    dim={dim}
+                  />
+                );
+              })}
               {(() => {
                 if (laying == null) return null;
                 // Sub-path preview grows from the source node (dashed); a body path
@@ -1518,6 +1589,135 @@ function PathLine({
             );
           })
         : null}
+    </Group>
+  );
+}
+
+// A committed path that has moving (dynamic / sub) nodes. Node positions are driven
+// by shared values (from → to over p) that the scheduler eases on each hop, so a node
+// glides to its new spot instead of hard-cutting. Terminals and static nodes hold
+// still. y comes from an animated ladder-index minus the live scroll, so the grid can
+// scroll under a mid-hop node without lag. Handles are drawn as two batched paths
+// (filled discs/dots, stroked rings) so the node count can vary freely.
+function AnimatedPathLine({
+  bodyId,
+  kinds,
+  targets,
+  scroll,
+  visible,
+  height,
+  dashed,
+  dim,
+  register,
+  unregister,
+}: {
+  bodyId: number;
+  kinds: number[]; // 0 terminal, 1 static, 2 dynamic, 3 sub
+  targets: number[]; // initial flat [x, ladderIndex] pairs
+  scroll: number;
+  visible: number;
+  height: number;
+  dashed?: boolean;
+  dim?: boolean;
+  register: (id: number, a: NodeAnim) => void;
+  unregister: (id: number) => void;
+}) {
+  const from = useSharedValue<number[]>(targets);
+  const to = useSharedValue<number[]>(targets);
+  const p = useSharedValue(1);
+  const scrollSV = useSharedValue(scroll);
+  useEffect(() => {
+    scrollSV.value = scroll;
+  }, [scroll, scrollSV]);
+  useEffect(() => {
+    register(bodyId, { from, to, p });
+    return () => unregister(bodyId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bodyId]);
+  // Snap to the current targets on any edit / reshape / scale change (a re-render
+  // gives a new signature). Hops don't re-render, so this only fires on real edits —
+  // it won't cut a running hop short.
+  const targetSig = targets.join(',');
+  useEffect(() => {
+    from.value = targets;
+    to.value = targets;
+    p.value = 1;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetSig]);
+
+  // Displayed position of node k this frame: lerp(from, to, p), y from ladder index.
+  const linePath = useDerivedValue(() => {
+    const path = Skia.Path.Make();
+    const f = from.value;
+    const t = to.value;
+    const pr = p.value;
+    const bottom = height - PITCH_BOTTOM_INSET;
+    const n = Math.floor(Math.min(f.length, t.length) / 2);
+    for (let k = 0; k < n; k++) {
+      const x = f[2 * k] + (t[2 * k] - f[2 * k]) * pr;
+      const idx = f[2 * k + 1] + (t[2 * k + 1] - f[2 * k + 1]) * pr;
+      const pos = idx - scrollSV.value;
+      const y = visible > 1 ? bottom - (pos / (visible - 1)) * (bottom - PITCH_TOP) : (PITCH_TOP + bottom) / 2;
+      if (k === 0) path.moveTo(x, y);
+      else path.lineTo(x, y);
+    }
+    return path;
+  }, [from, to, p, scrollSV, visible, height]);
+
+  // Filled marks: terminal discs (kind 0) and dynamic center dots (kind 2).
+  const fillPath = useDerivedValue(() => {
+    const path = Skia.Path.Make();
+    const f = from.value;
+    const t = to.value;
+    const pr = p.value;
+    const bottom = height - PITCH_BOTTOM_INSET;
+    const n = Math.floor(Math.min(f.length, t.length) / 2);
+    for (let k = 0; k < n; k++) {
+      const kind = k < kinds.length ? kinds[k] : 1;
+      if (kind !== 0 && kind !== 2) continue;
+      const x = f[2 * k] + (t[2 * k] - f[2 * k]) * pr;
+      const idx = f[2 * k + 1] + (t[2 * k + 1] - f[2 * k + 1]) * pr;
+      const pos = idx - scrollSV.value;
+      const y = visible > 1 ? bottom - (pos / (visible - 1)) * (bottom - PITCH_TOP) : (PITCH_TOP + bottom) / 2;
+      path.addCircle(x, y, kind === 0 ? HANDLE_R : HANDLE_R * 0.42);
+    }
+    return path;
+  }, [from, to, p, scrollSV, visible, height, kinds]);
+
+  // Stroked rings: static (kind 1), dynamic outer (kind 2), sub outer + inner (kind 3).
+  const ringPath = useDerivedValue(() => {
+    const path = Skia.Path.Make();
+    const f = from.value;
+    const t = to.value;
+    const pr = p.value;
+    const bottom = height - PITCH_BOTTOM_INSET;
+    const n = Math.floor(Math.min(f.length, t.length) / 2);
+    for (let k = 0; k < n; k++) {
+      const kind = k < kinds.length ? kinds[k] : 1;
+      if (kind === 0) continue; // terminals are filled discs, no ring
+      const x = f[2 * k] + (t[2 * k] - f[2 * k]) * pr;
+      const idx = f[2 * k + 1] + (t[2 * k + 1] - f[2 * k + 1]) * pr;
+      const pos = idx - scrollSV.value;
+      const y = visible > 1 ? bottom - (pos / (visible - 1)) * (bottom - PITCH_TOP) : (PITCH_TOP + bottom) / 2;
+      path.addCircle(x, y, HANDLE_R);
+      if (kind === 3) path.addCircle(x, y, HANDLE_R * 0.5); // sub: concentric inner ring
+    }
+    return path;
+  }, [from, to, p, scrollSV, visible, height, kinds]);
+
+  return (
+    <Group opacity={dim ? 0.25 : 1}>
+      <Path
+        path={linePath}
+        style="stroke"
+        strokeWidth={1.5}
+        strokeJoin="round"
+        color={dashed ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.32)'}
+      >
+        {dashed ? <DashPathEffect intervals={[7, 6]} /> : null}
+      </Path>
+      <Path path={ringPath} style="stroke" strokeWidth={2} color="rgba(255,255,255,0.6)" />
+      <Path path={fillPath} color="rgba(255,255,255,0.85)" />
     </Group>
   );
 }

@@ -1159,7 +1159,20 @@ export default function PathExplorations() {
       return;
     }
     if (pts.length >= 2) {
-      setBodies((prev) => prev.map((b) => (b.id === targetId ? { ...b, path: pts, pathT0: clock.value } : b)));
+      setBodies((prev) =>
+        prev.map((b) => {
+          if (b.id !== targetId) return b;
+          // Quantize the traversal start to the shared grid so the path's notes
+          // land on grid lines (and thus on the drums' pulse when combined),
+          // instead of wherever the finger happened to lift. Anchor at the grid
+          // origin — 0 on the shared clock, the bodies-grid t0 standalone — and
+          // snap down to the most recent line of this body's own subdivision.
+          const P = periodMs(b.subdivision, tempoRef.current);
+          const origin = sharedClock ? 0 : t0Ref.current;
+          const pathT0 = origin + Math.floor((clock.value - origin) / P) * P;
+          return { ...b, path: pts, pathT0 };
+        })
+      );
     }
   };
   const onLayClosed = () => setLayClosing(false);

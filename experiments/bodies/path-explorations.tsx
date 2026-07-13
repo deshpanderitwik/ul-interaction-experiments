@@ -44,7 +44,11 @@ const PULSES = 32; // headroom for many small pings at once
 const LIFE = 0.5; // each ping dies quickly
 const RING_ALPHA = 0.28;
 const SCHED_MS = 15;
-const MAX_DRIFT_FRAC = 0.18;
+// x position → velocity (loudness). The horizontal axis is dynamics now that the
+// grid quantizes timing: left of the field is soft, right is loud. A path's
+// horizontal shape becomes its accent/crescendo contour.
+const VEL_MIN = 0.12; // softest hit (pp)
+const VEL_MAX = 0.55; // loudest hit (ff) — the native synth tanh-clips above this
 const EXT_MIN = 24; // C0 (Ableton labeling)
 const EXT_MAX = 84; // C5
 const GRAB_R = 48; // forgiving touch radius for grabbing a body (drag/tap/hold)
@@ -148,9 +152,12 @@ function radialItems(p: Placing): RItem[] {
   return ring;
 }
 
-function driftMs(x: number, period: number, width: number): number {
-  const frac = Math.max(-1, Math.min(1, (x - width / 2) / (width / 2)));
-  return frac * MAX_DRIFT_FRAC * period;
+// Map an x position to a velocity: the synth gain plus a 0..1 normalized value
+// (for scaling the visual pop/ripple). The ruler column is the soft end.
+function velAt(x: number, width: number): { gain: number; norm: number } {
+  const usable = Math.max(1, width - RULER_WIDTH);
+  const norm = Math.max(0, Math.min(1, (x - RULER_WIDTH) / usable));
+  return { gain: VEL_MIN + (VEL_MAX - VEL_MIN) * norm, norm };
 }
 
 // y of a note at window-position `pos` (0 = lowest/bottom … visible-1 = top).
@@ -205,6 +212,7 @@ uniform float u_time;
 uniform float2 u_pulses[${PULSES}];
 uniform float u_pulseTimes[${PULSES}];
 uniform float u_pulseSeed[${PULSES}];
+uniform float u_pulseVel[${PULSES}];
 
 float2 flow(float2 p, float time) {
   return float2(
@@ -229,7 +237,9 @@ half4 main(float2 fragcoord) {
     float band = (dist - r) / width;
     float env = exp(-band * band);
     float decay = max(0.0, 1.0 - age / ${LIFE});
-    light += env * decay * ${RING_ALPHA};
+    // louder notes (higher velocity) shed a brighter ring
+    float vel = 0.35 + 1.1 * u_pulseVel[i];
+    light += env * decay * ${RING_ALPHA} * vel;
   }
   light = clamp(light, 0.0, 1.0);
   half3 col = half3(light);
@@ -260,8 +270,8 @@ type Fx = { pulse: SharedValue<number>; px: SharedValue<number>; py: SharedValue
 // new spot on each hop instead of hard-cutting. Positions are stored as flat pairs
 // [x, ladderIndex] per node and interpolated from → to as p goes 0 → 1.
 type NodeAnim = { from: SharedValue<number[]>; to: SharedValue<number[]>; p: SharedValue<number> };
-type Pulse = { x: number; y: number; t: number; seed: number }; // published to the shader
-type BufPulse = { x: number; midi: number; t: number; seed: number }; // anchored to its note
+type Pulse = { x: number; y: number; t: number; seed: number; vel: number }; // published to the shader
+type BufPulse = { x: number; midi: number; t: number; seed: number; vel: number }; // anchored to its note
 
 export default function PathExplorations() {
   const live = useExperimentActive();
@@ -468,25 +478,30 @@ export default function PathExplorations() {
   const emitNote = useCallback(
     (bodyId: number, midi: number, x: number) => {
       if (!noteEnabled(midi)) return;
-      playSine(midiToFreq(midi));
+      // x → velocity: loudness of the note, and how big/bright its pop + ripple are.
+      const { gain, norm } = velAt(x, widthRef.current);
+      playSine(midiToFreq(midi), gain);
       const fx = fxRef.current.get(bodyId);
       if (fx) {
         fx.pulse.value = 0;
         fx.pulse.value = withSequence(
-          withTiming(1, { duration: 70, easing: Easing.out(Easing.quad) }),
+          // louder notes pop bigger (peak scales with velocity)
+          withTiming(0.5 + 0.85 * norm, { duration: 70, easing: Easing.out(Easing.quad) }),
           withTiming(0, { duration: 320, easing: Easing.out(Easing.quad) })
         );
       }
       // A ring per fire, but each is small and short-lived (see LIFE / speed), so
       // every subdivision pings and they read as tight local pulses, not waves.
-      pulseBufRef.current.push({ x, midi, t: clock.value / 1000, seed: Math.random() });
+      // vel rides along so the shader can brighten louder pings.
+      pulseBufRef.current.push({ x, midi, t: clock.value / 1000, seed: Math.random(), vel: norm });
     },
     [clock]
   );
   const fire = useCallback((b: Body) => emitNote(b.id, b.midi, b.x), [emitNote]);
 
-  // Shared-grid scheduler with drift (identical to Bodies), publishing the ripple
-  // buffer once per tick so simultaneous bodies all show.
+  // Shared-grid scheduler (x is velocity now, not drift — timing is straight on
+  // the grid), publishing the ripple buffer once per tick so simultaneous bodies
+  // all show.
   const schedRef = useRef<Map<number, { k: number; sig: string }>>(new Map());
   const t0Ref = useRef(0);
   useEffect(() => {
@@ -501,7 +516,6 @@ export default function PathExplorations() {
       const now = clock.value;
       const nowSec = now / 1000;
       const bpm = tempoRef.current;
-      const w = widthRef.current;
       const present = new Set<number>();
       for (const b of bodiesRef.current) {
         present.add(b.id);
@@ -548,7 +562,7 @@ export default function PathExplorations() {
           continue;
         }
         const P = periodMs(b.subdivision, bpm);
-        const k = Math.floor((now - t0Ref.current - driftMs(b.x, P, w)) / P);
+        const k = Math.floor((now - t0Ref.current) / P);
         const sig = `${b.subdivision}:${bpm}`;
         // (No mute while dragging — a body keeps sounding as you move it.)
         const entry = sched.get(b.id);
@@ -567,7 +581,7 @@ export default function PathExplorations() {
       // note; off-window ripples are parked off-screen.
       pulses.value = buf.map((p) => {
         const py = yForMidiExt(p.midi, fullRef.current, scrollRef.current, visibleRef.current, heightRef.current);
-        return { x: p.x, y: py, t: p.t, seed: p.seed };
+        return { x: p.x, y: py, t: p.t, seed: p.seed, vel: p.vel };
       });
     }, SCHED_MS);
     return () => {
@@ -1198,6 +1212,7 @@ export default function PathExplorations() {
     const pos: number[] = [];
     const times: number[] = [];
     const seeds: number[] = [];
+    const vels: number[] = [];
     const ps = pulses.value;
     for (let i = 0; i < PULSES; i++) {
       const p = ps[i];
@@ -1205,10 +1220,12 @@ export default function PathExplorations() {
         pos.push(p.x, p.y);
         times.push(p.t);
         seeds.push(p.seed);
+        vels.push(p.vel);
       } else {
         pos.push(0, 0);
         times.push(-100);
         seeds.push(0);
+        vels.push(0);
       }
     }
     return {
@@ -1217,6 +1234,7 @@ export default function PathExplorations() {
       u_pulses: pos,
       u_pulseTimes: times,
       u_pulseSeed: seeds,
+      u_pulseVel: vels,
     };
   });
 
@@ -1383,11 +1401,7 @@ export default function PathExplorations() {
               )}
             </Group>
           </Canvas>
-          <View
-            style={[styles.centerGuide, { bottom: PITCH_BOTTOM_INSET + hostBottomInset }]}
-            pointerEvents="none"
-          />
-          <DriftRuler bottomInset={hostBottomInset} />
+          <VelocityRuler bottomInset={hostBottomInset} />
         </View>
       </GestureDetector>
 
@@ -2089,17 +2103,15 @@ function BodyView({
   );
 }
 
-// Horizontal drift ruler along the bottom (center = quantized), same as Bodies.
-// `bottomInset` lifts it above the combination host's nav.
-function DriftRuler({ bottomInset = 0 }: { bottomInset?: number }) {
+// Horizontal velocity ruler along the bottom: x maps loudness, soft (left) → loud
+// (right). `bottomInset` lifts it above the combination host's nav.
+function VelocityRuler({ bottomInset = 0 }: { bottomInset?: number }) {
   return (
     <View style={[styles.driftRuler, { bottom: 46 + bottomInset }]} pointerEvents="none">
       <View style={styles.driftLine} />
-      <View style={styles.driftCenterTick} />
       <View style={styles.driftLabels}>
-        <Text style={styles.driftText}>early</Text>
-        <Text style={styles.driftText}>grid</Text>
-        <Text style={styles.driftText}>late</Text>
+        <Text style={styles.driftText}>soft</Text>
+        <Text style={styles.driftText}>loud</Text>
       </View>
     </View>
   );

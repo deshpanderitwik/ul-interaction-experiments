@@ -15,6 +15,7 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
+import { useSharedClock } from '../combinations/clock';
 import { getScale, midiToFreq, noteName, useScale } from '../scale';
 import { useTempo } from '../tempo';
 import { BODY_R, MAX_BODIES, SUBDIVISIONS, periodMs, scaleMidiLadder } from './shared';
@@ -266,7 +267,12 @@ export default function PathExplorations() {
   const scale = useScale();
   const tempo = useTempo();
   const { width, height } = useWindowDimensions();
-  const clock = useClock();
+  // In a combination, run off the host's shared clock so we phase-lock with the
+  // other experiment; standalone, use our own. All `clock.value` reads below
+  // (scheduler, path anchors, shader time) then share one timeline.
+  const localClock = useClock();
+  const sharedClock = useSharedClock();
+  const clock = sharedClock ?? localClock;
   const disabled = useDisabledNotes();
 
   const fullLadder = useMemo(() => scaleMidiLadder(scale, EXT_MIN, EXT_MAX), [scale]);
@@ -479,7 +485,11 @@ export default function PathExplorations() {
   const schedRef = useRef<Map<number, { k: number; sig: string }>>(new Map());
   const t0Ref = useRef(0);
   useEffect(() => {
-    if (t0Ref.current === 0) t0Ref.current = clock.value;
+    // Combined: anchor the grid at the shared clock's origin (t0 = 0) so our
+    // pulse lines up with the partner experiment. Standalone: anchor at the
+    // first tick, as before.
+    if (sharedClock) t0Ref.current = 0;
+    else if (t0Ref.current === 0) t0Ref.current = clock.value;
     if (!live) return;
     const sched = schedRef.current;
     const handle = setInterval(() => {
@@ -561,7 +571,7 @@ export default function PathExplorations() {
       pulseBufRef.current = [];
       pulses.value = [];
     };
-  }, [live, fire, emitNote, clock, pulses]);
+  }, [live, fire, emitNote, clock, sharedClock, pulses]);
 
   const midiAtY = (y: number) => midiFromY(y, windowLadder, height);
   const wpY = (midi: number) =>

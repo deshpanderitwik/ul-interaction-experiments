@@ -44,6 +44,14 @@ export type Experiment = {
 
 export const experiments: Experiment[] = [
   {
+    id: 'combinations',
+    title: 'Combinations',
+    blurb: 'Several experiments playing at once on one shared clock. First up: Path Explorations + drum Subdivisions, phase-locked — flip between them with the bottom nav.',
+    accent: '#ffd166',
+    audio: true,
+    load: () => import('./combinations'),
+  },
+  {
     id: 'drums',
     title: 'Drums',
     blurb: 'An eight-step kick sequencer stacked vertically: tap a step to place a kick; the playhead falls down the column, looping the bar. Hello world for drums.',

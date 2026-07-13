@@ -1,3 +1,4 @@
+import { useClock } from '@shopify/react-native-skia';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -11,6 +12,7 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
+import { useSharedClock } from '../combinations/clock';
 import { useSettingsActions } from '../settings';
 import { useTempo } from '../tempo';
 import { playKick } from './voice';
@@ -54,6 +56,11 @@ type Fire = { flash: SharedValue<number>; activeHit: SharedValue<number> };
 export default function DrumSubdivisions() {
   const live = useExperimentActive();
   const tempo = useTempo();
+  // Combined: use the host's shared clock so we phase-lock with the partner
+  // experiment; standalone, use our own. Either way it's a monotonic ms clock.
+  const localClock = useClock();
+  const sharedClock = useSharedClock();
+  const clock = sharedClock ?? localClock;
 
   const [subs, setSubs] = useState<number[]>(SEED);
   const [current, setCurrent] = useState(-1);
@@ -110,20 +117,23 @@ export default function DrumSubdivisions() {
   const lastSubRef = useRef(-1);
   useEffect(() => {
     if (!live) return;
-    t0Ref.current = Date.now();
+    // Combined: anchor at the shared clock's origin (t0 = 0) to line up with the
+    // partner; standalone: anchor at the first tick.
+    t0Ref.current = sharedClock ? 0 : clock.value;
     lastStepRef.current = -1;
     lastSubRef.current = -1;
     setCurrent(-1);
     const handle = setInterval(() => {
+      const now = clock.value;
       const bpm = tempoRef.current;
       const stepMs = 60000 / bpm / 2; // one eighth-note per step
-      const k = Math.floor((Date.now() - t0Ref.current) / stepMs);
+      const k = Math.floor((now - t0Ref.current) / stepMs);
       const step = ((k % STEPS) + STEPS) % STEPS;
       const stepStart = t0Ref.current + k * stepMs;
       const s = subsRef.current[step];
       // Which sub-hit are we in? -1 when the step is off (nothing to fire).
       const subIdx =
-        s > 0 ? Math.min(s - 1, Math.floor((Date.now() - stepStart) / (stepMs / s))) : -1;
+        s > 0 ? Math.min(s - 1, Math.floor((now - stepStart) / (stepMs / s))) : -1;
 
       if (step !== lastStepRef.current) {
         lastStepRef.current = step;
@@ -140,7 +150,7 @@ export default function DrumSubdivisions() {
       lastStepRef.current = -1;
       lastSubRef.current = -1;
     };
-  }, [live, fireHit]);
+  }, [live, fireHit, clock, sharedClock]);
 
   const actions = useMemo(
     () => [{ id: 'clear', label: 'Clear', onPress: () => setSubs(Array(STEPS).fill(0)) }],

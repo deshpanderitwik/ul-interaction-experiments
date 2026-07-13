@@ -44,6 +44,14 @@ export type Experiment = {
 
 export const experiments: Experiment[] = [
   {
+    id: 'drums',
+    title: 'Drums',
+    blurb: 'An eight-step kick sequencer stacked vertically: tap a step to place a kick; the playhead falls down the column, looping the bar. Hello world for drums.',
+    accent: '#ff6b6b',
+    audio: true,
+    load: () => import('./drums'),
+  },
+  {
     id: 'bodies',
     title: 'Bodies',
     blurb: 'Plant sounding bodies in a scene: double-tap to add, tap to play/pause, drag to arrange, hold to tune. The atom of composition.',
@@ -100,14 +108,6 @@ export const experiments: Experiment[] = [
         load: () => import('./bodies/path-explorations'),
       },
     ],
-  },
-  {
-    id: 'drums',
-    title: 'Drums',
-    blurb: 'An eight-step kick sequencer stacked vertically: tap a step to place a kick; the playhead falls down the column, looping the bar. Hello world for drums.',
-    accent: '#ff6b6b',
-    audio: true,
-    load: () => import('./drums'),
   },
   {
     id: 'fence',

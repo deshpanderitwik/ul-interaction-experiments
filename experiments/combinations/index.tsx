@@ -38,8 +38,13 @@ export default function PathsAndDrums() {
     <SharedClockProvider value={clock}>
       <HostBottomInsetProvider value={NAV_CLEARANCE}>
         <View style={styles.fill}>
-        {/* Both mounted at once; the inactive layer is hidden (display:none) but
-            keeps running its scheduler, so it keeps playing. */}
+        {/* Both mounted at once and always laid out; the inactive layer is hidden
+            with opacity (NOT display:none) and made non-interactive with
+            pointerEvents. display:none would tear down the layer's native gesture
+            handlers and they don't reliably re-attach when it's shown again — so
+            the tab you returned to would render but stay dead to touch. Keeping
+            both laid out avoids that; audio runs on a setInterval regardless of
+            visibility, so the hidden one keeps playing. */}
         <View
           style={[styles.layer, active === 'paths' ? styles.shown : styles.hidden]}
           pointerEvents={active === 'paths' ? 'auto' : 'none'}
@@ -95,8 +100,11 @@ function BottomNav({
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
   layer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  shown: {},
-  hidden: { display: 'none' },
+  // Active layer on top and visible; inactive stays laid out but invisible and is
+  // made non-interactive via pointerEvents (see the note above on why not
+  // display:none). zIndex keeps the active layer's touch target on top.
+  shown: { opacity: 1, zIndex: 1 },
+  hidden: { opacity: 0, zIndex: 0 },
   // Bottom-center container; box-none lets touches fall through everywhere
   // except the pill itself.
   navWrap: {

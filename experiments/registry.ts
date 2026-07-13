@@ -50,6 +50,14 @@ export const experiments: Experiment[] = [
     accent: '#ff6b6b',
     audio: true,
     load: () => import('./drums'),
+    variations: [
+      {
+        id: 'subdivisions',
+        title: 'Subdivisions',
+        blurb: 'Each step can ratchet: tap to toggle, then press-drag a step up for fewer subdivisions or down for more (2, 3, 4… sub-hits in its slot — a drum roll). The bar splits into cells that light as they fire.',
+        load: () => import('./drums/subdivisions'),
+      },
+    ],
   },
   {
     id: 'bodies',

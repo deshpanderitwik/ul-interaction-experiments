@@ -896,7 +896,19 @@ export default function PathExplorations() {
     const bnd = bendActiveRef.current;
     if (!bnd) return;
     setBodies((prev) =>
-      prev.map((b) => (b.id === bnd.bodyId ? { ...b, pathT0: clock.value - bendPhaseRef.current } : b))
+      prev.map((b) => {
+        if (b.id !== bnd.bodyId) return b;
+        // Resume where it froze (clock.value - phase), then re-snap that anchor
+        // to the nearest grid line of this body's subdivision so the twang
+        // doesn't leave the path drifting off the drums. Nearest (not floor)
+        // keeps it closest to where the pluck let go while realigning to the
+        // shared pulse.
+        const raw = clock.value - bendPhaseRef.current;
+        const P = periodMs(b.subdivision, tempoRef.current);
+        const origin = sharedClock ? 0 : t0Ref.current;
+        const pathT0 = origin + Math.round((raw - origin) / P) * P;
+        return { ...b, pathT0 };
+      })
     );
     const fx = fxRef.current.get(bnd.bodyId);
     if (fx) fx.op.value = withTiming(1, { duration: 340, easing: Easing.out(Easing.cubic) });

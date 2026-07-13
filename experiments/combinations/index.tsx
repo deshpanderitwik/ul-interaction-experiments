@@ -100,11 +100,13 @@ function BottomNav({
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
   layer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  // Active layer on top and visible; inactive stays laid out but invisible and is
-  // made non-interactive via pointerEvents (see the note above on why not
-  // display:none). zIndex keeps the active layer's touch target on top.
-  shown: { opacity: 1, zIndex: 1 },
-  hidden: { opacity: 0, zIndex: 0 },
+  // Active layer visible; inactive stays laid out but invisible and non-interactive
+  // (opacity + pointerEvents, NOT display:none — see the note above). No zIndex: the
+  // layers keep natural sibling order so the nav, rendered last, stays on top and
+  // reachable. The inactive layer's pointerEvents:none lets touches fall through to
+  // the active one regardless of order.
+  shown: { opacity: 1 },
+  hidden: { opacity: 0 },
   // Bottom-center container; box-none lets touches fall through everywhere
   // except the pill itself.
   navWrap: {

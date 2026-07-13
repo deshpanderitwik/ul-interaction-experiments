@@ -4,6 +4,12 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import PathExplorations from '../bodies/path-explorations';
 import DrumSubdivisions from '../drums/subdivisions';
 import { SharedClockProvider } from './clock';
+import { HostBottomInsetProvider } from './insets';
+
+// Space reserved at the bottom for the nav selector — experiments lift their UI
+// above it. The nav pill sits at bottom:44 and is ~46px tall, so ~72 clears it
+// with a comfortable gap.
+const NAV_CLEARANCE = 72;
 
 // Combinations — several experiments running at once on ONE clock, with a bottom
 // nav to flip which is on screen. The first combination pairs Path Explorations
@@ -30,7 +36,8 @@ export default function PathsAndDrums() {
 
   return (
     <SharedClockProvider value={clock}>
-      <View style={styles.fill}>
+      <HostBottomInsetProvider value={NAV_CLEARANCE}>
+        <View style={styles.fill}>
         {/* Both mounted at once; the inactive layer is hidden (display:none) but
             keeps running its scheduler, so it keeps playing. */}
         <View
@@ -46,8 +53,9 @@ export default function PathsAndDrums() {
           <DrumSubdivisions />
         </View>
 
-        <BottomNav active={active} onSelect={setActive} />
-      </View>
+          <BottomNav active={active} onSelect={setActive} />
+        </View>
+      </HostBottomInsetProvider>
     </SharedClockProvider>
   );
 }

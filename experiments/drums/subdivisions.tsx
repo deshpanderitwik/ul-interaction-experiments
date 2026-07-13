@@ -13,6 +13,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
 import { useSharedClock } from '../combinations/clock';
+import { useHostBottomInset } from '../combinations/insets';
 import { useSettingsActions } from '../settings';
 import { useTempo } from '../tempo';
 import { playKick } from './voice';
@@ -61,6 +62,8 @@ export default function DrumSubdivisions() {
   const localClock = useClock();
   const sharedClock = useSharedClock();
   const clock = sharedClock ?? localClock;
+  // Lift the step column above the combination host's nav (0 standalone).
+  const hostBottomInset = useHostBottomInset();
 
   const [subs, setSubs] = useState<number[]>(SEED);
   const [current, setCurrent] = useState(-1);
@@ -160,7 +163,7 @@ export default function DrumSubdivisions() {
 
   return (
     <View style={styles.fill}>
-      <View style={styles.column}>
+      <View style={[styles.column, { paddingBottom: 40 + hostBottomInset }]}>
         {subs.map((sub, i) => (
           <StepRow
             key={i}

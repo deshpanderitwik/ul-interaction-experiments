@@ -16,6 +16,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
 import { useSharedClock } from '../combinations/clock';
+import { useHostBottomInset } from '../combinations/insets';
 import { getScale, midiToFreq, noteName, useScale } from '../scale';
 import { useTempo } from '../tempo';
 import { BODY_R, MAX_BODIES, SUBDIVISIONS, periodMs, scaleMidiLadder } from './shared';
@@ -266,7 +267,11 @@ export default function PathExplorations() {
   const live = useExperimentActive();
   const scale = useScale();
   const tempo = useTempo();
-  const { width, height } = useWindowDimensions();
+  const { width, height: winHeight } = useWindowDimensions();
+  // In a combination the host reserves a bottom band for its nav; shrink the
+  // playfield by that much so all pitch layout lifts above it. 0 standalone.
+  const hostBottomInset = useHostBottomInset();
+  const height = winHeight - hostBottomInset;
   // In a combination, run off the host's shared clock so we phase-lock with the
   // other experiment; standalone, use our own. All `clock.value` reads below
   // (scheduler, path anchors, shader time) then share one timeline.
@@ -1378,8 +1383,11 @@ export default function PathExplorations() {
               )}
             </Group>
           </Canvas>
-          <View style={styles.centerGuide} pointerEvents="none" />
-          <DriftRuler />
+          <View
+            style={[styles.centerGuide, { bottom: PITCH_BOTTOM_INSET + hostBottomInset }]}
+            pointerEvents="none"
+          />
+          <DriftRuler bottomInset={hostBottomInset} />
         </View>
       </GestureDetector>
 
@@ -1421,7 +1429,10 @@ export default function PathExplorations() {
           Tick (done) on the left, cross (cancel) on the right; each rises in from
           below one at a time and drops back out the same way. */}
       {laying != null || layClosing ? (
-        <View style={styles.layBar} pointerEvents={laying != null ? 'box-none' : 'none'}>
+        <View
+          style={[styles.layBar, { bottom: 44 + hostBottomInset }]}
+          pointerEvents={laying != null ? 'box-none' : 'none'}
+        >
           <LayIconButton
             key={`done-${laySeqRef.current}`}
             kind="done"
@@ -2079,9 +2090,10 @@ function BodyView({
 }
 
 // Horizontal drift ruler along the bottom (center = quantized), same as Bodies.
-function DriftRuler() {
+// `bottomInset` lifts it above the combination host's nav.
+function DriftRuler({ bottomInset = 0 }: { bottomInset?: number }) {
   return (
-    <View style={styles.driftRuler} pointerEvents="none">
+    <View style={[styles.driftRuler, { bottom: 46 + bottomInset }]} pointerEvents="none">
       <View style={styles.driftLine} />
       <View style={styles.driftCenterTick} />
       <View style={styles.driftLabels}>

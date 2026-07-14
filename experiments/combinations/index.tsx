@@ -1,10 +1,12 @@
 import { useClock } from '@shopify/react-native-skia';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import PathExplorations from '../bodies/path-explorations';
 import DrumSubdivisions from '../drums/subdivisions';
+import { useSettings } from '../settings';
 import { SharedClockProvider } from './clock';
 import { HostBottomInsetProvider } from './insets';
+import { setSidechain } from './sidechain';
 
 // Space reserved at the bottom for the nav selector — experiments lift their UI
 // above it. The nav pill sits at bottom:44 and is ~46px tall, so ~72 clears it
@@ -28,11 +30,26 @@ const TABS: Tab[] = [
   { id: 'drums', title: 'Drums' },
 ];
 
+// Sidechain amount lives in the combination's gear — it's a relationship between
+// the two experiments (kick ducks paths), so it belongs to the thing that owns
+// the pair, not to either one alone.
+const SETTINGS = {
+  sidechain: { type: 'slider', label: 'Sidechain', min: 0, max: 100, step: 1, unit: '%', default: 0 },
+} as const;
+
 export default function PathsAndDrums() {
   // The one clock both experiments share. useClock is driven by a global frame
   // callback, so it advances whether or not a given layer is currently drawn.
   const clock = useClock();
   const [active, setActive] = useState<string>('paths');
+
+  // Drive the (global) sidechain depth from the gear slider; disable it on the
+  // way out so it can't leak into a standalone experiment opened afterward.
+  const { sidechain } = useSettings(SETTINGS);
+  useEffect(() => {
+    setSidechain(sidechain / 100, 150);
+    return () => setSidechain(0);
+  }, [sidechain]);
 
   return (
     <SharedClockProvider value={clock}>

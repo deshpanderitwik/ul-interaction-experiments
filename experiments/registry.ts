@@ -65,6 +65,12 @@ export const experiments: Experiment[] = [
         blurb: 'Each step can ratchet: tap to toggle, then press-drag a step up for fewer subdivisions or down for more (2, 3, 4… sub-hits in its slot — a drum roll). The bar splits into cells that light as they fire.',
         load: () => import('./drums/subdivisions'),
       },
+      {
+        id: 'kit',
+        title: 'Kit',
+        blurb: 'A 3-lane × 8-step grid — kick, snare, hi-hat. Snare and hats are noise approximated from stacked inharmonic sine plucks. Tap cells to build a beat; the playhead sweeps the bar.',
+        load: () => import('./drums/kit'),
+      },
     ],
   },
   {

@@ -71,6 +71,12 @@ export const experiments: Experiment[] = [
         blurb: 'A 3-lane × 8-step grid — kick, snare, hi-hat. Snare and hats are noise approximated from stacked inharmonic sine plucks. Tap cells to build a beat; the playhead sweeps the bar.',
         load: () => import('./drums/kit'),
       },
+      {
+        id: 'lanes',
+        title: 'Three Lanes',
+        blurb: 'The vertical kick sequencer widened to three parallel lanes (kick, snare, hi-hat) and lengthened to 16 steps. Tap cells in any lane to add or remove beats; the playhead falls down all three together.',
+        load: () => import('./drums/lanes'),
+      },
     ],
   },
   {

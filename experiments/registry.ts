@@ -77,6 +77,13 @@ export const experiments: Experiment[] = [
         blurb: 'The vertical kick sequencer widened to three parallel lanes (kick, snare, hi-hat) and lengthened to 16 steps. Tap cells in any lane to add or remove beats; the playhead falls down all three together.',
         load: () => import('./drums/lanes'),
       },
+      {
+        id: 'beat-map',
+        title: 'Beat Map',
+        blurb: 'A pure visual (no sound): every place a hit can land in a 2-bar loop — bar, 1/4, 1/8, 1/16 and the triplet grid — laid out as the territory we’re modeling, with tick height showing metric strength and a sweeping playhead.',
+        audio: false,
+        load: () => import('./drums/beat-map'),
+      },
     ],
   },
   {

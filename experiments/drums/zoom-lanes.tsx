@@ -1,9 +1,8 @@
 import { useClock } from '@shopify/react-native-skia';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
-  LinearTransition,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
@@ -126,10 +125,8 @@ export default function ZoomLanes() {
       <View style={[styles.board, { paddingBottom: 28 + hostBottomInset }]}>
         {LANES.map((lane, l) => {
           const expanded = zoomed === l;
-          // Enlarged lane dominates; the rest become thin slivers; equal when none open.
-          const flex = zoomed == null ? 1 : expanded ? 9 : 0.5;
           return (
-            <Animated.View key={lane.id} layout={LinearTransition.duration(240)} style={[styles.column, { flex }]}>
+            <LaneColumn key={lane.id} expanded={expanded} anyZoomed={zoomed != null}>
               <Pressable
                 style={styles.header}
                 onPress={() => setZoomed(expanded ? null : l)}
@@ -155,12 +152,38 @@ export default function ZoomLanes() {
                   />
                 ))}
               </View>
-            </Animated.View>
+            </LaneColumn>
           );
         })}
       </View>
     </View>
   );
+}
+
+// Enlarged lane's share vs a folded lane's share of the row width. Folded is kept
+// generous (not a thin sliver) so it stays easy to tap.
+const EXPANDED_GROW = 7;
+const FOLDED_GROW = 1.6;
+
+// A lane column whose width is driven by an animated flexGrow — so it interpolates
+// smoothly every frame both while opening AND while closing (unlike a one-shot
+// layout transition, which could snap on the way back).
+function LaneColumn({
+  expanded,
+  anyZoomed,
+  children,
+}: {
+  expanded: boolean;
+  anyZoomed: boolean;
+  children: ReactNode;
+}) {
+  const grow = useSharedValue(1);
+  useEffect(() => {
+    const target = anyZoomed ? (expanded ? EXPANDED_GROW : FOLDED_GROW) : 1;
+    grow.value = withTiming(target, { duration: 260, easing: Easing.inOut(Easing.cubic) });
+  }, [expanded, anyZoomed, grow]);
+  const style = useAnimatedStyle(() => ({ flexGrow: grow.value }));
+  return <Animated.View style={[styles.column, style]}>{children}</Animated.View>;
 }
 
 // One step cell. In a sliver lane a tap enlarges that lane; in the enlarged lane a
@@ -211,7 +234,8 @@ function Cell({
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
   board: { flex: 1, flexDirection: 'row', paddingTop: 100, paddingHorizontal: 12, gap: 8 },
-  column: { overflow: 'hidden' },
+  // flexGrow is animated in LaneColumn; basis 0 + shrink 1 make it behave like `flex`.
+  column: { flexBasis: 0, flexShrink: 1, overflow: 'hidden' },
   header: { height: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   laneLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '700', textAlign: 'center' },
   cellsCol: { flex: 1, gap: 4 },

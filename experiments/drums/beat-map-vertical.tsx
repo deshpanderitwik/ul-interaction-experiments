@@ -119,7 +119,6 @@ export default function VerticalBeatMap() {
         </Group>
       </Canvas>
 
-      <Text style={styles.caption}>where a hit can land · 2-bar loop</Text>
       {colHeaders.map((c, i) => (
         <Text key={`c${i}`} style={[styles.colHeader, { left: c.x, color: c.triplet ? 'rgba(255,176,92,0.8)' : 'rgba(255,255,255,0.6)' }]}>
           {c.label}
@@ -136,14 +135,6 @@ export default function VerticalBeatMap() {
 
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
-  caption: {
-    position: 'absolute',
-    top: 84,
-    left: LEFT - 6,
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 12,
-    letterSpacing: 1,
-  },
   colHeader: {
     position: 'absolute',
     top: TOP - 24,

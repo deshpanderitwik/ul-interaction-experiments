@@ -124,7 +124,6 @@ export default function BeatMap() {
         </Group>
       </Canvas>
 
-      <Text style={styles.caption}>where a hit can land · 2-bar loop</Text>
       {beatNums.map((b, i) => (
         <Text
           key={`b${i}`}
@@ -144,14 +143,6 @@ export default function BeatMap() {
 
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
-  caption: {
-    position: 'absolute',
-    top: 96,
-    left: LEFT,
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 12,
-    letterSpacing: 1,
-  },
   beatNum: {
     position: 'absolute',
     top: TOP - 26,

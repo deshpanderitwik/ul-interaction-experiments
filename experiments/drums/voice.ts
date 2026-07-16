@@ -60,3 +60,28 @@ export function playHat(open = false, gain = 0.5) {
     NoteSynth.pluck(f, g * 0.09, decay).catch(() => {});
   }
 }
+
+/** Tom: a tonal drum — a low-ish sine body with a short pitch-drop click for punch. */
+export function playTom(freq = 150, gain = 0.85) {
+  const g = Math.max(0, Math.min(1, gain));
+  recordNote(freq, g);
+  if (!NoteSynth) return;
+  NoteSynth.pluck(freq, g, 0.34).catch(() => {}); // tonal body
+  NoteSynth.pluck(freq * 1.6, g * 0.4, 0.06).catch(() => {}); // attack, fakes the pitch drop
+}
+
+/** Clap: a few very short bright noise bursts, flammed a hair apart for the "clap". */
+export function playClap(gain = 0.7) {
+  const g = Math.max(0, Math.min(1, gain));
+  recordNote(1000, g);
+  if (!NoteSynth) return;
+  const burst = () => {
+    for (let i = 0; i < 6; i++) {
+      const f = 1200 + i * 700 + Math.random() * 500; // bright, inharmonic
+      NoteSynth!.pluck(f, g * 0.1, 0.05).catch(() => {});
+    }
+  };
+  burst();
+  setTimeout(burst, 12); // the flam that reads as a clap, not a single hit
+  setTimeout(burst, 26);
+}

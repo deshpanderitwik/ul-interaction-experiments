@@ -91,6 +91,12 @@ export const experiments: Experiment[] = [
         audio: false,
         load: () => import('./drums/beat-map-vertical'),
       },
+      {
+        id: 'zoom-lanes',
+        title: 'Zoom Lanes',
+        blurb: 'A six-piece kit (kick, snare, tom, clap, hat, open hat — all modified sines). All lanes loop in parallel as compact strips; tap one to zoom into a full 16-step editing grid, tap the scrim behind it to zoom back out.',
+        load: () => import('./drums/zoom-lanes'),
+      },
     ],
   },
   {

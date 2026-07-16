@@ -3,10 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
-  FadeIn,
-  FadeOut,
-  ZoomIn,
-  ZoomOut,
+  LinearTransition,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
@@ -20,12 +17,11 @@ import { useSettingsActions } from '../settings';
 import { useTempo } from '../tempo';
 import { playClap, playHat, playKick, playSnare, playTom } from './voice';
 
-// Drums · Zoom Lanes — a six-piece kit (all modified sines) laid out as six
-// VERTICAL lanes (columns), all looping in parallel on the shared clock with the
-// playhead falling down them together. Tap a lane and it zooms: the SAME vertical
-// lane just gets bigger (a wide column of 16 tall cells) over a dimmed scrim, so
-// it's easy to edit — the orientation never changes. Tap the scrim behind it to
-// zoom back out. The kit keeps playing throughout.
+// Drums · Zoom Lanes — a six-piece kit (all modified sines) as six VERTICAL lanes
+// looping in parallel on the shared clock, playhead falling down them. Tap a lane
+// and it grows in place to occupy the center (the others shrink to slivers, still
+// tappable to switch) so it's easy to edit — same lane, same orientation, just
+// bigger; no modal. Tap the enlarged lane's label to collapse back. Monochrome.
 
 const STEPS = 16; // one bar of sixteenth-notes
 const SCHED_MS = 10;
@@ -64,14 +60,13 @@ export default function ZoomLanes() {
 
   const [grid, setGrid] = useState<boolean[][]>(() => SEED.map((row) => row.slice()));
   const [current, setCurrent] = useState(-1);
-  const [zoomed, setZoomed] = useState<number | null>(null); // which lane is open for editing
+  const [zoomed, setZoomed] = useState<number | null>(null); // which lane is enlarged
 
   const gridRef = useRef(grid);
   gridRef.current = grid;
   const tempoRef = useRef(tempo);
   tempoRef.current = tempo;
 
-  // Flash channels for the zoomed lane's big cells (only the open lane registers).
   const flashRef = useRef<Map<number, Flash>>(new Map());
   const registerFlash = useCallback((k: number, f: Flash) => flashRef.current.set(k, f), []);
   const unregisterFlash = useCallback((k: number) => flashRef.current.delete(k), []);
@@ -96,7 +91,6 @@ export default function ZoomLanes() {
     }
   }, []);
 
-  // All six lanes run off one clock; fire on the crossing into a new step.
   const t0Ref = useRef(0);
   const lastStepRef = useRef(-1);
   useEffect(() => {
@@ -129,64 +123,55 @@ export default function ZoomLanes() {
 
   return (
     <View style={styles.fill}>
-      {/* Overview: six vertical lanes side by side, playhead falling down them. */}
       <View style={[styles.board, { paddingBottom: 28 + hostBottomInset }]}>
-        {LANES.map((lane, l) => (
-          <Pressable key={lane.id} style={styles.column} onPress={() => setZoomed(l)}>
-            <Text style={styles.laneLabel}>{lane.short}</Text>
-            <View style={styles.cellsCol}>
-              {grid[l].map((on, s) => (
-                <View
-                  key={s}
-                  style={[
-                    styles.miniCell,
-                    on ? styles.miniOn : isBeat(s) ? styles.miniBeat : styles.miniOff,
-                    s === current ? styles.miniCurrent : null,
-                  ]}
-                />
-              ))}
-            </View>
-          </Pressable>
-        ))}
+        {LANES.map((lane, l) => {
+          const expanded = zoomed === l;
+          // Enlarged lane dominates; the rest become thin slivers; equal when none open.
+          const flex = zoomed == null ? 1 : expanded ? 9 : 0.5;
+          return (
+            <Animated.View key={lane.id} layout={LinearTransition.duration(240)} style={[styles.column, { flex }]}>
+              <Pressable
+                style={styles.header}
+                onPress={() => setZoomed(expanded ? null : l)}
+                accessibilityRole="button"
+                accessibilityLabel={`${lane.label}${expanded ? ' — collapse' : ''}`}
+              >
+                <Text style={styles.laneLabel} numberOfLines={1}>
+                  {expanded ? lane.label : lane.short}
+                </Text>
+              </Pressable>
+              <View style={styles.cellsCol}>
+                {grid[l].map((on, s) => (
+                  <Cell
+                    key={s}
+                    lane={l}
+                    step={s}
+                    active={on}
+                    isCurrent={s === current}
+                    beat={isBeat(s)}
+                    onPress={() => (expanded ? toggle(l, s) : setZoomed(l))}
+                    register={registerFlash}
+                    unregister={unregisterFlash}
+                  />
+                ))}
+              </View>
+            </Animated.View>
+          );
+        })}
       </View>
-
-      {/* Zoomed: the same vertical lane, just bigger, over a scrim. */}
-      {zoomed != null ? (
-        <Animated.View style={styles.scrim} entering={FadeIn.duration(140)} exiting={FadeOut.duration(140)}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setZoomed(null)} />
-          <Animated.View style={styles.panel} entering={ZoomIn.duration(180)} exiting={ZoomOut.duration(140)}>
-            <Text style={styles.panelTitle}>{LANES[zoomed].label}</Text>
-            <View style={styles.bigCol}>
-              {grid[zoomed].map((on, s) => (
-                <BigCell
-                  key={s}
-                  lane={zoomed}
-                  step={s}
-                  active={on}
-                  isCurrent={s === current}
-                  beat={isBeat(s)}
-                  onToggle={toggle}
-                  register={registerFlash}
-                  unregister={unregisterFlash}
-                />
-              ))}
-            </View>
-            <Text style={styles.hint}>tap outside to close</Text>
-          </Animated.View>
-        </Animated.View>
-      ) : null}
     </View>
   );
 }
 
-// A big editable step in the zoomed lane — same vertical orientation, just larger.
-function BigCell({
+// One step cell. In a sliver lane a tap enlarges that lane; in the enlarged lane a
+// tap toggles the hit. Monochrome: white fill/rims on black, a flash on fire.
+function Cell({
   lane,
   step,
   active,
   isCurrent,
   beat,
-  onToggle,
+  onPress,
   register,
   unregister,
 }: {
@@ -195,7 +180,7 @@ function BigCell({
   active: boolean;
   isCurrent: boolean;
   beat: boolean;
-  onToggle: (lane: number, step: number) => void;
+  onPress: () => void;
   register: (k: number, f: Flash) => void;
   unregister: (k: number) => void;
 }) {
@@ -209,15 +194,15 @@ function BigCell({
   const glowStyle = useAnimatedStyle(() => ({ opacity: flash.value }));
 
   return (
-    <Pressable style={styles.bigCellPress} onPress={() => onToggle(lane, step)}>
+    <Pressable style={styles.cellPress} onPress={onPress}>
       <View
         style={[
-          styles.bigCell,
-          active ? styles.bigOn : beat ? styles.bigBeat : styles.bigOff,
-          isCurrent ? styles.bigCurrent : null,
+          styles.cell,
+          active ? styles.cellOn : beat ? styles.cellBeat : styles.cellOff,
+          isCurrent ? styles.cellCurrent : null,
         ]}
       >
-        <Animated.View pointerEvents="none" style={[styles.bigGlow, glowStyle]} />
+        <Animated.View pointerEvents="none" style={[styles.cellGlow, glowStyle]} />
       </View>
     </Pressable>
   );
@@ -225,53 +210,17 @@ function BigCell({
 
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
-  // Six lane-columns side by side.
   board: { flex: 1, flexDirection: 'row', paddingTop: 100, paddingHorizontal: 12, gap: 8 },
-  column: { flex: 1 },
-  laneLabel: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 13,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
+  column: { overflow: 'hidden' },
+  header: { height: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  laneLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '700', textAlign: 'center' },
   cellsCol: { flex: 1, gap: 4 },
-  miniCell: { flex: 1, borderRadius: 5, borderWidth: 1 },
-  miniOff: { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.1)' },
-  miniBeat: { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.2)' },
-  miniOn: { backgroundColor: 'rgba(255,255,255,0.28)', borderColor: 'rgba(255,255,255,0.42)' },
-  miniCurrent: { borderColor: 'rgba(120,220,255,0.9)', borderWidth: 1.5 },
-
-  scrim: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.66)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  panel: {
-    width: '72%',
-    height: '82%',
-    borderRadius: 22,
-    backgroundColor: 'rgba(16,16,18,0.98)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.14)',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
-  },
-  panelTitle: { color: '#fff', fontSize: 19, fontWeight: '700', letterSpacing: 0.5, marginBottom: 12, textAlign: 'center' },
-  // The big vertical lane: 16 tall cells stacked, same orientation as the mini.
-  bigCol: { flex: 1, gap: 5 },
-  bigCellPress: { flex: 1 },
-  bigCell: { flex: 1, borderRadius: 10, borderWidth: 1.5, overflow: 'hidden' },
-  bigOff: { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.12)' },
-  bigBeat: { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.24)' },
-  bigOn: { backgroundColor: 'rgba(255,255,255,0.28)', borderColor: 'rgba(255,255,255,0.45)' },
-  bigCurrent: { borderColor: 'rgba(120,220,255,0.9)', borderWidth: 2 },
-  bigGlow: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#fff' },
-  hint: { color: 'rgba(255,255,255,0.35)', fontSize: 11, textAlign: 'center', marginTop: 10, letterSpacing: 0.5 },
+  cellPress: { flex: 1 },
+  cell: { flex: 1, borderRadius: 6, borderWidth: 1, overflow: 'hidden' },
+  cellOff: { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.1)' },
+  cellBeat: { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.22)' },
+  cellOn: { backgroundColor: 'rgba(255,255,255,0.3)', borderColor: 'rgba(255,255,255,0.5)' },
+  // Monochrome playhead: a bright white rim on the current step.
+  cellCurrent: { borderColor: '#fff', borderWidth: 2 },
+  cellGlow: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#fff' },
 });

@@ -20,25 +20,25 @@ import { useSettingsActions } from '../settings';
 import { useTempo } from '../tempo';
 import { playClap, playHat, playKick, playSnare, playTom } from './voice';
 
-// Drums · Zoom Lanes — a six-piece kit (all modified sines), where you edit one
-// lane at a time by zooming into it. The overview shows all six lanes as compact
-// strips, all looping in parallel on the shared clock. Tap a lane and it zooms
-// into a full 16-step editing grid over a dimmed scrim; make granular edits, then
-// tap the scrim behind it to zoom back out. The whole kit keeps playing the whole
-// time.
+// Drums · Zoom Lanes — a six-piece kit (all modified sines) laid out as six
+// VERTICAL lanes (columns), all looping in parallel on the shared clock with the
+// playhead falling down them together. Tap a lane and it zooms: the SAME vertical
+// lane just gets bigger (a wide column of 16 tall cells) over a dimmed scrim, so
+// it's easy to edit — the orientation never changes. Tap the scrim behind it to
+// zoom back out. The kit keeps playing throughout.
 
 const STEPS = 16; // one bar of sixteenth-notes
 const SCHED_MS = 10;
 const isBeat = (s: number) => s % 4 === 0;
 
-type Lane = { id: string; label: string; play: () => void };
+type Lane = { id: string; label: string; short: string; play: () => void };
 const LANES: Lane[] = [
-  { id: 'kick', label: 'Kick', play: () => playKick() },
-  { id: 'snare', label: 'Snare', play: () => playSnare() },
-  { id: 'tom', label: 'Tom', play: () => playTom() },
-  { id: 'clap', label: 'Clap', play: () => playClap() },
-  { id: 'chat', label: 'Hat', play: () => playHat(false) },
-  { id: 'ohat', label: 'Open Hat', play: () => playHat(true) },
+  { id: 'kick', label: 'Kick', short: 'K', play: () => playKick() },
+  { id: 'snare', label: 'Snare', short: 'S', play: () => playSnare() },
+  { id: 'tom', label: 'Tom', short: 'T', play: () => playTom() },
+  { id: 'clap', label: 'Clap', short: 'C', play: () => playClap() },
+  { id: 'chat', label: 'Hat', short: 'H', play: () => playHat(false) },
+  { id: 'ohat', label: 'Open Hat', short: 'O', play: () => playHat(true) },
 ];
 
 // Seed a basic beat on kick/snare/hat; tom, clap, open-hat start empty to fill in.
@@ -129,12 +129,12 @@ export default function ZoomLanes() {
 
   return (
     <View style={styles.fill}>
-      {/* Overview: all six lanes as compact strips. */}
-      <View style={[styles.overview, { paddingBottom: 28 + hostBottomInset }]}>
+      {/* Overview: six vertical lanes side by side, playhead falling down them. */}
+      <View style={[styles.board, { paddingBottom: 28 + hostBottomInset }]}>
         {LANES.map((lane, l) => (
-          <Pressable key={lane.id} style={styles.laneRow} onPress={() => setZoomed(l)}>
-            <Text style={styles.laneLabel}>{lane.label}</Text>
-            <View style={styles.strip}>
+          <Pressable key={lane.id} style={styles.column} onPress={() => setZoomed(l)}>
+            <Text style={styles.laneLabel}>{lane.short}</Text>
+            <View style={styles.cellsCol}>
               {grid[l].map((on, s) => (
                 <View
                   key={s}
@@ -150,13 +150,13 @@ export default function ZoomLanes() {
         ))}
       </View>
 
-      {/* Zoomed editor: a big 16-step grid for one lane over a scrim. */}
+      {/* Zoomed: the same vertical lane, just bigger, over a scrim. */}
       {zoomed != null ? (
         <Animated.View style={styles.scrim} entering={FadeIn.duration(140)} exiting={FadeOut.duration(140)}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setZoomed(null)} />
           <Animated.View style={styles.panel} entering={ZoomIn.duration(180)} exiting={ZoomOut.duration(140)}>
             <Text style={styles.panelTitle}>{LANES[zoomed].label}</Text>
-            <View style={styles.bigGrid}>
+            <View style={styles.bigCol}>
               {grid[zoomed].map((on, s) => (
                 <BigCell
                   key={s}
@@ -179,7 +179,7 @@ export default function ZoomLanes() {
   );
 }
 
-// A big editable step in the zoomed grid, laid out 4-per-row (a beat per row).
+// A big editable step in the zoomed lane — same vertical orientation, just larger.
 function BigCell({
   lane,
   step,
@@ -225,19 +225,21 @@ function BigCell({
 
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
-  overview: { flex: 1, paddingTop: 104, paddingHorizontal: 16, gap: 10 },
-  laneRow: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  // Six lane-columns side by side.
+  board: { flex: 1, flexDirection: 'row', paddingTop: 100, paddingHorizontal: 12, gap: 8 },
+  column: { flex: 1 },
   laneLabel: {
-    width: 70,
-    color: 'rgba(255,255,255,0.65)',
+    color: 'rgba(255,255,255,0.6)',
     fontSize: 13,
     fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 8,
   },
-  strip: { flex: 1, flexDirection: 'row', gap: 3, height: '62%' },
-  miniCell: { flex: 1, borderRadius: 4, borderWidth: 1 },
+  cellsCol: { flex: 1, gap: 4 },
+  miniCell: { flex: 1, borderRadius: 5, borderWidth: 1 },
   miniOff: { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.1)' },
   miniBeat: { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.2)' },
-  miniOn: { backgroundColor: 'rgba(255,255,255,0.7)', borderColor: 'rgba(255,255,255,0.8)' },
+  miniOn: { backgroundColor: 'rgba(255,255,255,0.28)', borderColor: 'rgba(255,255,255,0.42)' },
   miniCurrent: { borderColor: 'rgba(120,220,255,0.9)', borderWidth: 1.5 },
 
   scrim: {
@@ -251,23 +253,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   panel: {
-    width: '90%',
+    width: '72%',
+    height: '82%',
     borderRadius: 22,
     backgroundColor: 'rgba(16,16,18,0.98)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.14)',
-    paddingHorizontal: 18,
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 12,
   },
-  panelTitle: { color: '#fff', fontSize: 20, fontWeight: '700', letterSpacing: 0.5, marginBottom: 16, textAlign: 'center' },
-  bigGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  bigCellPress: { width: '22%', aspectRatio: 1 },
-  bigCell: { flex: 1, borderRadius: 12, borderWidth: 1.5, overflow: 'hidden' },
+  panelTitle: { color: '#fff', fontSize: 19, fontWeight: '700', letterSpacing: 0.5, marginBottom: 12, textAlign: 'center' },
+  // The big vertical lane: 16 tall cells stacked, same orientation as the mini.
+  bigCol: { flex: 1, gap: 5 },
+  bigCellPress: { flex: 1 },
+  bigCell: { flex: 1, borderRadius: 10, borderWidth: 1.5, overflow: 'hidden' },
   bigOff: { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.12)' },
   bigBeat: { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.24)' },
   bigOn: { backgroundColor: 'rgba(255,255,255,0.28)', borderColor: 'rgba(255,255,255,0.45)' },
   bigCurrent: { borderColor: 'rgba(120,220,255,0.9)', borderWidth: 2 },
   bigGlow: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#fff' },
-  hint: { color: 'rgba(255,255,255,0.35)', fontSize: 11, textAlign: 'center', marginTop: 14, letterSpacing: 0.5 },
+  hint: { color: 'rgba(255,255,255,0.35)', fontSize: 11, textAlign: 'center', marginTop: 10, letterSpacing: 0.5 },
 });

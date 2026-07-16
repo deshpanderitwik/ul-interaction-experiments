@@ -94,7 +94,7 @@ export const experiments: Experiment[] = [
       {
         id: 'zoom-lanes',
         title: 'Zoom Lanes',
-        blurb: 'A six-piece kit (kick, snare, tom, clap, hat, open hat — all modified sines). All lanes loop in parallel as compact strips; tap one to zoom into a full 16-step editing grid, tap the scrim behind it to zoom back out.',
+        blurb: 'A six-piece kit (kick, snare, tom, clap, hat, open hat — all modified sines) as six vertical lanes looping in parallel. Tap a lane and the same vertical lane just gets bigger (16 tall cells) over a scrim for easy editing; tap the scrim to zoom back out.',
         load: () => import('./drums/zoom-lanes'),
       },
     ],

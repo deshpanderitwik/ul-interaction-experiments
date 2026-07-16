@@ -351,7 +351,9 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(255,255,255,0.12)',
     paddingTop: 10,
   },
-  clipRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14 },
+  // flexGrow fills the scroll width so justifyContent can center the boxes; the
+  // cluster then grows symmetrically from the middle as clips are added.
+  clipRow: { flexGrow: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 14 },
   clipBox: {
     width: 40,
     height: 40,

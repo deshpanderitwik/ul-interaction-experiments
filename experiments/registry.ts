@@ -84,6 +84,13 @@ export const experiments: Experiment[] = [
         audio: false,
         load: () => import('./drums/beat-map'),
       },
+      {
+        id: 'beat-map-vertical',
+        title: 'Vertical Beat Map',
+        blurb: 'The Beat Map rotated: time flows top-to-bottom and the subdivision levels are columns; a horizontal playhead descends the 2-bar loop. Same territory, vertical orientation.',
+        audio: false,
+        load: () => import('./drums/beat-map-vertical'),
+      },
     ],
   },
   {

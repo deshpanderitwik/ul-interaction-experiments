@@ -1,8 +1,10 @@
 import { useClock } from '@shopify/react-native-skia';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
@@ -17,15 +19,24 @@ import { useTempo } from '../tempo';
 import { playClap, playHat, playKick, playSnare, playTom } from './voice';
 
 // Drums · Zoom Lanes — a six-piece kit (all modified sines) as six vertical lanes.
-// Tap a lane to grow it in place for editing. A vertical PAGE selector on the left
-// sets the pattern length in bars (each page = 16 steps): tap a page to view/edit
-// that bar, + adds a bar (longer patterns), long-press for Clone/Delete. A CLIP bar
-// at the bottom holds whole patterns: tap to switch, + to add, long-press for
-// Clone/Delete. Both selectors are center-aligned. Monochrome; shared clock.
+// A cell holds a SUBDIVISION count, not just on/off: tap toggles on/off, and
+// hold-drag up/down sets how many sub-hits fire inside that step (2, 3, 4… = a
+// ratchet/roll, splitting the cell into that many bands that light in sequence).
+// A left PAGE selector sets pattern length in bars; a bottom CLIP bar holds whole
+// patterns; both center-aligned with Clone/Delete on long-press. Monochrome.
 
 const PAGE = 16; // steps per bar/page
-const SCHED_MS = 10;
+const SCHED_MS = 8;
 const isBeat = (s: number) => s % 4 === 0;
+// Subdivision rungs a cell steps through on a drag: 0 = off, 1 = single hit, then
+// ratchets. Kept modest at the top so fast sub-hits still resolve at this poll rate.
+const LEVELS = [0, 1, 2, 3, 4, 6, 8] as const;
+const DRAG_PX = 22; // finger travel per subdivision rung
+const levelIndex = (v: number) => {
+  const i = (LEVELS as readonly number[]).indexOf(v);
+  return i < 0 ? (v > 0 ? 1 : 0) : i;
+};
+const clampIdx = (i: number) => Math.max(0, Math.min(LEVELS.length - 1, i));
 
 type Lane = { id: string; label: string; short: string; play: () => void };
 const LANES: Lane[] = [
@@ -37,23 +48,22 @@ const LANES: Lane[] = [
   { id: 'ohat', label: 'Open Hat', short: 'O', play: () => playHat(true) },
 ];
 
-type Grid = boolean[][]; // [lane][step], length is PAGE * pages
-const emptyGrid = (): Grid => LANES.map(() => Array(PAGE).fill(false));
+type Grid = number[][]; // [lane][step] = subdivision count (0 = off); length is PAGE * pages
+const emptyGrid = (): Grid => LANES.map(() => Array(PAGE).fill(0));
 const cloneGrid = (g: Grid): Grid => g.map((row) => row.slice());
 const pagesOf = (g: Grid): number => g[0].length / PAGE;
 
-// The first clip is seeded with a basic one-bar beat.
 const seedGrid = (): Grid => [
-  Array.from({ length: PAGE }, (_, s) => s === 0 || s === 8), // kick
-  Array.from({ length: PAGE }, (_, s) => s === 4 || s === 12), // snare
-  Array.from({ length: PAGE }, () => false), // tom
-  Array.from({ length: PAGE }, () => false), // clap
-  Array.from({ length: PAGE }, (_, s) => s % 2 === 0), // closed hat
-  Array.from({ length: PAGE }, () => false), // open hat
+  Array.from({ length: PAGE }, (_, s) => (s === 0 || s === 8 ? 1 : 0)), // kick
+  Array.from({ length: PAGE }, (_, s) => (s === 4 || s === 12 ? 1 : 0)), // snare
+  Array.from({ length: PAGE }, () => 0), // tom
+  Array.from({ length: PAGE }, () => 0), // clap
+  Array.from({ length: PAGE }, (_, s) => (s % 2 === 0 ? 1 : 0)), // closed hat
+  Array.from({ length: PAGE }, () => 0), // open hat
 ];
 
 const cellKey = (lane: number, step: number) => lane * PAGE + step;
-type Flash = { flash: SharedValue<number> };
+type Flash = { flash: SharedValue<number>; band: SharedValue<number> };
 
 export default function ZoomLanes() {
   const live = useExperimentActive();
@@ -66,14 +76,14 @@ export default function ZoomLanes() {
   const [clips, setClips] = useState<Grid[]>(() => [seedGrid()]);
   const [active, setActive] = useState(0);
   const [viewPage, setViewPage] = useState(0);
-  const [current, setCurrent] = useState(-1); // absolute step within the active clip
+  const [current, setCurrent] = useState(-1);
   const [zoomed, setZoomed] = useState<number | null>(null);
   const [clipMenu, setClipMenu] = useState<number | null>(null);
   const [pageMenu, setPageMenu] = useState<number | null>(null);
 
   const grid = clips[active];
   const pageCount = pagesOf(grid);
-  const page = Math.min(Math.max(0, viewPage), pageCount - 1); // clamp (clips vary in length)
+  const page = Math.min(Math.max(0, viewPage), pageCount - 1);
   const playingPage = current >= 0 ? Math.floor(current / PAGE) : -1;
   const localCurrent = current >= 0 ? current % PAGE : -1;
 
@@ -90,17 +100,37 @@ export default function ZoomLanes() {
   const registerFlash = useCallback((k: number, f: Flash) => flashRef.current.set(k, f), []);
   const unregisterFlash = useCallback((k: number) => flashRef.current.delete(k), []);
 
-  // Toggle the step at the viewed page's local index `s`.
-  const toggle = useCallback(
+  // Set the viewed page's local step `s` of `lane` to a subdivision level.
+  const setCell = useCallback((lane: number, s: number, level: number) => {
+    const abs = pageRef.current * PAGE + s;
+    setClips((prev) =>
+      prev.map((g, ci) =>
+        ci === activeRef.current ? g.map((row, l) => (l === lane ? row.map((v, i) => (i === abs ? level : v)) : row)) : g
+      )
+    );
+  }, []);
+
+  // Gesture callbacks (stable — read live state via refs).
+  const onCellTap = useCallback(
     (lane: number, s: number) => {
-      const abs = page * PAGE + s;
-      setClips((prev) =>
-        prev.map((g, ci) =>
-          ci === active ? g.map((row, l) => (l === lane ? row.map((on, i) => (i === abs ? !on : on)) : row)) : g
-        )
-      );
+      const cur = gridRef.current[lane][pageRef.current * PAGE + s];
+      setCell(lane, s, cur > 0 ? 0 : 1); // tap = on/off
+      setZoomed(lane); // and focus its lane
     },
-    [active, page]
+    [setCell]
+  );
+  const dragStartRef = useRef(0);
+  const onCellGrab = useCallback((lane: number, s: number) => {
+    dragStartRef.current = levelIndex(gridRef.current[lane][pageRef.current * PAGE + s]);
+    setZoomed(lane);
+  }, []);
+  const onCellDrag = useCallback(
+    (lane: number, s: number, translationY: number) => {
+      // Down = more subdivisions, up = fewer.
+      const idx = clampIdx(dragStartRef.current + Math.round(translationY / DRAG_PX));
+      setCell(lane, s, LEVELS[idx]);
+    },
+    [setCell]
   );
 
   // --- clip ops ---
@@ -124,12 +154,10 @@ export default function ZoomLanes() {
     [clips.length]
   );
 
-  // --- page ops (act on the active clip; a page is a bar of PAGE steps) ---
+  // --- page ops ---
   const addPage = useCallback(() => {
-    setClips((prev) =>
-      prev.map((g, ci) => (ci === active ? g.map((row) => [...row, ...Array(PAGE).fill(false)]) : g))
-    );
-    setViewPage(pageCount); // the appended bar
+    setClips((prev) => prev.map((g, ci) => (ci === active ? g.map((row) => [...row, ...Array(PAGE).fill(0)]) : g)));
+    setViewPage(pageCount);
   }, [active, pageCount]);
   const clonePage = useCallback(
     (p: number) => {
@@ -157,49 +185,65 @@ export default function ZoomLanes() {
     [active, pageCount]
   );
 
-  const fireStep = useCallback((step: number) => {
-    const g = gridRef.current;
-    const localStep = step % PAGE;
-    const firedPage = Math.floor(step / PAGE);
-    for (let lane = 0; lane < LANES.length; lane++) {
-      if (!g[lane][step]) continue;
-      LANES[lane].play();
-      if (firedPage !== pageRef.current) continue; // only flash cells on the viewed page
-      const f = flashRef.current.get(cellKey(lane, localStep));
-      if (f) {
-        f.flash.value = 0;
-        f.flash.value = withSequence(
-          withTiming(1, { duration: 35, easing: Easing.out(Easing.quad) }),
-          withTiming(0, { duration: 220, easing: Easing.out(Easing.quad) })
-        );
-      }
+  // Fire one sub-hit of a lane's step, and light that band if it's on the viewed page.
+  const fireHit = useCallback((lane: number, step: number, subIdx: number) => {
+    LANES[lane].play();
+    if (Math.floor(step / PAGE) !== pageRef.current) return;
+    const f = flashRef.current.get(cellKey(lane, step % PAGE));
+    if (f) {
+      f.band.value = subIdx;
+      f.flash.value = 0;
+      f.flash.value = withSequence(
+        withTiming(1, { duration: 30, easing: Easing.out(Easing.quad) }),
+        withTiming(0, { duration: 200, easing: Easing.out(Easing.quad) })
+      );
     }
   }, []);
 
+  // One clock; per-lane ratchet: each lane subdivides its current step into `count`
+  // sub-hits and fires on each sub-crossing.
   const t0Ref = useRef(0);
   const lastStepRef = useRef(-1);
+  const laneStateRef = useRef(LANES.map(() => ({ step: -1, sub: -1 })));
   useEffect(() => {
     if (!live) return;
     t0Ref.current = sharedClock ? 0 : clock.value;
     lastStepRef.current = -1;
+    laneStateRef.current.forEach((r) => {
+      r.step = -1;
+      r.sub = -1;
+    });
     setCurrent(-1);
     const handle = setInterval(() => {
       const bpm = tempoRef.current;
-      const stepMs = 60000 / bpm / 4; // sixteenth-notes
-      const total = gridRef.current[0].length; // PAGE * pages of the active clip
-      const k = Math.floor((clock.value - t0Ref.current) / stepMs);
+      const stepMs = 60000 / bpm / 4;
+      const g = gridRef.current;
+      const total = g[0].length;
+      const now = clock.value - t0Ref.current;
+      const k = Math.floor(now / stepMs);
       const step = ((k % total) + total) % total;
+      const intoStep = now - k * stepMs;
       if (step !== lastStepRef.current) {
         lastStepRef.current = step;
         setCurrent(step);
-        fireStep(step);
+      }
+      const ls = laneStateRef.current;
+      for (let lane = 0; lane < LANES.length; lane++) {
+        if (ls[lane].step !== step) {
+          ls[lane].step = step;
+          ls[lane].sub = -1;
+        }
+        const count = g[lane][step];
+        if (count <= 0) continue;
+        const subIdx = Math.min(count - 1, Math.floor(intoStep / (stepMs / count)));
+        if (subIdx !== ls[lane].sub) {
+          ls[lane].sub = subIdx;
+          fireHit(lane, step, subIdx);
+        }
       }
     }, SCHED_MS);
-    return () => {
-      clearInterval(handle);
-      lastStepRef.current = -1;
-    };
-  }, [live, fireStep, clock, sharedClock]);
+    return () => clearInterval(handle);
+  }, [live, fireHit, clock, sharedClock]);
 
   const actions = useMemo(
     () => [
@@ -209,9 +253,7 @@ export default function ZoomLanes() {
         onPress: () =>
           setClips((prev) =>
             prev.map((g, ci) =>
-              ci === activeRef.current
-                ? g.map((row) => row.map((on, i) => (Math.floor(i / PAGE) === pageRef.current ? false : on)))
-                : g
+              ci === activeRef.current ? g.map((row) => row.map((v, i) => (Math.floor(i / PAGE) === pageRef.current ? 0 : v))) : g
             )
           ),
       },
@@ -223,7 +265,6 @@ export default function ZoomLanes() {
   return (
     <View style={styles.fill}>
       <View style={styles.content}>
-        {/* Page selector: vertical, center-aligned; sets pattern length in bars. */}
         <View style={styles.pageSel}>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.pageCol}>
             {Array.from({ length: pageCount }, (_, i) => {
@@ -248,7 +289,6 @@ export default function ZoomLanes() {
           </ScrollView>
         </View>
 
-        {/* Lanes for the viewed bar. */}
         <View style={styles.board}>
           {LANES.map((lane, l) => {
             const expanded = zoomed === l;
@@ -260,20 +300,17 @@ export default function ZoomLanes() {
                   </Text>
                 </Pressable>
                 <View style={styles.cellsCol}>
-                  {grid[l].slice(page * PAGE, page * PAGE + PAGE).map((on, s) => (
+                  {grid[l].slice(page * PAGE, page * PAGE + PAGE).map((count, s) => (
                     <Cell
                       key={s}
                       lane={l}
                       step={s}
-                      active={on}
+                      count={count}
                       isCurrent={playingPage === page && s === localCurrent}
                       beat={isBeat(s)}
-                      // Tap any cell to toggle it AND focus its lane — quick add,
-                      // then the lane is already open for more edits.
-                      onPress={() => {
-                        toggle(l, s);
-                        setZoomed(l);
-                      }}
+                      onTap={onCellTap}
+                      onGrab={onCellGrab}
+                      onDrag={onCellDrag}
                       register={registerFlash}
                       unregister={unregisterFlash}
                     />
@@ -285,7 +322,6 @@ export default function ZoomLanes() {
         </View>
       </View>
 
-      {/* Clip bar: whole patterns; center-aligned, shifted up for bottom clearance. */}
       <View style={[styles.clipBar, { paddingBottom: 26 + hostBottomInset }]}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.clipRow}>
           {clips.map((_, i) => {
@@ -331,7 +367,6 @@ export default function ZoomLanes() {
   );
 }
 
-// A centered Clone / Delete menu over a dismiss backdrop.
 function OpMenu({
   title,
   onClone,
@@ -380,48 +415,79 @@ function LaneColumn({ expanded, anyZoomed, children }: { expanded: boolean; anyZ
   return <Animated.View style={[styles.column, style]}>{children}</Animated.View>;
 }
 
+// One step cell. Tap = on/off + focus lane; hold-drag up/down = subdivision count.
+// A cell with count N shows N bands (top fires first); the firing band lights.
 function Cell({
   lane,
   step,
-  active,
+  count,
   isCurrent,
   beat,
-  onPress,
+  onTap,
+  onGrab,
+  onDrag,
   register,
   unregister,
 }: {
   lane: number;
   step: number;
-  active: boolean;
+  count: number;
   isCurrent: boolean;
   beat: boolean;
-  onPress: () => void;
+  onTap: (lane: number, s: number) => void;
+  onGrab: (lane: number, s: number) => void;
+  onDrag: (lane: number, s: number, ty: number) => void;
   register: (k: number, f: Flash) => void;
   unregister: (k: number) => void;
 }) {
   const flash = useSharedValue(0);
+  const band = useSharedValue(-1);
   useEffect(() => {
-    register(cellKey(lane, step), { flash });
+    register(cellKey(lane, step), { flash, band });
     return () => unregister(cellKey(lane, step));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lane, step]);
 
-  const glowStyle = useAnimatedStyle(() => ({ opacity: flash.value }));
+  const gesture = useMemo(() => {
+    const pan = Gesture.Pan()
+      .minDistance(8)
+      .onStart(() => runOnJS(onGrab)(lane, step))
+      .onUpdate((e) => runOnJS(onDrag)(lane, step, e.translationY));
+    const tap = Gesture.Tap()
+      .maxDuration(250)
+      .onStart(() => runOnJS(onTap)(lane, step));
+    return Gesture.Race(pan, tap);
+  }, [lane, step, onTap, onGrab, onDrag]);
+
+  const n = Math.max(1, count);
 
   return (
-    <Pressable style={styles.cellPress} onPress={onPress}>
-      <View style={[styles.cell, active ? styles.cellOn : beat ? styles.cellBeat : styles.cellOff, isCurrent ? styles.cellCurrent : null]}>
-        <Animated.View pointerEvents="none" style={[styles.cellGlow, glowStyle]} />
+    <GestureDetector gesture={gesture}>
+      <View style={[styles.cell, count > 0 ? styles.cellOn : beat ? styles.cellBeat : styles.cellOff, isCurrent ? styles.cellCurrent : null]}>
+        {count > 0 ? (
+          <View style={styles.bands}>
+            {Array.from({ length: n }, (_, i) => (
+              <Band key={i} index={i} flash={flash} band={band} />
+            ))}
+          </View>
+        ) : null}
       </View>
-    </Pressable>
+    </GestureDetector>
   );
+}
+
+function Band({ index, flash, band }: { index: number; flash: SharedValue<number>; band: SharedValue<number> }) {
+  const style = useAnimatedStyle(() => {
+    const lit = band.value === index ? flash.value : 0;
+    return { opacity: 0.26 + 0.74 * lit };
+  });
+  return <Animated.View style={[styles.band, style]} />;
 }
 
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
   content: { flex: 1, flexDirection: 'row', paddingTop: 96 },
 
-  // Page selector (left, vertically centered)
   pageSel: { width: 48 },
   pageCol: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 8 },
   pageBox: { width: 34, height: 34, borderRadius: 9, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
@@ -431,15 +497,14 @@ const styles = StyleSheet.create({
   header: { height: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   laneLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '700', textAlign: 'center' },
   cellsCol: { flex: 1, gap: 4 },
-  cellPress: { flex: 1 },
-  cell: { flex: 1, borderRadius: 6, borderWidth: 1, overflow: 'hidden' },
+  cell: { flex: 1, borderRadius: 6, borderWidth: 1, overflow: 'hidden', padding: 2 },
   cellOff: { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.1)' },
   cellBeat: { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.22)' },
-  cellOn: { backgroundColor: 'rgba(255,255,255,0.3)', borderColor: 'rgba(255,255,255,0.5)' },
+  cellOn: { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.5)' },
   cellCurrent: { borderColor: '#fff', borderWidth: 2 },
-  cellGlow: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#fff' },
+  bands: { flex: 1, gap: 2 },
+  band: { flex: 1, borderRadius: 3, backgroundColor: '#fff' },
 
-  // Shared box look (clip + page)
   boxOff: { borderColor: 'rgba(255,255,255,0.22)', backgroundColor: 'transparent' },
   boxOn: { borderColor: '#fff', backgroundColor: 'rgba(255,255,255,0.16)' },
   boxPlaying: { borderColor: '#fff', borderWidth: 2 },
@@ -448,12 +513,10 @@ const styles = StyleSheet.create({
   plusBox: { borderColor: 'rgba(255,255,255,0.28)', borderStyle: 'dashed' },
   plus: { color: 'rgba(255,255,255,0.6)', fontSize: 20, fontWeight: '400', lineHeight: 22 },
 
-  // Clip bar
   clipBar: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.12)', paddingTop: 10 },
   clipRow: { flexGrow: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 14 },
   clipBox: { width: 40, height: 40, borderRadius: 10, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
 
-  // Long-press menu
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   menuOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   menuCard: {

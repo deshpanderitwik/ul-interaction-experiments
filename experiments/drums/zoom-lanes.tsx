@@ -268,7 +268,12 @@ export default function ZoomLanes() {
                       active={on}
                       isCurrent={playingPage === page && s === localCurrent}
                       beat={isBeat(s)}
-                      onPress={() => (expanded ? toggle(l, s) : setZoomed(l))}
+                      // Tap any cell to toggle it AND focus its lane — quick add,
+                      // then the lane is already open for more edits.
+                      onPress={() => {
+                        toggle(l, s);
+                        setZoomed(l);
+                      }}
                       register={registerFlash}
                       unregister={unregisterFlash}
                     />

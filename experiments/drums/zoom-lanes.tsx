@@ -120,14 +120,22 @@ export default function ZoomLanes() {
     [setCell]
   );
   const dragStartRef = useRef(0);
+  const dragLastIdxRef = useRef(0);
   const onCellGrab = useCallback((lane: number, s: number) => {
-    dragStartRef.current = levelIndex(gridRef.current[lane][pageRef.current * PAGE + s]);
+    const idx = levelIndex(gridRef.current[lane][pageRef.current * PAGE + s]);
+    dragStartRef.current = idx;
+    dragLastIdxRef.current = idx;
     setZoomed(lane);
   }, []);
   const onCellDrag = useCallback(
     (lane: number, s: number, translationY: number) => {
       // Down = more subdivisions, up = fewer.
       const idx = clampIdx(dragStartRef.current + Math.round(translationY / DRAG_PX));
+      // Only commit when the rung actually changes — a state update per drag frame
+      // would re-render every cell 60x/s and starve the audio scheduler, stalling
+      // playback. This keeps the beat running while you adjust subdivisions.
+      if (idx === dragLastIdxRef.current) return;
+      dragLastIdxRef.current = idx;
       setCell(lane, s, LEVELS[idx]);
     },
     [setCell]

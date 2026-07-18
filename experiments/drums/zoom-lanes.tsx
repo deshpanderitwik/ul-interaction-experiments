@@ -81,6 +81,10 @@ export default function ZoomLanes() {
   pageRef.current = page;
   const activeRef = useRef(active);
   activeRef.current = active;
+  const clipCountRef = useRef(clips.length);
+  clipCountRef.current = clips.length;
+  const pageCountRef = useRef(pageCount);
+  pageCountRef.current = pageCount;
   const tempoRef = useRef(tempo);
   tempoRef.current = tempo;
 
@@ -108,6 +112,27 @@ export default function ZoomLanes() {
   const pagePlusStyle = useAnimatedStyle(() => ({
     borderColor: pagePlusHot.value > 0.5 ? '#fff' : 'rgba(255,255,255,0.28)',
     transform: [{ scale: 1 + 0.1 * pagePlusHot.value }],
+  }));
+
+  const clipTrashRef = useRef<View>(null);
+  const pageTrashRef = useRef<View>(null);
+  const clipTrashRect = useSharedValue<Rect>({ x: 0, y: 0, w: 0, h: 0 });
+  const pageTrashRect = useSharedValue<Rect>({ x: 0, y: 0, w: 0, h: 0 });
+  const clipTrashHot = useSharedValue(0);
+  const pageTrashHot = useSharedValue(0);
+  const measureClipTrash = useCallback(() => {
+    clipTrashRef.current?.measureInWindow((x, y, w, h) => (clipTrashRect.value = { x, y, w, h }));
+  }, [clipTrashRect]);
+  const measurePageTrash = useCallback(() => {
+    pageTrashRef.current?.measureInWindow((x, y, w, h) => (pageTrashRect.value = { x, y, w, h }));
+  }, [pageTrashRect]);
+  const clipTrashStyle = useAnimatedStyle(() => ({
+    borderColor: clipTrashHot.value > 0.5 ? '#ff5a5a' : 'rgba(255,255,255,0.28)',
+    transform: [{ scale: 1 + 0.1 * clipTrashHot.value }],
+  }));
+  const pageTrashStyle = useAnimatedStyle(() => ({
+    borderColor: pageTrashHot.value > 0.5 ? '#ff5a5a' : 'rgba(255,255,255,0.28)',
+    transform: [{ scale: 1 + 0.1 * pageTrashHot.value }],
   }));
 
   // --- editing ---
@@ -153,6 +178,11 @@ export default function ZoomLanes() {
     setClips((prev) => [...prev.slice(0, i + 1), cloneGrid(prev[i]), ...prev.slice(i + 1)]);
     setActive(i + 1);
   }, []);
+  const deleteClip = useCallback((i: number) => {
+    if (clipCountRef.current <= 1) return; // keep at least one clip
+    setClips((prev) => prev.filter((_, j) => j !== i));
+    setActive((a) => (i < a ? a - 1 : i > a ? a : Math.min(a, clipCountRef.current - 2)));
+  }, []);
   const clonePage = useCallback((p: number) => {
     const a = activeRef.current;
     setClips((prev) =>
@@ -161,6 +191,12 @@ export default function ZoomLanes() {
       )
     );
     setViewPage(p + 1);
+  }, []);
+  const deletePage = useCallback((p: number) => {
+    if (pageCountRef.current <= 1) return; // keep at least one bar
+    const a = activeRef.current;
+    setClips((prev) => prev.map((g, ci) => (ci === a ? g.map((row) => [...row.slice(0, p * PAGE), ...row.slice((p + 1) * PAGE)]) : g)));
+    setViewPage((vp) => (p < vp ? vp - 1 : p > vp ? vp : Math.min(vp, pageCountRef.current - 2)));
   }, []);
   const addClip = useCallback(() => {
     setClips((prev) => [...prev, emptyGrid()]);
@@ -261,8 +297,11 @@ export default function ZoomLanes() {
                 playing={i === playingPage}
                 onSelect={onPageSelect}
                 onClone={clonePage}
+                onDelete={deletePage}
                 plusRect={pagePlusRect}
                 plusHot={pagePlusHot}
+                trashRect={pageTrashRect}
+                trashHot={pageTrashHot}
               />
             ))}
             <Pressable ref={pagePlusRef} onLayout={measurePagePlus} onPress={addPage} accessibilityLabel="Add bar">
@@ -270,6 +309,11 @@ export default function ZoomLanes() {
                 <Text style={styles.plus}>+</Text>
               </Animated.View>
             </Pressable>
+            <View ref={pageTrashRef} onLayout={measurePageTrash} accessibilityLabel="Delete drop target">
+              <Animated.View style={[styles.selBox, styles.plusBox, pageTrashStyle]}>
+                <TrashIcon />
+              </Animated.View>
+            </View>
           </View>
         </View>
 
@@ -318,8 +362,11 @@ export default function ZoomLanes() {
               selected={i === active}
               onSelect={onClipSelect}
               onClone={cloneClip}
+              onDelete={deleteClip}
               plusRect={clipPlusRect}
               plusHot={clipPlusHot}
+              trashRect={clipTrashRect}
+              trashHot={clipTrashHot}
             />
           ))}
           <Pressable ref={clipPlusRef} onLayout={measureClipPlus} onPress={addClip} accessibilityLabel="Add clip">
@@ -327,14 +374,20 @@ export default function ZoomLanes() {
               <Text style={styles.plus}>+</Text>
             </Animated.View>
           </Pressable>
+          <View ref={clipTrashRef} onLayout={measureClipTrash} accessibilityLabel="Delete drop target">
+            <Animated.View style={[styles.selBox, styles.plusBox, clipTrashStyle]}>
+              <TrashIcon />
+            </Animated.View>
+          </View>
         </View>
       </View>
     </View>
   );
 }
 
-// A page/clip box: tap to select; press-drag onto the + (drop target) to clone.
-// It follows the finger while dragging and lights the + when hovering over it.
+// A page/clip box: tap to select; press-drag onto the + to clone it, or onto the
+// trash to delete it. It follows the finger while dragging and lights whichever
+// drop target it's hovering.
 function SelectorBox({
   index,
   label,
@@ -342,8 +395,11 @@ function SelectorBox({
   playing,
   onSelect,
   onClone,
+  onDelete,
   plusRect,
   plusHot,
+  trashRect,
+  trashHot,
 }: {
   index: number;
   label: number;
@@ -351,8 +407,11 @@ function SelectorBox({
   playing?: boolean;
   onSelect: (i: number) => void;
   onClone: (i: number) => void;
+  onDelete: (i: number) => void;
   plusRect: SharedValue<Rect>;
   plusHot: SharedValue<number>;
+  trashRect: SharedValue<Rect>;
+  trashHot: SharedValue<number>;
 }) {
   const tx = useSharedValue(0);
   const ty = useSharedValue(0);
@@ -364,9 +423,8 @@ function SelectorBox({
   }));
 
   const gesture = useMemo(() => {
-    const inPlus = (ax: number, ay: number) => {
+    const inRect = (r: Rect, ax: number, ay: number) => {
       'worklet';
-      const r = plusRect.value;
       return ax >= r.x && ax <= r.x + r.w && ay >= r.y && ay <= r.y + r.h;
     };
     const pan = Gesture.Pan()
@@ -377,22 +435,25 @@ function SelectorBox({
       .onUpdate((e) => {
         tx.value = e.translationX;
         ty.value = e.translationY;
-        plusHot.value = inPlus(e.absoluteX, e.absoluteY) ? 1 : 0;
+        plusHot.value = inRect(plusRect.value, e.absoluteX, e.absoluteY) ? 1 : 0;
+        trashHot.value = inRect(trashRect.value, e.absoluteX, e.absoluteY) ? 1 : 0;
       })
       .onEnd((e) => {
-        if (inPlus(e.absoluteX, e.absoluteY)) runOnJS(onClone)(index);
+        if (inRect(plusRect.value, e.absoluteX, e.absoluteY)) runOnJS(onClone)(index);
+        else if (inRect(trashRect.value, e.absoluteX, e.absoluteY)) runOnJS(onDelete)(index);
       })
       .onFinalize(() => {
         tx.value = withTiming(0, { duration: 180 });
         ty.value = withTiming(0, { duration: 180 });
         lift.value = withTiming(0, { duration: 180 });
         plusHot.value = 0;
+        trashHot.value = 0;
       });
     const tap = Gesture.Tap()
       .maxDuration(250)
       .onStart(() => runOnJS(onSelect)(index));
     return Gesture.Race(pan, tap);
-  }, [index, onSelect, onClone, plusRect, plusHot, tx, ty, lift]);
+  }, [index, onSelect, onClone, onDelete, plusRect, plusHot, trashRect, trashHot, tx, ty, lift]);
 
   return (
     <GestureDetector gesture={gesture}>
@@ -485,6 +546,20 @@ function Band({ index, flash, band }: { index: number; flash: SharedValue<number
   return <Animated.View style={[styles.band, style]} />;
 }
 
+// A minimal trash-can glyph (muted red) drawn from a few views — the delete target.
+function TrashIcon() {
+  const c = 'rgba(255,90,90,0.75)';
+  return (
+    <View style={styles.trashIcon}>
+      <View style={{ width: 7, height: 2, borderRadius: 1, backgroundColor: c, marginBottom: 1.5 }} />
+      <View style={{ width: 15, height: 2, borderRadius: 1, backgroundColor: c }} />
+      <View
+        style={{ width: 11, height: 10, borderWidth: 1.5, borderColor: c, borderTopWidth: 0, borderBottomLeftRadius: 3, borderBottomRightRadius: 3, marginTop: 1 }}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
   content: { flex: 1, flexDirection: 'row', paddingTop: 96 },
@@ -514,6 +589,7 @@ const styles = StyleSheet.create({
   boxNumOn: { color: '#fff' },
   plusBox: { borderStyle: 'dashed' },
   plus: { color: 'rgba(255,255,255,0.6)', fontSize: 20, fontWeight: '400', lineHeight: 22 },
+  trashIcon: { alignItems: 'center' },
 
   clipBar: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.12)', paddingTop: 10 },
   clipRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 14 },

@@ -53,15 +53,6 @@ const emptyGrid = (): Grid => LANES.map(() => Array(PAGE).fill(0));
 const cloneGrid = (g: Grid): Grid => g.map((row) => row.slice());
 const pagesOf = (g: Grid): number => g[0].length / PAGE;
 
-const seedGrid = (): Grid => [
-  Array.from({ length: PAGE }, (_, s) => (s === 0 || s === 8 ? 1 : 0)), // kick
-  Array.from({ length: PAGE }, (_, s) => (s === 4 || s === 12 ? 1 : 0)), // snare
-  Array.from({ length: PAGE }, () => 0), // tom
-  Array.from({ length: PAGE }, () => 0), // clap
-  Array.from({ length: PAGE }, (_, s) => (s % 2 === 0 ? 1 : 0)), // closed hat
-  Array.from({ length: PAGE }, () => 0), // open hat
-];
-
 const cellKey = (lane: number, step: number) => lane * PAGE + step;
 type Flash = { flash: SharedValue<number>; band: SharedValue<number> };
 
@@ -73,7 +64,7 @@ export default function ZoomLanes() {
   const clock = sharedClock ?? localClock;
   const hostBottomInset = useHostBottomInset();
 
-  const [clips, setClips] = useState<Grid[]>(() => [seedGrid()]);
+  const [clips, setClips] = useState<Grid[]>(() => [emptyGrid()]);
   const [active, setActive] = useState(0);
   const [viewPage, setViewPage] = useState(0);
   const [current, setCurrent] = useState(-1);

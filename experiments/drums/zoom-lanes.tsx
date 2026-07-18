@@ -487,9 +487,9 @@ const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
   content: { flex: 1, flexDirection: 'row', paddingTop: 96 },
 
-  pageSel: { width: 48 },
+  pageSel: { width: 52 },
   pageCol: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 8 },
-  pageBox: { width: 34, height: 34, borderRadius: 9, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  pageBox: { width: 40, height: 40, borderRadius: 10, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
 
   board: { flex: 1, flexDirection: 'row', paddingRight: 12, paddingLeft: 4, paddingBottom: 8, gap: 8 },
   column: { flexBasis: 0, flexShrink: 1, overflow: 'hidden' },

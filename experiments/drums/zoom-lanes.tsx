@@ -1,6 +1,6 @@
 import { useClock } from '@shopify/react-native-skia';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
@@ -19,19 +19,17 @@ import { useTempo } from '../tempo';
 import { playClap, playHat, playKick, playSnare, playTom } from './voice';
 
 // Drums · Zoom Lanes — a six-piece kit (all modified sines) as six vertical lanes.
-// A cell holds a SUBDIVISION count, not just on/off: tap toggles on/off, and
-// hold-drag up/down sets how many sub-hits fire inside that step (2, 3, 4… = a
-// ratchet/roll, splitting the cell into that many bands that light in sequence).
-// A left PAGE selector sets pattern length in bars; a bottom CLIP bar holds whole
-// patterns; both center-aligned with Clone/Delete on long-press. Monochrome.
+// A cell holds a subdivision count (tap on/off + focus lane; hold-drag up/down
+// sets ratchets). A vertical PAGE selector (left) sets pattern length in bars; a
+// bottom CLIP bar holds whole patterns. Both are center-aligned, same box size —
+// and to duplicate a bar/clip you press its box and drag it onto the + (which
+// lights up); dropping on the + clones it. Monochrome; shared clock.
 
-const PAGE = 16; // steps per bar/page
+const PAGE = 16;
 const SCHED_MS = 8;
 const isBeat = (s: number) => s % 4 === 0;
-// Subdivision rungs a cell steps through on a drag: 0 = off, 1 = single hit, then
-// ratchets. Kept modest at the top so fast sub-hits still resolve at this poll rate.
 const LEVELS = [0, 1, 2, 3, 4, 6, 8] as const;
-const DRAG_PX = 22; // finger travel per subdivision rung
+const DRAG_PX = 22;
 const levelIndex = (v: number) => {
   const i = (LEVELS as readonly number[]).indexOf(v);
   return i < 0 ? (v > 0 ? 1 : 0) : i;
@@ -48,13 +46,14 @@ const LANES: Lane[] = [
   { id: 'ohat', label: 'Open Hat', short: 'O', play: () => playHat(true) },
 ];
 
-type Grid = number[][]; // [lane][step] = subdivision count (0 = off); length is PAGE * pages
+type Grid = number[][];
 const emptyGrid = (): Grid => LANES.map(() => Array(PAGE).fill(0));
 const cloneGrid = (g: Grid): Grid => g.map((row) => row.slice());
 const pagesOf = (g: Grid): number => g[0].length / PAGE;
 
 const cellKey = (lane: number, step: number) => lane * PAGE + step;
 type Flash = { flash: SharedValue<number>; band: SharedValue<number> };
+type Rect = { x: number; y: number; w: number; h: number };
 
 export default function ZoomLanes() {
   const live = useExperimentActive();
@@ -69,8 +68,6 @@ export default function ZoomLanes() {
   const [viewPage, setViewPage] = useState(0);
   const [current, setCurrent] = useState(-1);
   const [zoomed, setZoomed] = useState<number | null>(null);
-  const [clipMenu, setClipMenu] = useState<number | null>(null);
-  const [pageMenu, setPageMenu] = useState<number | null>(null);
 
   const grid = clips[active];
   const pageCount = pagesOf(grid);
@@ -91,7 +88,29 @@ export default function ZoomLanes() {
   const registerFlash = useCallback((k: number, f: Flash) => flashRef.current.set(k, f), []);
   const unregisterFlash = useCallback((k: number) => flashRef.current.delete(k), []);
 
-  // Set the viewed page's local step `s` of `lane` to a subdivision level.
+  // --- + drop targets (measured window rects + hover highlight, for drag-to-clone) ---
+  const clipPlusRef = useRef<View>(null);
+  const pagePlusRef = useRef<View>(null);
+  const clipPlusRect = useSharedValue<Rect>({ x: 0, y: 0, w: 0, h: 0 });
+  const pagePlusRect = useSharedValue<Rect>({ x: 0, y: 0, w: 0, h: 0 });
+  const clipPlusHot = useSharedValue(0);
+  const pagePlusHot = useSharedValue(0);
+  const measureClipPlus = useCallback(() => {
+    clipPlusRef.current?.measureInWindow((x, y, w, h) => (clipPlusRect.value = { x, y, w, h }));
+  }, [clipPlusRect]);
+  const measurePagePlus = useCallback(() => {
+    pagePlusRef.current?.measureInWindow((x, y, w, h) => (pagePlusRect.value = { x, y, w, h }));
+  }, [pagePlusRect]);
+  const clipPlusStyle = useAnimatedStyle(() => ({
+    borderColor: clipPlusHot.value > 0.5 ? '#fff' : 'rgba(255,255,255,0.28)',
+    transform: [{ scale: 1 + 0.1 * clipPlusHot.value }],
+  }));
+  const pagePlusStyle = useAnimatedStyle(() => ({
+    borderColor: pagePlusHot.value > 0.5 ? '#fff' : 'rgba(255,255,255,0.28)',
+    transform: [{ scale: 1 + 0.1 * pagePlusHot.value }],
+  }));
+
+  // --- editing ---
   const setCell = useCallback((lane: number, s: number, level: number) => {
     const abs = pageRef.current * PAGE + s;
     setClips((prev) =>
@@ -101,12 +120,11 @@ export default function ZoomLanes() {
     );
   }, []);
 
-  // Gesture callbacks (stable — read live state via refs).
   const onCellTap = useCallback(
     (lane: number, s: number) => {
       const cur = gridRef.current[lane][pageRef.current * PAGE + s];
-      setCell(lane, s, cur > 0 ? 0 : 1); // tap = on/off
-      setZoomed(lane); // and focus its lane
+      setCell(lane, s, cur > 0 ? 0 : 1);
+      setZoomed(lane);
     },
     [setCell]
   );
@@ -120,71 +138,40 @@ export default function ZoomLanes() {
   }, []);
   const onCellDrag = useCallback(
     (lane: number, s: number, translationY: number) => {
-      // Down = more subdivisions, up = fewer.
       const idx = clampIdx(dragStartRef.current + Math.round(translationY / DRAG_PX));
-      // Only commit when the rung actually changes — a state update per drag frame
-      // would re-render every cell 60x/s and starve the audio scheduler, stalling
-      // playback. This keeps the beat running while you adjust subdivisions.
-      if (idx === dragLastIdxRef.current) return;
+      if (idx === dragLastIdxRef.current) return; // commit only on a rung change (keeps playback smooth)
       dragLastIdxRef.current = idx;
       setCell(lane, s, LEVELS[idx]);
     },
     [setCell]
   );
 
-  // --- clip ops ---
+  // --- clip / page ops (stable via refs) ---
+  const onClipSelect = useCallback((i: number) => setActive(i), []);
+  const onPageSelect = useCallback((i: number) => setViewPage(i), []);
+  const cloneClip = useCallback((i: number) => {
+    setClips((prev) => [...prev.slice(0, i + 1), cloneGrid(prev[i]), ...prev.slice(i + 1)]);
+    setActive(i + 1);
+  }, []);
+  const clonePage = useCallback((p: number) => {
+    const a = activeRef.current;
+    setClips((prev) =>
+      prev.map((g, ci) =>
+        ci === a ? g.map((row) => [...row.slice(0, (p + 1) * PAGE), ...row.slice(p * PAGE, (p + 1) * PAGE), ...row.slice((p + 1) * PAGE)]) : g
+      )
+    );
+    setViewPage(p + 1);
+  }, []);
   const addClip = useCallback(() => {
     setClips((prev) => [...prev, emptyGrid()]);
     setActive(clips.length);
     setViewPage(0);
   }, [clips.length]);
-  const cloneClip = useCallback((i: number) => {
-    setClips((prev) => [...prev.slice(0, i + 1), cloneGrid(prev[i]), ...prev.slice(i + 1)]);
-    setActive(i + 1);
-    setClipMenu(null);
-  }, []);
-  const deleteClip = useCallback(
-    (i: number) => {
-      if (clips.length <= 1) return;
-      setClips((prev) => prev.filter((_, j) => j !== i));
-      setActive((a) => (i < a ? a - 1 : i > a ? a : Math.min(a, clips.length - 2)));
-      setClipMenu(null);
-    },
-    [clips.length]
-  );
-
-  // --- page ops ---
   const addPage = useCallback(() => {
     setClips((prev) => prev.map((g, ci) => (ci === active ? g.map((row) => [...row, ...Array(PAGE).fill(0)]) : g)));
     setViewPage(pageCount);
   }, [active, pageCount]);
-  const clonePage = useCallback(
-    (p: number) => {
-      setClips((prev) =>
-        prev.map((g, ci) =>
-          ci === active
-            ? g.map((row) => [...row.slice(0, (p + 1) * PAGE), ...row.slice(p * PAGE, (p + 1) * PAGE), ...row.slice((p + 1) * PAGE)])
-            : g
-        )
-      );
-      setViewPage(p + 1);
-      setPageMenu(null);
-    },
-    [active]
-  );
-  const deletePage = useCallback(
-    (p: number) => {
-      if (pageCount <= 1) return;
-      setClips((prev) =>
-        prev.map((g, ci) => (ci === active ? g.map((row) => [...row.slice(0, p * PAGE), ...row.slice((p + 1) * PAGE)]) : g))
-      );
-      setViewPage((vp) => (p < vp ? vp - 1 : p > vp ? vp : Math.min(vp, pageCount - 2)));
-      setPageMenu(null);
-    },
-    [active, pageCount]
-  );
 
-  // Fire one sub-hit of a lane's step, and light that band if it's on the viewed page.
   const fireHit = useCallback((lane: number, step: number, subIdx: number) => {
     LANES[lane].play();
     if (Math.floor(step / PAGE) !== pageRef.current) return;
@@ -199,8 +186,6 @@ export default function ZoomLanes() {
     }
   }, []);
 
-  // One clock; per-lane ratchet: each lane subdivides its current step into `count`
-  // sub-hits and fires on each sub-crossing.
   const t0Ref = useRef(0);
   const lastStepRef = useRef(-1);
   const laneStateRef = useRef(LANES.map(() => ({ step: -1, sub: -1 })));
@@ -264,30 +249,31 @@ export default function ZoomLanes() {
   return (
     <View style={styles.fill}>
       <View style={styles.content}>
+        {/* Page selector (left) — drag a bar onto + to clone it. */}
         <View style={styles.pageSel}>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.pageCol}>
-            {Array.from({ length: pageCount }, (_, i) => {
-              const selected = i === page;
-              const playing = i === playingPage;
-              return (
-                <Pressable
-                  key={i}
-                  onPress={() => setViewPage(i)}
-                  onLongPress={() => setPageMenu(i)}
-                  delayLongPress={280}
-                  style={[styles.pageBox, selected ? styles.boxOn : styles.boxOff, playing ? styles.boxPlaying : null]}
-                  accessibilityLabel={`Bar ${i + 1}`}
-                >
-                  <Text style={[styles.boxNum, selected ? styles.boxNumOn : null]}>{i + 1}</Text>
-                </Pressable>
-              );
-            })}
-            <Pressable onPress={addPage} style={[styles.pageBox, styles.plusBox]} accessibilityLabel="Add bar">
-              <Text style={styles.plus}>+</Text>
+          <View style={styles.pageCol}>
+            {Array.from({ length: pageCount }, (_, i) => (
+              <SelectorBox
+                key={i}
+                index={i}
+                label={i + 1}
+                selected={i === page}
+                playing={i === playingPage}
+                onSelect={onPageSelect}
+                onClone={clonePage}
+                plusRect={pagePlusRect}
+                plusHot={pagePlusHot}
+              />
+            ))}
+            <Pressable ref={pagePlusRef} onLayout={measurePagePlus} onPress={addPage} accessibilityLabel="Add bar">
+              <Animated.View style={[styles.selBox, styles.plusBox, pagePlusStyle]}>
+                <Text style={styles.plus}>+</Text>
+              </Animated.View>
             </Pressable>
-          </ScrollView>
+          </View>
         </View>
 
+        {/* Lanes for the viewed bar. */}
         <View style={styles.board}>
           {LANES.map((lane, l) => {
             const expanded = zoomed === l;
@@ -321,81 +307,99 @@ export default function ZoomLanes() {
         </View>
       </View>
 
+      {/* Clip bar (bottom) — drag a clip onto + to clone it. */}
       <View style={[styles.clipBar, { paddingBottom: 26 + hostBottomInset }]}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.clipRow}>
-          {clips.map((_, i) => {
-            const selected = i === active;
-            return (
-              <Pressable
-                key={i}
-                onPress={() => setActive(i)}
-                onLongPress={() => setClipMenu(i)}
-                delayLongPress={280}
-                style={[styles.clipBox, selected ? styles.boxOn : styles.boxOff]}
-                accessibilityLabel={`Clip ${i + 1}`}
-              >
-                <Text style={[styles.boxNum, selected ? styles.boxNumOn : null]}>{i + 1}</Text>
-              </Pressable>
-            );
-          })}
-          <Pressable onPress={addClip} style={[styles.clipBox, styles.plusBox]} accessibilityLabel="Add clip">
-            <Text style={styles.plus}>+</Text>
+        <View style={styles.clipRow}>
+          {clips.map((_, i) => (
+            <SelectorBox
+              key={i}
+              index={i}
+              label={i + 1}
+              selected={i === active}
+              onSelect={onClipSelect}
+              onClone={cloneClip}
+              plusRect={clipPlusRect}
+              plusHot={clipPlusHot}
+            />
+          ))}
+          <Pressable ref={clipPlusRef} onLayout={measureClipPlus} onPress={addClip} accessibilityLabel="Add clip">
+            <Animated.View style={[styles.selBox, styles.plusBox, clipPlusStyle]}>
+              <Text style={styles.plus}>+</Text>
+            </Animated.View>
           </Pressable>
-        </ScrollView>
+        </View>
       </View>
-
-      {clipMenu != null ? (
-        <OpMenu
-          title={`Clip ${clipMenu + 1}`}
-          onClone={() => cloneClip(clipMenu)}
-          onDelete={() => deleteClip(clipMenu)}
-          canDelete={clips.length > 1}
-          onDismiss={() => setClipMenu(null)}
-        />
-      ) : null}
-      {pageMenu != null ? (
-        <OpMenu
-          title={`Bar ${pageMenu + 1}`}
-          onClone={() => clonePage(pageMenu)}
-          onDelete={() => deletePage(pageMenu)}
-          canDelete={pageCount > 1}
-          onDismiss={() => setPageMenu(null)}
-        />
-      ) : null}
     </View>
   );
 }
 
-function OpMenu({
-  title,
+// A page/clip box: tap to select; press-drag onto the + (drop target) to clone.
+// It follows the finger while dragging and lights the + when hovering over it.
+function SelectorBox({
+  index,
+  label,
+  selected,
+  playing,
+  onSelect,
   onClone,
-  onDelete,
-  canDelete,
-  onDismiss,
+  plusRect,
+  plusHot,
 }: {
-  title: string;
-  onClone: () => void;
-  onDelete: () => void;
-  canDelete: boolean;
-  onDismiss: () => void;
+  index: number;
+  label: number;
+  selected: boolean;
+  playing?: boolean;
+  onSelect: (i: number) => void;
+  onClone: (i: number) => void;
+  plusRect: SharedValue<Rect>;
+  plusHot: SharedValue<number>;
 }) {
+  const tx = useSharedValue(0);
+  const ty = useSharedValue(0);
+  const lift = useSharedValue(0);
+  const style = useAnimatedStyle(() => ({
+    transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: 1 + 0.12 * lift.value }],
+    opacity: 1 - 0.2 * lift.value,
+    zIndex: lift.value > 0 ? 20 : 0,
+  }));
+
+  const gesture = useMemo(() => {
+    const inPlus = (ax: number, ay: number) => {
+      'worklet';
+      const r = plusRect.value;
+      return ax >= r.x && ax <= r.x + r.w && ay >= r.y && ay <= r.y + r.h;
+    };
+    const pan = Gesture.Pan()
+      .minDistance(10)
+      .onStart(() => {
+        lift.value = withTiming(1, { duration: 120 });
+      })
+      .onUpdate((e) => {
+        tx.value = e.translationX;
+        ty.value = e.translationY;
+        plusHot.value = inPlus(e.absoluteX, e.absoluteY) ? 1 : 0;
+      })
+      .onEnd((e) => {
+        if (inPlus(e.absoluteX, e.absoluteY)) runOnJS(onClone)(index);
+      })
+      .onFinalize(() => {
+        tx.value = withTiming(0, { duration: 180 });
+        ty.value = withTiming(0, { duration: 180 });
+        lift.value = withTiming(0, { duration: 180 });
+        plusHot.value = 0;
+      });
+    const tap = Gesture.Tap()
+      .maxDuration(250)
+      .onStart(() => runOnJS(onSelect)(index));
+    return Gesture.Race(pan, tap);
+  }, [index, onSelect, onClone, plusRect, plusHot, tx, ty, lift]);
+
   return (
-    <>
-      <Pressable style={styles.backdrop} onPress={onDismiss} />
-      <View style={styles.menuOverlay} pointerEvents="box-none">
-        <View style={styles.menuCard}>
-          <Text style={styles.menuTitle}>{title}</Text>
-          <View style={styles.menuRow}>
-            <Pressable style={styles.menuBtn} onPress={onClone}>
-              <Text style={styles.menuBtnText}>Clone</Text>
-            </Pressable>
-            <Pressable style={styles.menuBtn} onPress={onDelete} disabled={!canDelete}>
-              <Text style={[styles.menuBtnText, styles.menuDelete, canDelete ? null : styles.menuDisabled]}>Delete</Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
-    </>
+    <GestureDetector gesture={gesture}>
+      <Animated.View style={[styles.selBox, selected ? styles.boxOn : styles.boxOff, playing ? styles.boxPlaying : null, style]}>
+        <Text style={[styles.boxNum, selected ? styles.boxNumOn : null]}>{label}</Text>
+      </Animated.View>
+    </GestureDetector>
   );
 }
 
@@ -414,8 +418,6 @@ function LaneColumn({ expanded, anyZoomed, children }: { expanded: boolean; anyZ
   return <Animated.View style={[styles.column, style]}>{children}</Animated.View>;
 }
 
-// One step cell. Tap = on/off + focus lane; hold-drag up/down = subdivision count.
-// A cell with count N shows N bands (top fires first); the firing band lights.
 function Cell({
   lane,
   step,
@@ -488,8 +490,7 @@ const styles = StyleSheet.create({
   content: { flex: 1, flexDirection: 'row', paddingTop: 96 },
 
   pageSel: { width: 52 },
-  pageCol: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 8 },
-  pageBox: { width: 40, height: 40, borderRadius: 10, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  pageCol: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 8 },
 
   board: { flex: 1, flexDirection: 'row', paddingRight: 12, paddingLeft: 4, paddingBottom: 8, gap: 8 },
   column: { flexBasis: 0, flexShrink: 1, overflow: 'hidden' },
@@ -504,33 +505,16 @@ const styles = StyleSheet.create({
   bands: { flex: 1, gap: 2 },
   band: { flex: 1, borderRadius: 3, backgroundColor: '#fff' },
 
+  // Shared selector box (page + clip): same size.
+  selBox: { width: 40, height: 40, borderRadius: 10, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   boxOff: { borderColor: 'rgba(255,255,255,0.22)', backgroundColor: 'transparent' },
   boxOn: { borderColor: '#fff', backgroundColor: 'rgba(255,255,255,0.16)' },
   boxPlaying: { borderColor: '#fff', borderWidth: 2 },
   boxNum: { color: 'rgba(255,255,255,0.5)', fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
   boxNumOn: { color: '#fff' },
-  plusBox: { borderColor: 'rgba(255,255,255,0.28)', borderStyle: 'dashed' },
+  plusBox: { borderStyle: 'dashed' },
   plus: { color: 'rgba(255,255,255,0.6)', fontSize: 20, fontWeight: '400', lineHeight: 22 },
 
   clipBar: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.12)', paddingTop: 10 },
-  clipRow: { flexGrow: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 14 },
-  clipBox: { width: 40, height: 40, borderRadius: 10, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-
-  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  menuOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
-  menuCard: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 16,
-    backgroundColor: 'rgba(20,20,22,0.98)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.16)',
-    alignItems: 'center',
-  },
-  menuTitle: { color: 'rgba(255,255,255,0.55)', fontSize: 12, letterSpacing: 1, marginBottom: 10, textTransform: 'uppercase' },
-  menuRow: { flexDirection: 'row', gap: 10 },
-  menuBtn: { paddingVertical: 9, paddingHorizontal: 22, borderRadius: 11, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.22)' },
-  menuBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  menuDelete: { color: '#ff5a5a' },
-  menuDisabled: { color: 'rgba(255,90,90,0.35)' },
+  clipRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 14 },
 });

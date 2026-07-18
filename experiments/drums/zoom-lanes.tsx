@@ -99,6 +99,10 @@ export default function ZoomLanes() {
   const pagePlusRect = useSharedValue<Rect>({ x: 0, y: 0, w: 0, h: 0 });
   const clipPlusHot = useSharedValue(0);
   const pagePlusHot = useSharedValue(0);
+  // 0 at rest, 1 while a box in that selector is being dragged — fades the drop
+  // targets in/out so + and trash only show during a drag.
+  const clipDragActive = useSharedValue(0);
+  const pageDragActive = useSharedValue(0);
   const measureClipPlus = useCallback(() => {
     clipPlusRef.current?.measureInWindow((x, y, w, h) => (clipPlusRect.value = { x, y, w, h }));
   }, [clipPlusRect]);
@@ -106,10 +110,12 @@ export default function ZoomLanes() {
     pagePlusRef.current?.measureInWindow((x, y, w, h) => (pagePlusRect.value = { x, y, w, h }));
   }, [pagePlusRect]);
   const clipPlusStyle = useAnimatedStyle(() => ({
+    opacity: clipDragActive.value,
     borderColor: clipPlusHot.value > 0.5 ? '#fff' : 'rgba(255,255,255,0.28)',
     transform: [{ scale: 1 + 0.1 * clipPlusHot.value }],
   }));
   const pagePlusStyle = useAnimatedStyle(() => ({
+    opacity: pageDragActive.value,
     borderColor: pagePlusHot.value > 0.5 ? '#fff' : 'rgba(255,255,255,0.28)',
     transform: [{ scale: 1 + 0.1 * pagePlusHot.value }],
   }));
@@ -127,10 +133,12 @@ export default function ZoomLanes() {
     pageTrashRef.current?.measureInWindow((x, y, w, h) => (pageTrashRect.value = { x, y, w, h }));
   }, [pageTrashRect]);
   const clipTrashStyle = useAnimatedStyle(() => ({
+    opacity: clipDragActive.value,
     borderColor: clipTrashHot.value > 0.5 ? '#ff5a5a' : 'rgba(255,255,255,0.28)',
     transform: [{ scale: 1 + 0.1 * clipTrashHot.value }],
   }));
   const pageTrashStyle = useAnimatedStyle(() => ({
+    opacity: pageDragActive.value,
     borderColor: pageTrashHot.value > 0.5 ? '#ff5a5a' : 'rgba(255,255,255,0.28)',
     transform: [{ scale: 1 + 0.1 * pageTrashHot.value }],
   }));
@@ -198,15 +206,6 @@ export default function ZoomLanes() {
     setClips((prev) => prev.map((g, ci) => (ci === a ? g.map((row) => [...row.slice(0, p * PAGE), ...row.slice((p + 1) * PAGE)]) : g)));
     setViewPage((vp) => (p < vp ? vp - 1 : p > vp ? vp : Math.min(vp, pageCountRef.current - 2)));
   }, []);
-  const addClip = useCallback(() => {
-    setClips((prev) => [...prev, emptyGrid()]);
-    setActive(clips.length);
-    setViewPage(0);
-  }, [clips.length]);
-  const addPage = useCallback(() => {
-    setClips((prev) => prev.map((g, ci) => (ci === active ? g.map((row) => [...row, ...Array(PAGE).fill(0)]) : g)));
-    setViewPage(pageCount);
-  }, [active, pageCount]);
 
   const fireHit = useCallback((lane: number, step: number, subIdx: number) => {
     LANES[lane].play();
@@ -302,14 +301,18 @@ export default function ZoomLanes() {
                 plusHot={pagePlusHot}
                 trashRect={pageTrashRect}
                 trashHot={pageTrashHot}
+                dragActive={pageDragActive}
               />
             ))}
-            <Pressable ref={pagePlusRef} onLayout={measurePagePlus} onPress={addPage} accessibilityLabel="Add bar">
+          </View>
+          {/* Drop targets — only visible while dragging a bar. */}
+          <View style={styles.pageDrops} pointerEvents="none">
+            <View ref={pagePlusRef} onLayout={measurePagePlus}>
               <Animated.View style={[styles.selBox, styles.plusBox, pagePlusStyle]}>
                 <Text style={styles.plus}>+</Text>
               </Animated.View>
-            </Pressable>
-            <View ref={pageTrashRef} onLayout={measurePageTrash} accessibilityLabel="Delete drop target">
+            </View>
+            <View ref={pageTrashRef} onLayout={measurePageTrash}>
               <Animated.View style={[styles.selBox, styles.plusBox, pageTrashStyle]}>
                 <TrashIcon />
               </Animated.View>
@@ -367,14 +370,18 @@ export default function ZoomLanes() {
               plusHot={clipPlusHot}
               trashRect={clipTrashRect}
               trashHot={clipTrashHot}
+              dragActive={clipDragActive}
             />
           ))}
-          <Pressable ref={clipPlusRef} onLayout={measureClipPlus} onPress={addClip} accessibilityLabel="Add clip">
+        </View>
+        {/* Drop targets — only visible while dragging a clip. */}
+        <View style={styles.clipDrops} pointerEvents="none">
+          <View ref={clipPlusRef} onLayout={measureClipPlus}>
             <Animated.View style={[styles.selBox, styles.plusBox, clipPlusStyle]}>
               <Text style={styles.plus}>+</Text>
             </Animated.View>
-          </Pressable>
-          <View ref={clipTrashRef} onLayout={measureClipTrash} accessibilityLabel="Delete drop target">
+          </View>
+          <View ref={clipTrashRef} onLayout={measureClipTrash}>
             <Animated.View style={[styles.selBox, styles.plusBox, clipTrashStyle]}>
               <TrashIcon />
             </Animated.View>
@@ -400,6 +407,7 @@ function SelectorBox({
   plusHot,
   trashRect,
   trashHot,
+  dragActive,
 }: {
   index: number;
   label: number;
@@ -412,6 +420,7 @@ function SelectorBox({
   plusHot: SharedValue<number>;
   trashRect: SharedValue<Rect>;
   trashHot: SharedValue<number>;
+  dragActive: SharedValue<number>;
 }) {
   const tx = useSharedValue(0);
   const ty = useSharedValue(0);
@@ -431,6 +440,7 @@ function SelectorBox({
       .minDistance(10)
       .onStart(() => {
         lift.value = withTiming(1, { duration: 120 });
+        dragActive.value = withTiming(1, { duration: 120 }); // reveal the drop targets
       })
       .onUpdate((e) => {
         tx.value = e.translationX;
@@ -448,12 +458,13 @@ function SelectorBox({
         lift.value = withTiming(0, { duration: 180 });
         plusHot.value = 0;
         trashHot.value = 0;
+        dragActive.value = withTiming(0, { duration: 200 });
       });
     const tap = Gesture.Tap()
       .maxDuration(250)
       .onStart(() => runOnJS(onSelect)(index));
     return Gesture.Race(pan, tap);
-  }, [index, onSelect, onClone, onDelete, plusRect, plusHot, trashRect, trashHot, tx, ty, lift]);
+  }, [index, onSelect, onClone, onDelete, plusRect, plusHot, trashRect, trashHot, dragActive, tx, ty, lift]);
 
   return (
     <GestureDetector gesture={gesture}>
@@ -566,6 +577,8 @@ const styles = StyleSheet.create({
 
   pageSel: { width: 52 },
   pageCol: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  // Drop targets, stacked at the bottom of the page column (shown only on drag).
+  pageDrops: { position: 'absolute', bottom: 8, left: 0, right: 0, alignItems: 'center', gap: 8 },
 
   board: { flex: 1, flexDirection: 'row', paddingRight: 12, paddingLeft: 4, paddingBottom: 8, gap: 8 },
   column: { flexBasis: 0, flexShrink: 1, overflow: 'hidden' },
@@ -593,4 +606,6 @@ const styles = StyleSheet.create({
 
   clipBar: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.12)', paddingTop: 10 },
   clipRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 14 },
+  // Drop targets, at the right end of the clip bar (shown only on drag).
+  clipDrops: { position: 'absolute', right: 14, top: 10, flexDirection: 'row', gap: 8 },
 });

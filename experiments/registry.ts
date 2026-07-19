@@ -92,6 +92,12 @@ export const experiments: Experiment[] = [
         load: () => import('./drums/beat-map-vertical'),
       },
       {
+        id: 'bounce',
+        title: 'Bounce',
+        blurb: 'A ball falling under gravity: every time it hits the ground it thumps a kick (louder on harder impacts), doing the natural accelerating dribble until it settles. Tap anywhere to drop it from that spot.',
+        load: () => import('./drums/bounce'),
+      },
+      {
         id: 'zoom-lanes',
         title: 'Zoom Lanes',
         blurb: 'A six-piece kit (kick, snare, tom, clap, hat, open hat — all modified sines) as six vertical lanes looping in parallel. Tap a lane and the same vertical lane just gets bigger (16 tall cells) over a scrim for easy editing; tap the scrim to zoom back out.',

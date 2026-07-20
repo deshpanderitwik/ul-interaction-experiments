@@ -31,7 +31,7 @@ const BALL_R = 22;
 const RR = 40;
 const GROUND_FROM_BOTTOM = 150;
 const TOP_MARGIN = 150;
-const RAIL_W = 76;
+const RAIL_W = 48;
 
 // The rhythm ladder, slowest (top) → fastest (bottom). Each slot is a period in
 // beats plus a phase offset within that period: phase 0 lands on the grid,
@@ -221,13 +221,6 @@ export default function HeightRhythms() {
             </View>
           );
         })}
-        {/* legend */}
-        <View style={styles.legend} pointerEvents="none">
-          <Text style={[styles.legendItem, { color: KIND_COLOR.straight }]}>straight</Text>
-          <Text style={[styles.legendItem, { color: KIND_COLOR.off }]}>+  off-beat</Text>
-          <Text style={[styles.legendItem, { color: KIND_COLOR.sync }]}>.  syncopated</Text>
-        </View>
-
         <View style={[styles.ground, { top: groundY }]} />
         {[0, 1, 2].map((b) => (
           <BallView
@@ -325,8 +318,6 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     letterSpacing: 0.3,
   },
-  legend: { position: 'absolute', left: 12, top: 64 },
-  legendItem: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3, marginBottom: 3 },
   ball: {
     position: 'absolute',
     top: 0,

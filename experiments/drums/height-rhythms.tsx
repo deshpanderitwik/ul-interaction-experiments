@@ -18,22 +18,43 @@ import { useTempo } from '../tempo';
 import { playHat, playKick, playSnare } from './voice';
 
 // Drums · Height Rhythms — three bouncing balls (kick, snare, hi-hat), each one's
-// *apex* is its own subdivision. Drag a ball's column up for a higher, slower
-// bounce = coarser hits, or down for a lower, faster bounce = finer hits. Each
-// snaps between subdivisions (1/2, 1/4, 1/8, 1/16) and is clock-locked to it, so
-// three independent rhythms layer without drifting. Every ground touch fires that
-// ball's voice.
+// *apex* picks a rhythmic slot off a ladder on the left. The ladder isn't just
+// straight subdivisions: interleaved between them are OFF-BEAT slots (same rate,
+// landing on the "and") and SYNCOPATED slots (dotted values that cross the beat).
+// Drag a ball's column up for a higher, slower slot or down for a lower, faster
+// one; each is clock-locked (with its phase offset) so three independent grooves
+// layer without drifting. Every ground touch fires that ball's voice.
 
 const N = 3;
 const NAMES = ['KICK', 'SNARE', 'HAT'];
 const BALL_R = 22;
 const RR = 40;
 const GROUND_FROM_BOTTOM = 150;
-const TOP_MARGIN = 120;
-const PERIODS = [2, 1, 0.5, 0.25]; // bounce period in beats (slow → fast)
-const APEX_FRACS = [1.0, 0.6, 0.32, 0.16]; // apex as a fraction of the available height
-const LABELS = ['1/2', '1/4', '1/8', '1/16'];
-const DEFAULT_IDX = [1, 0, 2]; // kick 1/4, snare 1/2, hat 1/8 — a starting groove
+const TOP_MARGIN = 150;
+const RAIL_W = 76;
+
+// The rhythm ladder, slowest (top) → fastest (bottom). Each slot is a period in
+// beats plus a phase offset within that period: phase 0 lands on the grid,
+// phase 0.5 lands halfway (the off-beat / "and"). Dotted periods (1.5, 0.75)
+// don't divide the beat evenly, so they push against it — syncopation.
+const SLOTS: { beats: number; phase: number; label: string; kind: 'straight' | 'off' | 'sync' }[] = [
+  { beats: 2, phase: 0, label: '1/2', kind: 'straight' },
+  { beats: 1.5, phase: 0, label: '1/4.', kind: 'sync' },
+  { beats: 1, phase: 0, label: '1/4', kind: 'straight' },
+  { beats: 1, phase: 0.5, label: '1/4+', kind: 'off' },
+  { beats: 0.75, phase: 0, label: '1/8.', kind: 'sync' },
+  { beats: 0.5, phase: 0, label: '1/8', kind: 'straight' },
+  { beats: 0.5, phase: 0.5, label: '1/8+', kind: 'off' },
+  { beats: 0.25, phase: 0, label: '1/16', kind: 'straight' },
+];
+const SLOT_BEATS = SLOTS.map((s) => s.beats);
+const SLOT_PHASE = SLOTS.map((s) => s.phase);
+const KIND_COLOR: Record<string, string> = {
+  straight: 'rgba(255,255,255,0.72)',
+  off: '#7ad0ff', // cool = off-beat
+  sync: '#ffd166', // amber = syncopated
+};
+const DEFAULT_IDX = [2, 0, 5]; // kick 1/4, snare 1/2, hat 1/8 — a straight starting groove
 
 export default function HeightRhythms() {
   const live = useExperimentActive();
@@ -43,15 +64,22 @@ export default function HeightRhythms() {
   const clock = sharedClock ?? localClock;
   const { width, height } = useWindowDimensions();
   const groundY = height - GROUND_FROM_BOTTOM;
-  const xs = useMemo(() => [width * 0.25, width * 0.5, width * 0.75], [width]);
+  const xs = useMemo(() => {
+    const span = width - RAIL_W;
+    return [1, 2, 3].map((k) => RAIL_W + (span * k) / 4);
+  }, [width]);
 
-  // Apex heights (px above the ground) for each subdivision, fit to the screen.
-  const apexes = useMemo(
-    () => APEX_FRACS.map((f) => Math.max(44, f * (groundY - TOP_MARGIN - 2 * BALL_R))),
-    [groundY]
-  );
+  // Apex height (px above the ground) for each ladder slot — evenly spaced rungs,
+  // so off-beat/syncopated slots get their own reachable height next to the
+  // straight ones. Independent of the raw period, which the slot also carries.
+  const apexes = useMemo(() => {
+    const top = Math.max(140, groundY - TOP_MARGIN - 2 * BALL_R);
+    const bottom = 44;
+    const n = SLOTS.length;
+    return SLOTS.map((_, i) => top - (i / (n - 1)) * (top - bottom));
+  }, [groundY]);
 
-  const [idxs, setIdxs] = useState(DEFAULT_IDX); // per-ball subdivision index, for labels
+  const [idxs, setIdxs] = useState(DEFAULT_IDX); // per-ball slot index, for labels
   const setIdxAt = (b: number, v: number) =>
     setIdxs((prev) => {
       const next = prev.slice();
@@ -68,7 +96,8 @@ export default function HeightRhythms() {
   const starteds = [useSharedValue(0), useSharedValue(0), useSharedValue(0)];
   const idxSVs = [useSharedValue(DEFAULT_IDX[0]), useSharedValue(DEFAULT_IDX[1]), useSharedValue(DEFAULT_IDX[2])];
 
-  const periodsSV = useSharedValue(PERIODS);
+  const slotBeatsSV = useSharedValue(SLOT_BEATS);
+  const slotPhaseSV = useSharedValue(SLOT_PHASE);
   const apexesSV = useSharedValue(apexes);
   const tempoSV = useSharedValue(tempo);
   const groundYSV = useSharedValue(groundY);
@@ -95,11 +124,15 @@ export default function HeightRhythms() {
     const ax = apexesSV.value;
     for (let b = 0; b < N; b++) {
       const i = idxSVs[b].value;
-      const T = periodsSV.value[i] * beatMs;
+      const T = slotBeatsSV.value[i] * beatMs;
+      const ph = slotPhaseSV.value[i];
       const apex = ax[i];
-      const u = (now % T) / T;
-      ballYs[b].value = ground - BALL_R - apex * 4 * u * (1 - u);
-      const k = Math.floor(now / T);
+      // Phase-shifted parabola: local phase p is 0 at the (possibly off-beat)
+      // ground contact and 1 at the next; apex at p = 0.5.
+      const x = now / T - ph;
+      const p = x - Math.floor(x);
+      ballYs[b].value = ground - BALL_R - apex * 4 * p * (1 - p);
+      const k = Math.floor(x);
       if (starteds[b].value === 0) {
         kCounts[b].value = k;
         starteds[b].value = 1;
@@ -127,8 +160,8 @@ export default function HeightRhythms() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, frame]);
 
-  // Grab the nearest ball's column, then drag up/down to set its apex; snaps to
-  // the nearest subdivision.
+  // Grab the nearest ball's column, then drag up/down to set its slot; snaps to
+  // the nearest rung.
   const pan = Gesture.Pan()
     .onBegin((e) => {
       const cols = xsSV.value;
@@ -159,7 +192,7 @@ export default function HeightRhythms() {
       }
       if (best !== idxSVs[b].value) {
         idxSVs[b].value = best;
-        starteds[b].value = 0; // re-baseline the hit counter for the new period
+        starteds[b].value = 0; // re-baseline the hit counter for the new period/phase
         runOnJS(setIdxAt)(b, best);
       }
     })
@@ -167,16 +200,34 @@ export default function HeightRhythms() {
       activeBall.value = -1;
     });
 
+  const railTop = groundY - BALL_R - apexes[0];
+
   return (
     <GestureDetector gesture={pan}>
       <View style={styles.fill}>
-        {/* shared height ladder: a faint line + label at each snap height */}
-        {apexes.map((a, i) => (
-          <View key={i} style={[styles.guide, { top: groundY - BALL_R - a }]} pointerEvents="none">
-            <Text style={styles.guideLabel}>{LABELS[i]}</Text>
-            <View style={styles.guideLine} />
-          </View>
-        ))}
+        {/* left ruler: the rhythm ladder */}
+        <View
+          style={[styles.rail, { top: railTop - 10, height: groundY - (railTop - 10) }]}
+          pointerEvents="none"
+        />
+        {apexes.map((a, i) => {
+          const y = groundY - BALL_R - a;
+          const c = KIND_COLOR[SLOTS[i].kind];
+          return (
+            <View key={i} pointerEvents="none">
+              <View style={[styles.railGuide, { top: y }]} />
+              <View style={[styles.railTick, { top: y - 0.5, backgroundColor: c }]} />
+              <Text style={[styles.railLabel, { top: y - 8, color: c }]}>{SLOTS[i].label}</Text>
+            </View>
+          );
+        })}
+        {/* legend */}
+        <View style={styles.legend} pointerEvents="none">
+          <Text style={[styles.legendItem, { color: KIND_COLOR.straight }]}>straight</Text>
+          <Text style={[styles.legendItem, { color: KIND_COLOR.off }]}>+  off-beat</Text>
+          <Text style={[styles.legendItem, { color: KIND_COLOR.sync }]}>.  syncopated</Text>
+        </View>
+
         <View style={[styles.ground, { top: groundY }]} />
         {[0, 1, 2].map((b) => (
           <BallView
@@ -189,11 +240,15 @@ export default function HeightRhythms() {
             idxSV={idxSVs[b]}
             apexesSV={apexesSV}
             groundYSV={groundYSV}
+            ringColor={KIND_COLOR[SLOTS[idxs[b]].kind]}
           />
         ))}
         {[0, 1, 2].map((b) => (
-          <Text key={b} style={[styles.name, { top: groundY + 16, left: xs[b] - 50 }]}>
-            {NAMES[b]} · {LABELS[idxs[b]]}
+          <Text
+            key={b}
+            style={[styles.name, { top: groundY + 16, left: xs[b] - 50, color: KIND_COLOR[SLOTS[idxs[b]].kind] }]}
+          >
+            {NAMES[b]} · {SLOTS[idxs[b]].label}
           </Text>
         ))}
       </View>
@@ -210,6 +265,7 @@ function BallView({
   idxSV,
   apexesSV,
   groundYSV,
+  ringColor,
 }: {
   x: number;
   ballY: SharedValue<number>;
@@ -219,6 +275,7 @@ function BallView({
   idxSV: SharedValue<number>;
   apexesSV: SharedValue<number[]>;
   groundYSV: SharedValue<number>;
+  ringColor: string;
 }) {
   const ballStyle = useAnimatedStyle(() => ({
     transform: [
@@ -239,7 +296,7 @@ function BallView({
   return (
     <>
       <Animated.View style={[styles.ripple, rippleStyle]} pointerEvents="none" />
-      <Animated.View style={[styles.ring, ringStyle]} pointerEvents="none" />
+      <Animated.View style={[styles.ring, { borderColor: ringColor }, ringStyle]} pointerEvents="none" />
       <Animated.View style={[styles.ball, ballStyle]} pointerEvents="none" />
     </>
   );
@@ -254,17 +311,22 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     backgroundColor: 'rgba(255,255,255,0.35)',
   },
-  guide: { position: 'absolute', left: 0, right: 0, height: 0, flexDirection: 'row', alignItems: 'center' },
-  guideLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.08)' },
-  guideLabel: {
-    width: 40,
-    marginLeft: 16,
-    color: 'rgba(255,255,255,0.35)',
-    fontSize: 11,
+  rail: { position: 'absolute', left: RAIL_W, width: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.25)' },
+  // faint full-width reference line at each rung, so a ball's apex reads across
+  railGuide: { position: 'absolute', left: RAIL_W, right: 0, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.05)' },
+  railTick: { position: 'absolute', left: RAIL_W - 8, width: 8, height: 1 },
+  railLabel: {
+    position: 'absolute',
+    left: 0,
+    width: RAIL_W - 12,
+    textAlign: 'right',
+    fontSize: 10,
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
+  legend: { position: 'absolute', left: 12, top: 64 },
+  legendItem: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3, marginBottom: 3 },
   ball: {
     position: 'absolute',
     top: 0,
@@ -284,7 +346,6 @@ const styles = StyleSheet.create({
     borderRadius: BALL_R,
     borderWidth: 2,
     borderStyle: 'dashed',
-    borderColor: 'rgba(255,255,255,0.55)',
   },
   ripple: {
     position: 'absolute',
@@ -300,7 +361,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 100,
     textAlign: 'center',
-    color: 'rgba(255,255,255,0.5)',
     fontSize: 11,
     fontWeight: '700',
     fontVariant: ['tabular-nums'],

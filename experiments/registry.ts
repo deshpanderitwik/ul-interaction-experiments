@@ -92,6 +92,12 @@ export const experiments: Experiment[] = [
         load: () => import('./drums/beat-map-vertical'),
       },
       {
+        id: 'static-balls',
+        title: 'Static Rhythm With Balls',
+        blurb: 'Two balls keep a fixed groove: a kick ball bounces on every beat (4/4) and a snare ball bounces half as often, landing on the downbeats (1 & 3). The rhythm is the physics — two clock-locked bounces that never drift.',
+        load: () => import('./drums/static-balls'),
+      },
+      {
         id: 'bounce',
         title: 'Bounce',
         blurb: 'A ball falling under gravity: every time it hits the ground it thumps a kick (louder on harder impacts), doing the natural accelerating dribble until it settles. Tap anywhere to drop it from that spot.',

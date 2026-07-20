@@ -104,6 +104,12 @@ export const experiments: Experiment[] = [
         load: () => import('./drums/bounce'),
       },
       {
+        id: 'height-rhythms',
+        title: 'Height Rhythms',
+        blurb: 'A bouncing ball whose apex height is its subdivision: drag the dashed ring up for a higher, slower bounce (coarser hits) or down for a lower, faster one (finer hits). It snaps between 1/2, 1/4, 1/8 and 1/16, each bounce clock-locked so the rhythm stays musical; the kick fires on every ground touch.',
+        load: () => import('./drums/height-rhythms'),
+      },
+      {
         id: 'zoom-lanes',
         title: 'Zoom Lanes',
         blurb: 'A six-piece kit (kick, snare, tom, clap, hat, open hat — all modified sines) as six vertical lanes looping in parallel. Tap a lane and the same vertical lane just gets bigger (16 tall cells) over a scrim for easy editing; tap the scrim to zoom back out.',

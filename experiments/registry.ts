@@ -106,7 +106,7 @@ export const experiments: Experiment[] = [
       {
         id: 'height-rhythms',
         title: 'Height Rhythms',
-        blurb: 'A bouncing ball whose apex height is its subdivision: drag the dashed ring up for a higher, slower bounce (coarser hits) or down for a lower, faster one (finer hits). It snaps between 1/2, 1/4, 1/8 and 1/16, each bounce clock-locked so the rhythm stays musical; the kick fires on every ground touch.',
+        blurb: 'Three bouncing balls — kick, snare, hi-hat — each with its own apex as its subdivision. Drag a ball’s column up for a higher, slower bounce (coarser hits) or down for a lower, faster one (finer hits); each snaps between 1/2, 1/4, 1/8 and 1/16 and is clock-locked, so three independent rhythms layer without drifting. Every ground touch fires that ball’s voice.',
         load: () => import('./drums/height-rhythms'),
       },
       {

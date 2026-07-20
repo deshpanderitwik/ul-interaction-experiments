@@ -25,6 +25,7 @@ const RESTITUTION = 0.72; // energy kept per bounce
 const MIN_IMPACT = 90; // px/s below which it settles instead of bouncing
 const GROUND_FROM_BOTTOM = 120;
 const RR = 44; // base ripple radius
+const GRAB_R = BALL_R * 2.4; // how close you must press to grab the ball
 
 export default function Bounce() {
   const live = useExperimentActive();
@@ -38,6 +39,9 @@ export default function Bounce() {
   const rippleX = useSharedValue(width / 2);
   const rippleScale = useSharedValue(0);
   const rippleOp = useSharedValue(0);
+  const held = useSharedValue(0); // 1 while the finger is holding the ball
+  const grabOffX = useSharedValue(0);
+  const grabOffY = useSharedValue(0);
 
   // Layout that the physics worklet needs, mirrored into shared values.
   const groundYSV = useSharedValue(groundY);
@@ -53,6 +57,7 @@ export default function Bounce() {
 
   const frame = useFrameCallback((info) => {
     'worklet';
+    if (held.value === 1) return; // held by the finger — no gravity
     const dt = Math.min(info.timeSincePreviousFrame ?? 16, 40) / 1000;
     if (dt <= 0) return;
     ballVy.value += GRAVITY * dt;
@@ -85,12 +90,34 @@ export default function Bounce() {
     return () => frame.setActive(false);
   }, [live, frame]);
 
-  // Tap to drop the ball from that point.
-  const tap = Gesture.Tap().onStart((e) => {
-    ballX.value = Math.max(BALL_R, Math.min(widthSV.value - BALL_R, e.x));
-    ballY.value = Math.min(e.y, groundYSV.value - BALL_R - 1);
-    ballVy.value = 0;
-  });
+  // Grab the ball (press near it), drag it around with gravity paused, and let go
+  // to drop it — carrying the flick's velocity, so you can toss it up or slam it.
+  const pan = Gesture.Pan()
+    .minDistance(0)
+    .onBegin((e) => {
+      const dx = e.x - ballX.value;
+      const dy = e.y - ballY.value;
+      if (dx * dx + dy * dy <= GRAB_R * GRAB_R) {
+        held.value = 1;
+        grabOffX.value = ballX.value - e.x; // keep the grab offset so it doesn't snap
+        grabOffY.value = ballY.value - e.y;
+        ballVy.value = 0;
+      }
+    })
+    .onUpdate((e) => {
+      if (held.value !== 1) return;
+      ballX.value = Math.max(BALL_R, Math.min(widthSV.value - BALL_R, e.x + grabOffX.value));
+      ballY.value = Math.max(BALL_R, Math.min(groundYSV.value - BALL_R, e.y + grabOffY.value));
+      ballVy.value = 0;
+    })
+    .onEnd((e) => {
+      if (held.value !== 1) return;
+      held.value = 0;
+      ballVy.value = Math.max(-1800, Math.min(2500, e.velocityY)); // release with the flick
+    })
+    .onFinalize(() => {
+      held.value = 0;
+    });
 
   const ballStyle = useAnimatedStyle(() => ({
     transform: [
@@ -110,7 +137,7 @@ export default function Bounce() {
   }));
 
   return (
-    <GestureDetector gesture={tap}>
+    <GestureDetector gesture={pan}>
       <View style={styles.fill}>
         <View style={[styles.ground, { top: groundY }]} />
         <Animated.View style={[styles.ripple, rippleStyle]} pointerEvents="none" />

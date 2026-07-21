@@ -48,7 +48,6 @@ const SLOTS: { beats: number; phase: number; label: string; kind: 'straight' | '
   { beats: 0.25, phase: 0, label: '1/16', kind: 'straight' },
 ];
 const SLOT_BEATS = SLOTS.map((s) => s.beats);
-const SLOT_PHASE = SLOTS.map((s) => s.phase);
 const KIND_COLOR: Record<string, string> = {
   straight: 'rgba(255,255,255,0.72)',
   off: '#7ad0ff', // cool = off-beat
@@ -102,11 +101,11 @@ export default function HeightRhythms() {
   const rOps = [useSharedValue(0), useSharedValue(0), useSharedValue(0)];
   const kCounts = [useSharedValue(-1), useSharedValue(-1), useSharedValue(-1)];
   const starteds = [useSharedValue(0), useSharedValue(0), useSharedValue(0)];
+  const t0s = [useSharedValue(0), useSharedValue(0), useSharedValue(0)]; // clock time each ball was released
   const activeSVs = [useSharedValue(0), useSharedValue(0), useSharedValue(0)]; // 0 = muted
   const idxSVs = [useSharedValue(DEFAULT_IDX[0]), useSharedValue(DEFAULT_IDX[1]), useSharedValue(DEFAULT_IDX[2])];
 
   const slotBeatsSV = useSharedValue(SLOT_BEATS);
-  const slotPhaseSV = useSharedValue(SLOT_PHASE);
   const apexesSV = useSharedValue(apexes);
   const tempoSV = useSharedValue(tempo);
   const groundYSV = useSharedValue(groundY);
@@ -135,12 +134,17 @@ export default function HeightRhythms() {
       if (activeSVs[b].value === 0) continue; // muted — no bounce, no hit
       const i = idxSVs[b].value;
       const T = slotBeatsSV.value[i] * beatMs;
-      const ph = slotPhaseSV.value[i];
-      const apex = ax[i];
-      // Phase-shifted parabola: local phase p is 0 at the (possibly off-beat)
-      // ground contact and 1 at the next; apex at p = 0.5.
-      const x = now / T - ph;
+      // Anchor the cycle to the moment this ball was released: at t0 the ball is
+      // at the top (phase 0.5, its apex) and drops from there — no snap to a
+      // global phase. The first ground contact (its downbeat) lands half a period
+      // later, then it repeats.
+      const e = Math.max(0, now - t0s[b].value);
+      const x = e / T + 0.5;
       const p = x - Math.floor(x);
+      // The very first descent falls from the top (the ghost/switch height);
+      // after the first hit it settles to the slot's own apex. The switch happens
+      // at a ground contact, so there's no visible jump.
+      const apex = x < 1 ? ax[0] : ax[i];
       ballYs[b].value = ground - BALL_R - apex * 4 * p * (1 - p);
       const k = Math.floor(x);
       if (starteds[b].value === 0) {
@@ -164,7 +168,10 @@ export default function HeightRhythms() {
   }, false);
 
   useEffect(() => {
-    for (let b = 0; b < N; b++) starteds[b].value = 0;
+    for (let b = 0; b < N; b++) {
+      starteds[b].value = 0;
+      t0s[b].value = clock.value; // re-drop live balls from the top on (re)activation
+    }
     frame.setActive(live);
     return () => frame.setActive(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -202,7 +209,8 @@ export default function HeightRhythms() {
       }
       if (best !== idxSVs[b].value) {
         idxSVs[b].value = best;
-        starteds[b].value = 0; // re-baseline the hit counter for the new period/phase
+        starteds[b].value = 0;
+        t0s[b].value = clock.value; // changing the rhythm re-drops it from the top
         runOnJS(setIdxAt)(b, best);
       }
     })
@@ -219,18 +227,19 @@ export default function HeightRhythms() {
       const ax = apexesSV.value;
       const ground = groundYSV.value;
       const R = BALL_R * 1.5; // generous touch target around the ring
+      // The switch/release ring sits at the top (tallest rung) for every column.
+      const cy = ground - BALL_R - ax[0];
       for (let b = 0; b < N; b++) {
-        // Muted balls rest as ghosts at the top (tallest rung); live balls mark
-        // their slot's apex.
-        const apexHere = activeSVs[b].value === 1 ? ax[idxSVs[b].value] : ax[0];
         const cx = cols[b];
-        const cy = ground - BALL_R - apexHere;
         const dx = e.x - cx;
         const dy = e.y - cy;
         if (dx * dx + dy * dy <= R * R) {
           const on = activeSVs[b].value === 0;
           activeSVs[b].value = on ? 1 : 0;
-          if (on) starteds[b].value = 0; // start clean so it doesn't fire mid-arc
+          if (on) {
+            starteds[b].value = 0;
+            t0s[b].value = clock.value; // release now → drops from the top
+          }
           runOnJS(setActiveAt)(b, on);
           break;
         }
@@ -267,7 +276,6 @@ export default function HeightRhythms() {
             squash={squashes[b]}
             rScale={rScales[b]}
             rOp={rOps[b]}
-            idxSV={idxSVs[b]}
             apexesSV={apexesSV}
             groundYSV={groundYSV}
             ringColor={KIND_COLOR[SLOTS[idxs[b]].kind]}
@@ -296,7 +304,6 @@ function BallView({
   squash,
   rScale,
   rOp,
-  idxSV,
   apexesSV,
   groundYSV,
   ringColor,
@@ -307,7 +314,6 @@ function BallView({
   squash: SharedValue<number>;
   rScale: SharedValue<number>;
   rOp: SharedValue<number>;
-  idxSV: SharedValue<number>;
   apexesSV: SharedValue<number[]>;
   groundYSV: SharedValue<number>;
   ringColor: string;
@@ -322,8 +328,9 @@ function BallView({
     ],
   }));
   const ringStyle = useAnimatedStyle(() => {
-    // Muted: rest as a ghost at the top (tallest rung). Live: mark the slot apex.
-    const apex = active ? (apexesSV.value[idxSV.value] ?? 0) : (apexesSV.value[0] ?? 0);
+    // The switch/release ring always rests at the top (tallest rung) — the point
+    // the ball drops from. The ball then grooves below it at its slot's height.
+    const apex = apexesSV.value[0] ?? 0;
     return { transform: [{ translateX: x - BALL_R }, { translateY: groundYSV.value - 2 * BALL_R - apex }] };
   });
   const rippleStyle = useAnimatedStyle(() => ({

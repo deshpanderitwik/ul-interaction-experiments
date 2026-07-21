@@ -48,6 +48,17 @@ const SLOTS: { beats: number; phase: number; label: string; kind: 'straight' | '
   { beats: 0.25, phase: 0, label: '1/16', kind: 'straight' },
 ];
 const SLOT_BEATS = SLOTS.map((s) => s.beats);
+const SLOT_PHASE = SLOTS.map((s) => s.phase);
+
+// The release time that snaps a ball's cycle to the shared beat grid: the first
+// "top of the arc" moment at or after `now`. A ball released with this t0 poses
+// at the top until that grid point, then drops so its ground contacts land on
+// (k + phase)·T — i.e. on the beat (or its off-beat / syncopated offset).
+function gridT0(now: number, T: number, ph: number) {
+  'worklet';
+  const k = Math.ceil(now / T - 0.5 - ph);
+  return (k + 0.5 + ph) * T;
+}
 const KIND_COLOR: Record<string, string> = {
   straight: 'rgba(255,255,255,0.72)',
   off: '#7ad0ff', // cool = off-beat
@@ -106,6 +117,7 @@ export default function HeightRhythms() {
   const idxSVs = [useSharedValue(DEFAULT_IDX[0]), useSharedValue(DEFAULT_IDX[1]), useSharedValue(DEFAULT_IDX[2])];
 
   const slotBeatsSV = useSharedValue(SLOT_BEATS);
+  const slotPhaseSV = useSharedValue(SLOT_PHASE);
   const apexesSV = useSharedValue(apexes);
   const tempoSV = useSharedValue(tempo);
   const groundYSV = useSharedValue(groundY);
@@ -168,9 +180,13 @@ export default function HeightRhythms() {
   }, false);
 
   useEffect(() => {
+    const now = clock.value;
+    const beatMs = 60000 / tempoSV.value;
     for (let b = 0; b < N; b++) {
       starteds[b].value = 0;
-      t0s[b].value = clock.value; // re-drop live balls from the top on (re)activation
+      const i = idxSVs[b].value;
+      // Re-lock live balls to the grid on (re)activation.
+      t0s[b].value = gridT0(now, SLOT_BEATS[i] * beatMs, SLOT_PHASE[i]);
     }
     frame.setActive(live);
     return () => frame.setActive(false);
@@ -210,7 +226,9 @@ export default function HeightRhythms() {
       if (best !== idxSVs[b].value) {
         idxSVs[b].value = best;
         starteds[b].value = 0;
-        t0s[b].value = clock.value; // changing the rhythm re-drops it from the top
+        const T = slotBeatsSV.value[best] * (60000 / tempoSV.value);
+        // Re-snap the new rhythm to the grid so it stays locked to the beat.
+        t0s[b].value = gridT0(clock.value, T, slotPhaseSV.value[best]);
         runOnJS(setIdxAt)(b, best);
       }
     })
@@ -238,7 +256,10 @@ export default function HeightRhythms() {
           activeSVs[b].value = on ? 1 : 0;
           if (on) {
             starteds[b].value = 0;
-            t0s[b].value = clock.value; // release now → drops from the top
+            const i = idxSVs[b].value;
+            const T = slotBeatsSV.value[i] * (60000 / tempoSV.value);
+            // Poise at the top now, then drop on the beat — snapped to the grid.
+            t0s[b].value = gridT0(clock.value, T, slotPhaseSV.value[i]);
           }
           runOnJS(setActiveAt)(b, on);
           break;

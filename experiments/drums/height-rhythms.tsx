@@ -220,8 +220,11 @@ export default function HeightRhythms() {
       const ground = groundYSV.value;
       const R = BALL_R * 1.5; // generous touch target around the ring
       for (let b = 0; b < N; b++) {
+        // Muted balls rest as ghosts at the top (tallest rung); live balls mark
+        // their slot's apex.
+        const apexHere = activeSVs[b].value === 1 ? ax[idxSVs[b].value] : ax[0];
         const cx = cols[b];
-        const cy = ground - BALL_R - ax[idxSVs[b].value]; // ring center = apex point
+        const cy = ground - BALL_R - apexHere;
         const dx = e.x - cx;
         const dy = e.y - cy;
         if (dx * dx + dy * dy <= R * R) {
@@ -319,7 +322,8 @@ function BallView({
     ],
   }));
   const ringStyle = useAnimatedStyle(() => {
-    const apex = apexesSV.value[idxSV.value] ?? 0;
+    // Muted: rest as a ghost at the top (tallest rung). Live: mark the slot apex.
+    const apex = active ? (apexesSV.value[idxSV.value] ?? 0) : (apexesSV.value[0] ?? 0);
     return { transform: [{ translateX: x - BALL_R }, { translateY: groundYSV.value - 2 * BALL_R - apex }] };
   });
   const rippleStyle = useAnimatedStyle(() => ({

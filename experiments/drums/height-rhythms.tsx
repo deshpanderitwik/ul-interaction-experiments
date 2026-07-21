@@ -49,16 +49,6 @@ const SLOTS: { beats: number; phase: number; label: string; kind: 'straight' | '
 ];
 const SLOT_BEATS = SLOTS.map((s) => s.beats);
 const SLOT_PHASE = SLOTS.map((s) => s.phase);
-
-// The release time that snaps a ball's cycle to the shared beat grid: the first
-// "top of the arc" moment at or after `now`. A ball released with this t0 poses
-// at the top until that grid point, then drops so its ground contacts land on
-// (k + phase)·T — i.e. on the beat (or its off-beat / syncopated offset).
-function gridT0(now: number, T: number, ph: number) {
-  'worklet';
-  const k = Math.ceil(now / T - 0.5 - ph);
-  return (k + 0.5 + ph) * T;
-}
 const KIND_COLOR: Record<string, string> = {
   straight: 'rgba(255,255,255,0.72)',
   off: '#7ad0ff', // cool = off-beat
@@ -146,25 +136,33 @@ export default function HeightRhythms() {
       if (activeSVs[b].value === 0) continue; // muted — no bounce, no hit
       const i = idxSVs[b].value;
       const T = slotBeatsSV.value[i] * beatMs;
-      // Anchor the cycle to the moment this ball was released: at t0 the ball is
-      // at the top (phase 0.5, its apex) and drops from there — no snap to a
-      // global phase. The first ground contact (its downbeat) lands half a period
-      // later, then it repeats.
-      const e = Math.max(0, now - t0s[b].value);
-      const x = e / T + 0.5;
-      const p = x - Math.floor(x);
-      // The ball rises to the dashed ring's height (the slot apex). It poses at
-      // the ring until its grid moment, then drops from there — no jump.
-      const apex = ax[i];
-      ballYs[b].value = ground - BALL_R - apex * 4 * p * (1 - p);
-      const k = Math.floor(x);
+      const ph = slotPhaseSV.value[i];
+      const apex = ax[i]; // the dashed ring's height
+      const t0 = t0s[b].value;
+      // First descent: the ball starts exactly at the dashed ring (where it was
+      // released) and falls from there right away, timed to reach the ground on
+      // the next grid hit. After that it bounces steadily, locked to the beat —
+      // so the entry is immediate but the rhythm still lands on the grid.
+      const kNext = Math.floor(t0 / T - ph) + 1;
+      const tHit0 = (kNext + ph) * T;
+      if (now < tHit0) {
+        let u = (now - t0) / (tHit0 - t0);
+        if (u < 0) u = 0;
+        else if (u > 1) u = 1;
+        ballYs[b].value = ground - BALL_R - apex * (1 - u * u); // accelerating fall
+      } else {
+        const g = now / T - ph;
+        const p = g - Math.floor(g);
+        ballYs[b].value = ground - BALL_R - apex * 4 * p * (1 - p);
+      }
+      const kPassed = Math.floor(now / T - ph); // grid hits elapsed
       if (starteds[b].value === 0) {
-        kCounts[b].value = k;
+        kCounts[b].value = kPassed;
         starteds[b].value = 1;
         continue;
       }
-      if (k !== kCounts[b].value) {
-        kCounts[b].value = k;
+      if (kPassed !== kCounts[b].value) {
+        kCounts[b].value = kPassed;
         squashes[b].value = withSequence(
           withTiming(1, { duration: 45, easing: Easing.out(Easing.quad) }),
           withTiming(0, { duration: 200, easing: Easing.out(Easing.quad) })
@@ -180,12 +178,9 @@ export default function HeightRhythms() {
 
   useEffect(() => {
     const now = clock.value;
-    const beatMs = 60000 / tempoSV.value;
     for (let b = 0; b < N; b++) {
       starteds[b].value = 0;
-      const i = idxSVs[b].value;
-      // Re-lock live balls to the grid on (re)activation.
-      t0s[b].value = gridT0(now, SLOT_BEATS[i] * beatMs, SLOT_PHASE[i]);
+      t0s[b].value = now; // re-drop live balls from their ring on (re)activation
     }
     frame.setActive(live);
     return () => frame.setActive(false);
@@ -225,9 +220,7 @@ export default function HeightRhythms() {
       if (best !== idxSVs[b].value) {
         idxSVs[b].value = best;
         starteds[b].value = 0;
-        const T = slotBeatsSV.value[best] * (60000 / tempoSV.value);
-        // Re-snap the new rhythm to the grid so it stays locked to the beat.
-        t0s[b].value = gridT0(clock.value, T, slotPhaseSV.value[best]);
+        t0s[b].value = clock.value; // changing height re-drops from the new ring
         runOnJS(setIdxAt)(b, best);
       }
     })
@@ -249,10 +242,7 @@ export default function HeightRhythms() {
         activeSVs[b].value = on ? 1 : 0;
         if (on) {
           starteds[b].value = 0;
-          const i = idxSVs[b].value;
-          const T = slotBeatsSV.value[i] * (60000 / tempoSV.value);
-          // Poise at the ring now, then drop on the beat — snapped to the grid.
-          t0s[b].value = gridT0(clock.value, T, slotPhaseSV.value[i]);
+          t0s[b].value = clock.value; // release now → drops from the ring immediately
         }
         runOnJS(setActiveAt)(b, on);
         break;
@@ -305,7 +295,7 @@ export default function HeightRhythms() {
             ]}
           >
             {active[b] ? '● ' : '○ '}
-            {NAMES[b]} · {SLOTS[idxs[b]].label}
+            {NAMES[b]}
           </Text>
         ))}
       </View>

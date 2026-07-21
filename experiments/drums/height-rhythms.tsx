@@ -87,6 +87,14 @@ export default function HeightRhythms() {
       return next;
     });
 
+  const [active, setActive] = useState([false, false, false]); // every voice starts off
+  const setActiveAt = (b: number, on: boolean) =>
+    setActive((prev) => {
+      const next = prev.slice();
+      next[b] = on;
+      return next;
+    });
+
   // Per-ball animated state (arrays of shared values, indexed in the worklet).
   const ballYs = [useSharedValue(groundY - BALL_R), useSharedValue(groundY - BALL_R), useSharedValue(groundY - BALL_R)];
   const squashes = [useSharedValue(0), useSharedValue(0), useSharedValue(0)];
@@ -94,6 +102,7 @@ export default function HeightRhythms() {
   const rOps = [useSharedValue(0), useSharedValue(0), useSharedValue(0)];
   const kCounts = [useSharedValue(-1), useSharedValue(-1), useSharedValue(-1)];
   const starteds = [useSharedValue(0), useSharedValue(0), useSharedValue(0)];
+  const activeSVs = [useSharedValue(0), useSharedValue(0), useSharedValue(0)]; // 0 = muted
   const idxSVs = [useSharedValue(DEFAULT_IDX[0]), useSharedValue(DEFAULT_IDX[1]), useSharedValue(DEFAULT_IDX[2])];
 
   const slotBeatsSV = useSharedValue(SLOT_BEATS);
@@ -123,6 +132,7 @@ export default function HeightRhythms() {
     const ground = groundYSV.value;
     const ax = apexesSV.value;
     for (let b = 0; b < N; b++) {
+      if (activeSVs[b].value === 0) continue; // muted — no bounce, no hit
       const i = idxSVs[b].value;
       const T = slotBeatsSV.value[i] * beatMs;
       const ph = slotPhaseSV.value[i];
@@ -200,10 +210,34 @@ export default function HeightRhythms() {
       activeBall.value = -1;
     });
 
+  // Tap inside a ball's dashed ring to switch that voice on/off. The ring is the
+  // on/off switch and stays visible whether the voice is muted or live.
+  const tap = Gesture.Tap()
+    .maxDistance(18)
+    .onEnd((e) => {
+      const cols = xsSV.value;
+      const ax = apexesSV.value;
+      const ground = groundYSV.value;
+      const R = BALL_R * 1.5; // generous touch target around the ring
+      for (let b = 0; b < N; b++) {
+        const cx = cols[b];
+        const cy = ground - BALL_R - ax[idxSVs[b].value]; // ring center = apex point
+        const dx = e.x - cx;
+        const dy = e.y - cy;
+        if (dx * dx + dy * dy <= R * R) {
+          const on = activeSVs[b].value === 0;
+          activeSVs[b].value = on ? 1 : 0;
+          if (on) starteds[b].value = 0; // start clean so it doesn't fire mid-arc
+          runOnJS(setActiveAt)(b, on);
+          break;
+        }
+      }
+    });
+
   const railTop = groundY - BALL_R - apexes[0];
 
   return (
-    <GestureDetector gesture={pan}>
+    <GestureDetector gesture={Gesture.Exclusive(tap, pan)}>
       <View style={styles.fill}>
         {/* left ruler: the rhythm ladder */}
         <View
@@ -234,12 +268,16 @@ export default function HeightRhythms() {
             apexesSV={apexesSV}
             groundYSV={groundYSV}
             ringColor={KIND_COLOR[SLOTS[idxs[b]].kind]}
+            active={active[b]}
           />
         ))}
         {[0, 1, 2].map((b) => (
           <Text
             key={b}
-            style={[styles.name, { top: groundY + 16, left: xs[b] - 50, color: KIND_COLOR[SLOTS[idxs[b]].kind] }]}
+            style={[
+              styles.name,
+              { top: groundY + 16, left: xs[b] - 50, color: KIND_COLOR[SLOTS[idxs[b]].kind], opacity: active[b] ? 1 : 0.4 },
+            ]}
           >
             {NAMES[b]} · {SLOTS[idxs[b]].label}
           </Text>
@@ -259,6 +297,7 @@ function BallView({
   apexesSV,
   groundYSV,
   ringColor,
+  active,
 }: {
   x: number;
   ballY: SharedValue<number>;
@@ -269,6 +308,7 @@ function BallView({
   apexesSV: SharedValue<number[]>;
   groundYSV: SharedValue<number>;
   ringColor: string;
+  active: boolean;
 }) {
   const ballStyle = useAnimatedStyle(() => ({
     transform: [
@@ -288,9 +328,13 @@ function BallView({
   }));
   return (
     <>
-      <Animated.View style={[styles.ripple, rippleStyle]} pointerEvents="none" />
-      <Animated.View style={[styles.ring, { borderColor: ringColor }, ringStyle]} pointerEvents="none" />
-      <Animated.View style={[styles.ball, ballStyle]} pointerEvents="none" />
+      {active && <Animated.View style={[styles.ripple, rippleStyle]} pointerEvents="none" />}
+      {/* the dashed ring is always visible — it's the on/off switch */}
+      <Animated.View
+        style={[styles.ring, { borderColor: ringColor, opacity: active ? 1 : 0.4 }, ringStyle]}
+        pointerEvents="none"
+      />
+      {active && <Animated.View style={[styles.ball, ballStyle]} pointerEvents="none" />}
     </>
   );
 }

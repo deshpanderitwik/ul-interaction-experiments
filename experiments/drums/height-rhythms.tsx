@@ -153,10 +153,9 @@ export default function HeightRhythms() {
       const e = Math.max(0, now - t0s[b].value);
       const x = e / T + 0.5;
       const p = x - Math.floor(x);
-      // The very first descent falls from the top (the ghost/switch height);
-      // after the first hit it settles to the slot's own apex. The switch happens
-      // at a ground contact, so there's no visible jump.
-      const apex = x < 1 ? ax[0] : ax[i];
+      // The ball rises to the dashed ring's height (the slot apex). It poses at
+      // the ring until its grid moment, then drops from there — no jump.
+      const apex = ax[i];
       ballYs[b].value = ground - BALL_R - apex * 4 * p * (1 - p);
       const k = Math.floor(x);
       if (starteds[b].value === 0) {
@@ -236,34 +235,27 @@ export default function HeightRhythms() {
       activeBall.value = -1;
     });
 
-  // Tap inside a ball's dashed ring to switch that voice on/off. The ring is the
-  // on/off switch and stays visible whether the voice is muted or live.
+  // Tap an instrument's label (below the ground line) to switch that voice on or
+  // off. The dashed ring is no longer a switch — it just marks bounce height.
   const tap = Gesture.Tap()
     .maxDistance(18)
     .onEnd((e) => {
       const cols = xsSV.value;
-      const ax = apexesSV.value;
       const ground = groundYSV.value;
-      const R = BALL_R * 1.5; // generous touch target around the ring
-      // The switch/release ring sits at the top (tallest rung) for every column.
-      const cy = ground - BALL_R - ax[0];
+      if (e.y < ground + 6 || e.y > ground + 56) return; // only the label strip
       for (let b = 0; b < N; b++) {
-        const cx = cols[b];
-        const dx = e.x - cx;
-        const dy = e.y - cy;
-        if (dx * dx + dy * dy <= R * R) {
-          const on = activeSVs[b].value === 0;
-          activeSVs[b].value = on ? 1 : 0;
-          if (on) {
-            starteds[b].value = 0;
-            const i = idxSVs[b].value;
-            const T = slotBeatsSV.value[i] * (60000 / tempoSV.value);
-            // Poise at the top now, then drop on the beat — snapped to the grid.
-            t0s[b].value = gridT0(clock.value, T, slotPhaseSV.value[i]);
-          }
-          runOnJS(setActiveAt)(b, on);
-          break;
+        if (Math.abs(e.x - cols[b]) > 60) continue;
+        const on = activeSVs[b].value === 0;
+        activeSVs[b].value = on ? 1 : 0;
+        if (on) {
+          starteds[b].value = 0;
+          const i = idxSVs[b].value;
+          const T = slotBeatsSV.value[i] * (60000 / tempoSV.value);
+          // Poise at the ring now, then drop on the beat — snapped to the grid.
+          t0s[b].value = gridT0(clock.value, T, slotPhaseSV.value[i]);
         }
+        runOnJS(setActiveAt)(b, on);
+        break;
       }
     });
 
@@ -297,6 +289,7 @@ export default function HeightRhythms() {
             squash={squashes[b]}
             rScale={rScales[b]}
             rOp={rOps[b]}
+            idxSV={idxSVs[b]}
             apexesSV={apexesSV}
             groundYSV={groundYSV}
             ringColor={KIND_COLOR[SLOTS[idxs[b]].kind]}
@@ -308,9 +301,10 @@ export default function HeightRhythms() {
             key={b}
             style={[
               styles.name,
-              { top: groundY + 16, left: xs[b] - 50, color: KIND_COLOR[SLOTS[idxs[b]].kind], opacity: active[b] ? 1 : 0.4 },
+              { top: groundY + 16, left: xs[b] - 50, color: KIND_COLOR[SLOTS[idxs[b]].kind], opacity: active[b] ? 1 : 0.5 },
             ]}
           >
+            {active[b] ? '● ' : '○ '}
             {NAMES[b]} · {SLOTS[idxs[b]].label}
           </Text>
         ))}
@@ -325,6 +319,7 @@ function BallView({
   squash,
   rScale,
   rOp,
+  idxSV,
   apexesSV,
   groundYSV,
   ringColor,
@@ -335,6 +330,7 @@ function BallView({
   squash: SharedValue<number>;
   rScale: SharedValue<number>;
   rOp: SharedValue<number>;
+  idxSV: SharedValue<number>;
   apexesSV: SharedValue<number[]>;
   groundYSV: SharedValue<number>;
   ringColor: string;
@@ -349,9 +345,9 @@ function BallView({
     ],
   }));
   const ringStyle = useAnimatedStyle(() => {
-    // The switch/release ring always rests at the top (tallest rung) — the point
-    // the ball drops from. The ball then grooves below it at its slot's height.
-    const apex = apexesSV.value[0] ?? 0;
+    // The dashed ring marks how high the ball travels — the slot's apex. Drag the
+    // column to move it up/down (higher = slower/coarser, lower = faster/finer).
+    const apex = apexesSV.value[idxSV.value] ?? 0;
     return { transform: [{ translateX: x - BALL_R }, { translateY: groundYSV.value - 2 * BALL_R - apex }] };
   });
   const rippleStyle = useAnimatedStyle(() => ({
@@ -361,9 +357,9 @@ function BallView({
   return (
     <>
       {active && <Animated.View style={[styles.ripple, rippleStyle]} pointerEvents="none" />}
-      {/* the dashed ring is always visible — it's the on/off switch */}
+      {/* the dashed ring marks how high the ball travels; drag it up/down */}
       <Animated.View
-        style={[styles.ring, { borderColor: ringColor, opacity: active ? 1 : 0.4 }, ringStyle]}
+        style={[styles.ring, { borderColor: ringColor, opacity: active ? 1 : 0.55 }, ringStyle]}
         pointerEvents="none"
       />
       {active && <Animated.View style={[styles.ball, ballStyle]} pointerEvents="none" />}

@@ -106,7 +106,7 @@ export const experiments: Experiment[] = [
       {
         id: 'height-rhythms',
         title: 'Height Rhythms',
-        blurb: 'Three bouncing balls — kick, snare, hi-hat — each apex picks a slot off a rhythm ladder on the left. Beyond straight subdivisions (1/2…1/16) the ladder interleaves off-beat slots (same rate, landing on the “and”) and syncopated dotted slots that cross the beat. Drag a ball’s column to a rung; each is clock-locked with its phase offset, so three independent grooves layer without drifting. Every ground touch fires that ball’s voice.',
+        blurb: 'Three bouncing balls — kick, snare, hi-hat — each apex picks a slot off a rhythm ladder on the left (straight, off-beat, and dotted/syncopated rungs). Tap a label to bring a voice in; drag its column to set how high it bounces. A bar meter below loops a 4-bar phrase: tap a bar to select it, then move a sound to write a variation just for that bar. Everything stays grid-locked to the shared beat.',
         load: () => import('./drums/height-rhythms'),
       },
       {

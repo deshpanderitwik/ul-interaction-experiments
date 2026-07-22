@@ -18,20 +18,21 @@ import { useTempo } from '../tempo';
 import { playHat, playKick, playSnare } from './voice';
 
 // Drums · Height Rhythms — three bouncing balls (kick, snare, hi-hat), each one's
-// *apex* picks a rhythmic slot off a ladder on the left. The ladder isn't just
-// straight subdivisions: interleaved between them are OFF-BEAT slots (same rate,
-// landing on the "and") and SYNCOPATED slots (dotted values that cross the beat).
-// Drag a ball's column up for a higher, slower slot or down for a lower, faster
-// one; each is clock-locked (with its phase offset) so three independent grooves
-// layer without drifting. Every ground touch fires that ball's voice.
+// apex picks a rhythmic slot off a ladder on the left. Below, a bar meter shows a
+// looping 4-bar phrase: tap a bar to select it, then move a sound's height to
+// write a *variation* just for that bar (the base pattern plays in every other
+// bar). Each bounce is grid-locked, so the three grooves — and their per-bar
+// variations — stay in time. Every ground touch fires that ball's voice.
 
 const N = 3;
 const NAMES = ['KICK', 'SNARE', 'HAT'];
 const BALL_R = 22;
 const RR = 40;
-const GROUND_FROM_BOTTOM = 150;
+const GROUND_FROM_BOTTOM = 170;
 const TOP_MARGIN = 150;
 const RAIL_W = 48;
+const BARS = 4; // loop length in bars
+const BEATS_PER_BAR = 4;
 
 // The rhythm ladder, slowest (top) → fastest (bottom). Each slot is a period in
 // beats plus a phase offset within that period: phase 0 lands on the grid,
@@ -54,6 +55,7 @@ const KIND_COLOR: Record<string, string> = {
   off: '#7ad0ff', // cool = off-beat
   sync: '#ffd166', // amber = syncopated
 };
+const VAR_COLOR = '#ffd166';
 const DEFAULT_IDX = [2, 0, 5]; // kick 1/4, snare 1/2, hat 1/8 — a straight starting groove
 
 export default function HeightRhythms() {
@@ -69,9 +71,14 @@ export default function HeightRhythms() {
     return [1, 2, 3].map((k) => RAIL_W + (span * k) / 4);
   }, [width]);
 
-  // Apex height (px above the ground) for each ladder slot — evenly spaced rungs,
-  // so off-beat/syncopated slots get their own reachable height next to the
-  // straight ones. Independent of the raw period, which the slot also carries.
+  // Bar meter geometry.
+  const meterLeft = RAIL_W;
+  const meterW = width - RAIL_W - 16;
+  const cellW = meterW / BARS;
+  const meterTop = groundY + 44;
+  const meterH = 22;
+
+  // Apex height (px above the ground) for each ladder slot — evenly spaced rungs.
   const apexes = useMemo(() => {
     const top = Math.max(140, groundY - TOP_MARGIN - 2 * BALL_R);
     const bottom = 44;
@@ -79,21 +86,47 @@ export default function HeightRhythms() {
     return SLOTS.map((_, i) => top - (i / (n - 1)) * (top - bottom));
   }, [groundY]);
 
-  const [idxs, setIdxs] = useState(DEFAULT_IDX); // per-ball slot index, for labels
-  const setIdxAt = (b: number, v: number) =>
-    setIdxs((prev) => {
+  // Base slot per ball, plus per-(ball,bar) overrides (-1 = follow the base).
+  const [baseIdxs, setBaseIdxs] = useState(DEFAULT_IDX);
+  const [overrides, setOverrides] = useState<number[]>(() => new Array(N * BARS).fill(-1));
+  const [selectedBar, setSelectedBar] = useState(-1); // -1 = editing the base
+  const [active, setActive] = useState([false, false, false]); // every voice starts off
+
+  const setBaseIdxAt = (b: number, v: number) =>
+    setBaseIdxs((prev) => {
       const next = prev.slice();
       next[b] = v;
       return next;
     });
-
-  const [active, setActive] = useState([false, false, false]); // every voice starts off
+  const setOverrideAt = (b: number, bar: number, v: number) =>
+    setOverrides((prev) => {
+      const next = prev.slice();
+      next[b * BARS + bar] = v;
+      return next;
+    });
   const setActiveAt = (b: number, on: boolean) =>
     setActive((prev) => {
       const next = prev.slice();
       next[b] = on;
       return next;
     });
+
+  // The slot the ring/label should show for ball b — the current edit target.
+  const displayIdx = (b: number) => {
+    if (selectedBar >= 0) {
+      const ov = overrides[b * BARS + selectedBar];
+      return ov >= 0 ? ov : baseIdxs[b];
+    }
+    return baseIdxs[b];
+  };
+  // Which bars carry a real variation (any ball differs from its base there).
+  const barHasVar = (bar: number) => {
+    for (let b = 0; b < N; b++) {
+      const ov = overrides[b * BARS + bar];
+      if (ov >= 0 && ov !== baseIdxs[b]) return true;
+    }
+    return false;
+  };
 
   // Per-ball animated state (arrays of shared values, indexed in the worklet).
   const ballYs = [useSharedValue(groundY - BALL_R), useSharedValue(groundY - BALL_R), useSharedValue(groundY - BALL_R)];
@@ -102,10 +135,14 @@ export default function HeightRhythms() {
   const rOps = [useSharedValue(0), useSharedValue(0), useSharedValue(0)];
   const kCounts = [useSharedValue(-1), useSharedValue(-1), useSharedValue(-1)];
   const starteds = [useSharedValue(0), useSharedValue(0), useSharedValue(0)];
-  const t0s = [useSharedValue(0), useSharedValue(0), useSharedValue(0)]; // clock time each ball was released
+  const t0s = [useSharedValue(0), useSharedValue(0), useSharedValue(0)]; // release time
+  const tHit0s = [useSharedValue(0), useSharedValue(0), useSharedValue(0)]; // first grid hit
+  const firstApexs = [useSharedValue(0), useSharedValue(0), useSharedValue(0)]; // entry drop height
   const activeSVs = [useSharedValue(0), useSharedValue(0), useSharedValue(0)]; // 0 = muted
-  const idxSVs = [useSharedValue(DEFAULT_IDX[0]), useSharedValue(DEFAULT_IDX[1]), useSharedValue(DEFAULT_IDX[2])];
 
+  const baseIdxSV = useSharedValue(DEFAULT_IDX.slice());
+  const overrideSV = useSharedValue<number[]>(new Array(N * BARS).fill(-1));
+  const selectedBarSV = useSharedValue(-1);
   const slotBeatsSV = useSharedValue(SLOT_BEATS);
   const slotPhaseSV = useSharedValue(SLOT_PHASE);
   const apexesSV = useSharedValue(apexes);
@@ -113,6 +150,8 @@ export default function HeightRhythms() {
   const groundYSV = useSharedValue(groundY);
   const xsSV = useSharedValue(xs);
   const activeBall = useSharedValue(-1);
+  const loopProgress = useSharedValue(0);
+  const currentBar = useSharedValue(0);
   useEffect(() => {
     apexesSV.value = apexes;
     tempoSV.value = tempo;
@@ -130,37 +169,48 @@ export default function HeightRhythms() {
     'worklet';
     const now = clock.value;
     const beatMs = 60000 / tempoSV.value;
+    const barMs = BEATS_PER_BAR * beatMs;
     const ground = groundYSV.value;
     const ax = apexesSV.value;
+
+    const bar = Math.floor(now / barMs) % BARS;
+    currentBar.value = bar;
+    loopProgress.value = (now % (BARS * barMs)) / (BARS * barMs);
+
     for (let b = 0; b < N; b++) {
       if (activeSVs[b].value === 0) continue; // muted — no bounce, no hit
-      const i = idxSVs[b].value;
-      const T = slotBeatsSV.value[i] * beatMs;
-      const ph = slotPhaseSV.value[i];
-      const apex = ax[i]; // the dashed ring's height
+      // Effective slot for this ball in the bar that's playing right now.
+      const ov = overrideSV.value[b * BARS + bar];
+      const slot = ov >= 0 ? ov : baseIdxSV.value[b];
+      const T = slotBeatsSV.value[slot] * beatMs;
+      const ph = slotPhaseSV.value[slot];
+      const apex = ax[slot];
       const t0 = t0s[b].value;
-      // First descent: the ball starts exactly at the dashed ring (where it was
-      // released) and falls from there right away, timed to reach the ground on
-      // the next grid hit. After that it bounces steadily, locked to the beat —
-      // so the entry is immediate but the rhythm still lands on the grid.
-      const kNext = Math.floor(t0 / T - ph) + 1;
-      const tHit0 = (kNext + ph) * T;
+
+      if (starteds[b].value === 0) {
+        // Arm the entry: baseline the hit counter and time the first fall to land
+        // on the next grid hit, dropping from this slot's ring.
+        const k0 = Math.floor(t0 / T - ph);
+        kCounts[b].value = k0;
+        tHit0s[b].value = (k0 + 1 + ph) * T;
+        firstApexs[b].value = apex;
+        starteds[b].value = 1;
+      }
+
+      const tHit0 = tHit0s[b].value;
       if (now < tHit0) {
+        // Immediate accelerating fall from the ring to the ground on the grid hit.
         let u = (now - t0) / (tHit0 - t0);
         if (u < 0) u = 0;
         else if (u > 1) u = 1;
-        ballYs[b].value = ground - BALL_R - apex * (1 - u * u); // accelerating fall
+        ballYs[b].value = ground - BALL_R - firstApexs[b].value * (1 - u * u);
       } else {
         const g = now / T - ph;
         const p = g - Math.floor(g);
         ballYs[b].value = ground - BALL_R - apex * 4 * p * (1 - p);
       }
-      const kPassed = Math.floor(now / T - ph); // grid hits elapsed
-      if (starteds[b].value === 0) {
-        kCounts[b].value = kPassed;
-        starteds[b].value = 1;
-        continue;
-      }
+
+      const kPassed = Math.floor(now / T - ph); // grid hits elapsed for this slot
       if (kPassed !== kCounts[b].value) {
         kCounts[b].value = kPassed;
         squashes[b].value = withSequence(
@@ -187,8 +237,8 @@ export default function HeightRhythms() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, frame]);
 
-  // Grab the nearest ball's column, then drag up/down to set its slot; snaps to
-  // the nearest rung.
+  // Drag a ball's column up/down to set its bounce height. If a bar is selected,
+  // the change writes a variation just for that bar; otherwise it sets the base.
   const pan = Gesture.Pan()
     .onBegin((e) => {
       const cols = xsSV.value;
@@ -206,7 +256,7 @@ export default function HeightRhythms() {
     .onUpdate((e) => {
       const b = activeBall.value;
       if (b < 0) return;
-      const target = groundYSV.value - BALL_R - e.y; // desired apex from finger height
+      const target = groundYSV.value - BALL_R - e.y;
       const ax = apexesSV.value;
       let best = 0;
       let bestD = 1e9;
@@ -217,35 +267,64 @@ export default function HeightRhythms() {
           best = j;
         }
       }
-      if (best !== idxSVs[b].value) {
-        idxSVs[b].value = best;
-        starteds[b].value = 0;
-        t0s[b].value = clock.value; // changing height re-drops from the new ring
-        runOnJS(setIdxAt)(b, best);
+      const sel = selectedBarSV.value;
+      let cur;
+      if (sel >= 0) {
+        const ov = overrideSV.value[b * BARS + sel];
+        cur = ov >= 0 ? ov : baseIdxSV.value[b];
+      } else {
+        cur = baseIdxSV.value[b];
+      }
+      if (best !== cur) {
+        if (sel >= 0) {
+          const arr = overrideSV.value.slice();
+          arr[b * BARS + sel] = best;
+          overrideSV.value = arr;
+          runOnJS(setOverrideAt)(b, sel, best);
+        } else {
+          const arr = baseIdxSV.value.slice();
+          arr[b] = best;
+          baseIdxSV.value = arr;
+          starteds[b].value = 0;
+          t0s[b].value = clock.value; // re-drop from the new ring on a base edit
+          runOnJS(setBaseIdxAt)(b, best);
+        }
       }
     })
     .onFinalize(() => {
       activeBall.value = -1;
     });
 
-  // Tap an instrument's label (below the ground line) to switch that voice on or
-  // off. The dashed ring is no longer a switch — it just marks bounce height.
+  // Tap an instrument label to toggle its voice; tap a bar in the meter to select
+  // it for editing (tap again to deselect).
   const tap = Gesture.Tap()
     .maxDistance(18)
     .onEnd((e) => {
-      const cols = xsSV.value;
       const ground = groundYSV.value;
-      if (e.y < ground + 6 || e.y > ground + 56) return; // only the label strip
-      for (let b = 0; b < N; b++) {
-        if (Math.abs(e.x - cols[b]) > 60) continue;
-        const on = activeSVs[b].value === 0;
-        activeSVs[b].value = on ? 1 : 0;
-        if (on) {
-          starteds[b].value = 0;
-          t0s[b].value = clock.value; // release now → drops from the ring immediately
+      // Bar meter strip.
+      if (e.y >= meterTop - 4 && e.y <= meterTop + meterH + 6 && e.x >= meterLeft && e.x <= meterLeft + meterW) {
+        let bar = Math.floor((e.x - meterLeft) / cellW);
+        if (bar < 0) bar = 0;
+        else if (bar >= BARS) bar = BARS - 1;
+        const next = selectedBarSV.value === bar ? -1 : bar;
+        selectedBarSV.value = next;
+        runOnJS(setSelectedBar)(next);
+        return;
+      }
+      // Instrument label strip.
+      if (e.y >= ground + 2 && e.y <= ground + 36) {
+        const cols = xsSV.value;
+        for (let b = 0; b < N; b++) {
+          if (Math.abs(e.x - cols[b]) > 60) continue;
+          const on = activeSVs[b].value === 0;
+          activeSVs[b].value = on ? 1 : 0;
+          if (on) {
+            starteds[b].value = 0;
+            t0s[b].value = clock.value;
+          }
+          runOnJS(setActiveAt)(b, on);
+          break;
         }
-        runOnJS(setActiveAt)(b, on);
-        break;
       }
     });
 
@@ -255,10 +334,7 @@ export default function HeightRhythms() {
     <GestureDetector gesture={Gesture.Exclusive(tap, pan)}>
       <View style={styles.fill}>
         {/* left ruler: the rhythm ladder */}
-        <View
-          style={[styles.rail, { top: railTop - 10, height: groundY - (railTop - 10) }]}
-          pointerEvents="none"
-        />
+        <View style={[styles.rail, { top: railTop - 10, height: groundY - (railTop - 10) }]} pointerEvents="none" />
         {apexes.map((a, i) => {
           const y = groundY - BALL_R - a;
           const c = KIND_COLOR[SLOTS[i].kind];
@@ -279,10 +355,11 @@ export default function HeightRhythms() {
             squash={squashes[b]}
             rScale={rScales[b]}
             rOp={rOps[b]}
-            idxSV={idxSVs[b]}
-            apexesSV={apexesSV}
+            apexes={apexes}
+            groundY={groundY}
             groundYSV={groundYSV}
-            ringColor={KIND_COLOR[SLOTS[idxs[b]].kind]}
+            displayIdx={displayIdx(b)}
+            ringColor={KIND_COLOR[SLOTS[displayIdx(b)].kind]}
             active={active[b]}
           />
         ))}
@@ -291,15 +368,81 @@ export default function HeightRhythms() {
             key={b}
             style={[
               styles.name,
-              { top: groundY + 16, left: xs[b] - 50, color: KIND_COLOR[SLOTS[idxs[b]].kind], opacity: active[b] ? 1 : 0.5 },
+              { top: groundY + 12, left: xs[b] - 50, color: KIND_COLOR[SLOTS[displayIdx(b)].kind], opacity: active[b] ? 1 : 0.5 },
             ]}
           >
             {active[b] ? '● ' : '○ '}
             {NAMES[b]}
           </Text>
         ))}
+
+        {/* bar meter */}
+        <View style={{ position: 'absolute', left: meterLeft, top: meterTop, width: meterW, height: meterH }}>
+          {Array.from({ length: BARS }, (_, i) => (
+            <MeterCell
+              key={i}
+              index={i}
+              left={i * cellW}
+              width={cellW - 4}
+              height={meterH}
+              selected={selectedBar === i}
+              hasVar={barHasVar(i)}
+              currentBar={currentBar}
+            />
+          ))}
+          <Playhead loopProgress={loopProgress} meterW={meterW} height={meterH} />
+        </View>
       </View>
     </GestureDetector>
+  );
+}
+
+function MeterCell({
+  index,
+  left,
+  width,
+  height,
+  selected,
+  hasVar,
+  currentBar,
+}: {
+  index: number;
+  left: number;
+  width: number;
+  height: number;
+  selected: boolean;
+  hasVar: boolean;
+  currentBar: SharedValue<number>;
+}) {
+  const fillStyle = useAnimatedStyle(() => ({ opacity: currentBar.value === index ? 0.24 : 0 }));
+  const border = selected ? '#fff' : hasVar ? 'rgba(255,209,102,0.8)' : 'rgba(255,255,255,0.22)';
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        left,
+        top: 0,
+        width,
+        height,
+        borderRadius: 5,
+        borderWidth: selected ? 1.5 : 1,
+        borderColor: border,
+        overflow: 'hidden',
+      }}
+    >
+      <Animated.View style={[{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#fff' }, fillStyle]} />
+      {hasVar && <View style={{ position: 'absolute', top: 4, right: 4, width: 4, height: 4, borderRadius: 2, backgroundColor: VAR_COLOR }} />}
+    </View>
+  );
+}
+
+function Playhead({ loopProgress, meterW, height }: { loopProgress: SharedValue<number>; meterW: number; height: number }) {
+  const style = useAnimatedStyle(() => ({ transform: [{ translateX: loopProgress.value * meterW }] }));
+  return (
+    <Animated.View
+      style={[{ position: 'absolute', top: -3, left: 0, width: 2, height: height + 6, backgroundColor: 'rgba(255,255,255,0.85)' }, style]}
+      pointerEvents="none"
+    />
   );
 }
 
@@ -309,9 +452,10 @@ function BallView({
   squash,
   rScale,
   rOp,
-  idxSV,
-  apexesSV,
+  apexes,
+  groundY,
   groundYSV,
+  displayIdx,
   ringColor,
   active,
 }: {
@@ -320,9 +464,10 @@ function BallView({
   squash: SharedValue<number>;
   rScale: SharedValue<number>;
   rOp: SharedValue<number>;
-  idxSV: SharedValue<number>;
-  apexesSV: SharedValue<number[]>;
+  apexes: number[];
+  groundY: number;
   groundYSV: SharedValue<number>;
+  displayIdx: number;
   ringColor: string;
   active: boolean;
 }) {
@@ -334,22 +479,18 @@ function BallView({
       { scaleY: 1 - 0.4 * squash.value },
     ],
   }));
-  const ringStyle = useAnimatedStyle(() => {
-    // The dashed ring marks how high the ball travels — the slot's apex. Drag the
-    // column to move it up/down (higher = slower/coarser, lower = faster/finer).
-    const apex = apexesSV.value[idxSV.value] ?? 0;
-    return { transform: [{ translateX: x - BALL_R }, { translateY: groundYSV.value - 2 * BALL_R - apex }] };
-  });
   const rippleStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: x - RR }, { translateY: groundYSV.value - RR }, { scale: rScale.value }],
     opacity: rOp.value,
   }));
+  // The dashed ring marks how high the ball travels (the edit target's apex). It's
+  // a discrete value, so a plain positioned view is fine.
+  const ringTop = groundY - 2 * BALL_R - (apexes[displayIdx] ?? 0);
   return (
     <>
       {active && <Animated.View style={[styles.ripple, rippleStyle]} pointerEvents="none" />}
-      {/* the dashed ring marks how high the ball travels; drag it up/down */}
-      <Animated.View
-        style={[styles.ring, { borderColor: ringColor, opacity: active ? 1 : 0.55 }, ringStyle]}
+      <View
+        style={[styles.ring, { borderColor: ringColor, opacity: active ? 1 : 0.55, left: x - BALL_R, top: ringTop }]}
         pointerEvents="none"
       />
       {active && <Animated.View style={[styles.ball, ballStyle]} pointerEvents="none" />}
@@ -367,7 +508,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.35)',
   },
   rail: { position: 'absolute', left: RAIL_W, width: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.25)' },
-  // faint full-width reference line at each rung, so a ball's apex reads across
   railGuide: { position: 'absolute', left: RAIL_W, right: 0, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.05)' },
   railTick: { position: 'absolute', left: RAIL_W - 8, width: 8, height: 1 },
   railLabel: {
@@ -389,11 +529,8 @@ const styles = StyleSheet.create({
     borderRadius: BALL_R,
     backgroundColor: '#fff',
   },
-  // Dashed apex ring — the point the ball rises to.
   ring: {
     position: 'absolute',
-    top: 0,
-    left: 0,
     width: BALL_R * 2,
     height: BALL_R * 2,
     borderRadius: BALL_R,

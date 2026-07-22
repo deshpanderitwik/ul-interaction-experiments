@@ -266,7 +266,6 @@ export default function HeightRhythms() {
             <View key={i} pointerEvents="none">
               <View style={[styles.railGuide, { top: y }]} />
               <View style={[styles.railTick, { top: y - 0.5, backgroundColor: c }]} />
-              <Text style={[styles.railLabel, { top: y - 8, color: c }]}>{SLOTS[i].label}</Text>
             </View>
           );
         })}
@@ -370,16 +369,6 @@ const styles = StyleSheet.create({
   // faint full-width reference line at each rung, so a ball's apex reads across
   railGuide: { position: 'absolute', left: RAIL_W, right: 0, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.05)' },
   railTick: { position: 'absolute', left: RAIL_W - 8, width: 8, height: 1 },
-  railLabel: {
-    position: 'absolute',
-    left: 0,
-    width: RAIL_W - 12,
-    textAlign: 'right',
-    fontSize: 10,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-    letterSpacing: 0.3,
-  },
   ball: {
     position: 'absolute',
     top: 0,

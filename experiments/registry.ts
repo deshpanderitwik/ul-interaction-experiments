@@ -110,6 +110,12 @@ export const experiments: Experiment[] = [
         load: () => import('./drums/height-rhythms'),
       },
       {
+        id: 'analysis',
+        title: 'Analysis',
+        blurb: 'Reverse-engineering a real sequenced drum part: a transcribed deadmau5-style electro-house drop groove (four-on-the-floor kick, backbeat clap, off-beat open hats, 16th closed-hat interplay, ghost snares, a bar-4 fill) played back and drawn as a vertical piano-roll — time flows down 4 bars, brightness is velocity. The reference we work backwards from to design the interactions that build it.',
+        load: () => import('./drums/analysis'),
+      },
+      {
         id: 'zoom-lanes',
         title: 'Zoom Lanes',
         blurb: 'A six-piece kit (kick, snare, tom, clap, hat, open hat — all modified sines) as six vertical lanes looping in parallel. Tap a lane and the same vertical lane just gets bigger (16 tall cells) over a scrim for easy editing; tap the scrim to zoom back out.',

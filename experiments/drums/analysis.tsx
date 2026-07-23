@@ -96,7 +96,7 @@ export default function Analysis() {
   const clock = sharedClock ?? localClock;
   const { width, height } = useWindowDimensions();
 
-  const HEADER = 58;
+  const HEADER = 96; // clearance for the device/host top bar
   const BOTTOM = 64;
   const gridLeft = 10;
   const gridTop = HEADER;
@@ -214,7 +214,7 @@ const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
   title: {
     position: 'absolute',
-    top: 16,
+    top: 54,
     left: 10,
     right: 10,
     color: 'rgba(255,255,255,0.6)',
@@ -224,7 +224,7 @@ const styles = StyleSheet.create({
   },
   laneName: {
     position: 'absolute',
-    top: 38,
+    top: 76,
     textAlign: 'center',
     fontSize: 10,
     fontWeight: '800',

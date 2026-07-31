@@ -166,7 +166,6 @@ export default function TimeLoop() {
           <Text style={styles.barsNum}>
             {bars} <Text style={styles.barsLabel}>{bars === 1 ? 'BAR' : 'BARS'}</Text>
           </Text>
-          <Text style={styles.hint}>drag ↕ to set the loop</Text>
         </View>
       </View>
     </GestureDetector>
@@ -196,5 +195,4 @@ const styles = StyleSheet.create({
   },
   barsNum: { color: ACCENT, fontSize: 30, fontWeight: '600', fontVariant: ['tabular-nums'] },
   barsLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 12, fontWeight: '700', letterSpacing: 1.5 },
-  hint: { color: 'rgba(255,255,255,0.32)', fontSize: 11, letterSpacing: 0.5, marginTop: 6 },
 });

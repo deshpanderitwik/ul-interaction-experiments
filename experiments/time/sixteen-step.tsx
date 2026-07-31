@@ -133,8 +133,8 @@ export default function SixteenStep() {
       </Animated.View>
       <View style={{ position: 'absolute', left: cx - 4, top: cy - 4, width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.5)' }} pointerEvents="none" />
 
-      {/* readout below the clock */}
-      <View style={{ position: 'absolute', left: cx - 80, top: cy + R + 34, width: 160, alignItems: 'center' }} pointerEvents="none">
+      {/* readout bottom-aligned with the screen */}
+      <View style={{ position: 'absolute', left: 0, right: 0, bottom: 48, alignItems: 'center' }} pointerEvents="none">
         <Text style={styles.stepNum}>{loopStep + 1}</Text>
         <View style={{ flexDirection: 'row', marginTop: 6 }}>
           {Array.from({ length: BEATS_PER_BAR }, (_, i) => (

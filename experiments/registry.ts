@@ -57,6 +57,12 @@ export const experiments: Experiment[] = [
         blurb: 'The loop clock locked to 8 bars, so the ring becomes eight big steps (one per bar). Same carry-forward clock, but the stops are large and button-like — the first hint that these steps want to be tapped.',
         load: () => import('./time/eight-step'),
       },
+      {
+        id: 'sixteen-step',
+        title: 'Sixteen Step',
+        blurb: 'One bar of sixteenths wrapped onto the ring — sixteen stops, each sized by its metric weight: downbeat biggest, then beat 3, then beats 2 & 4, then the 8th “ands,” then the weak 16ths smallest. The metric skeleton, made visible.',
+        load: () => import('./time/sixteen-step'),
+      },
     ],
   },
   {

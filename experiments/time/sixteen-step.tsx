@@ -98,8 +98,6 @@ export default function SixteenStep() {
 
   return (
     <View style={styles.fill}>
-      <Text style={styles.title}>TIME · SIXTEEN STEP</Text>
-
       {/* ring outline */}
       <View
         style={{ position: 'absolute', left: cx - R, top: cy - R, width: 2 * R, height: 2 * R, borderRadius: R, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)' }}
@@ -147,31 +145,11 @@ export default function SixteenStep() {
           ))}
         </View>
       </View>
-
-      <View style={styles.footer} pointerEvents="none">
-        <Text style={styles.barsNum}>
-          16 <Text style={styles.barsLabel}>STEPS</Text>
-        </Text>
-      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
-  title: {
-    position: 'absolute',
-    top: 54,
-    left: 0,
-    right: 0,
-    textAlign: 'center',
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 2,
-  },
   stepNum: { color: '#fff', fontSize: 56, fontWeight: '200', fontVariant: ['tabular-nums'], lineHeight: 60 },
-  footer: { position: 'absolute', bottom: 84, left: 0, right: 0, alignItems: 'center' },
-  barsNum: { color: ACCENT, fontSize: 30, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  barsLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 12, fontWeight: '700', letterSpacing: 1.5 },
 });

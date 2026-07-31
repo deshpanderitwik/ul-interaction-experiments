@@ -115,8 +115,8 @@ export default function TimeLoop() {
       </Animated.View>
       <View style={{ position: 'absolute', left: cx - 4, top: cy - 4, width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.5)' }} pointerEvents="none" />
 
-      {/* center readout */}
-      <View style={{ position: 'absolute', left: cx - 80, top: cy - 44, width: 160, alignItems: 'center' }} pointerEvents="none">
+      {/* readout below the clock so it's never hidden by the hand */}
+      <View style={{ position: 'absolute', left: cx - 80, top: cy + R + 24, width: 160, alignItems: 'center' }} pointerEvents="none">
         <Text style={styles.barNum}>{curBar}</Text>
         <View style={{ flexDirection: 'row', marginTop: 6 }}>
           {Array.from({ length: BEATS_PER_BAR }, (_, i) => (

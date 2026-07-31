@@ -46,10 +46,18 @@ export const experiments: Experiment[] = [
   {
     id: 'time',
     title: 'Time',
-    blurb: 'Explorations of looping a chunk of time. First: a clock that counts up to a set number of bars, snaps back to 0, and counts up again — a sweeping hand, a ring of beat dots that fill as it goes, and −/+ to set the loop length.',
+    blurb: 'Explorations of looping a chunk of time. First: a clock that counts up to a set number of bars, snaps back to 0, and counts up again — a sweeping hand, a ring of beat dots that fill as it goes, and drag ↕ to set the loop length.',
     accent: '#a0b4ff',
     audio: true,
     load: () => import('./time'),
+    variations: [
+      {
+        id: 'eight-step',
+        title: 'Eight Step',
+        blurb: 'The loop clock locked to 8 bars, so the ring becomes eight big steps (one per bar). Same carry-forward clock, but the stops are large and button-like — the first hint that these steps want to be tapped.',
+        load: () => import('./time/eight-step'),
+      },
+    ],
   },
   {
     id: 'combinations',

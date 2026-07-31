@@ -1,6 +1,7 @@
 import { useClock } from '@shopify/react-native-skia';
 import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useFrameCallback, useSharedValue, runOnJS } from 'react-native-reanimated';
 import { useExperimentActive } from '../_host';
 import { useSharedClock } from '../combinations/clock';
@@ -41,6 +42,13 @@ export default function SixteenStep() {
 
   const [loopStep, setLoopStep] = useState(0);
   const [curBeat, setCurBeat] = useState(1);
+  const [on, setOn] = useState<boolean[]>(() => new Array(STEPS).fill(false)); // toggled steps
+  const toggleStep = (i: number) =>
+    setOn((prev) => {
+      const next = prev.slice();
+      next[i] = !next[i];
+      return next;
+    });
 
   const tempoSV = useSharedValue(tempo);
   const phase = useSharedValue(0); // 0..1 across one bar (accumulated)
@@ -96,18 +104,34 @@ export default function SixteenStep() {
 
   const handStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${phase.value * 360}deg` }] }));
 
+  // Tap a stop to toggle it filled (no sound yet). Hit-test by polar position so
+  // even the small weak-beat dots are easy to hit anywhere along the ring.
+  const tap = Gesture.Tap()
+    .maxDistance(24)
+    .onEnd((e) => {
+      const dx = e.x - cx;
+      const dy = e.y - cy;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      if (r < R - 46 || r > R + 46) return; // only near the ring
+      const a = Math.atan2(dy, dx);
+      let idx = Math.round(((a + Math.PI / 2) / (2 * Math.PI)) * STEPS);
+      idx = ((idx % STEPS) + STEPS) % STEPS;
+      runOnJS(toggleStep)(idx);
+    });
+
   return (
-    <View style={styles.fill}>
+    <GestureDetector gesture={tap}>
+      <View style={styles.fill}>
       {/* ring outline */}
       <View
         style={{ position: 'absolute', left: cx - R, top: cy - R, width: 2 * R, height: 2 * R, borderRadius: R, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)' }}
         pointerEvents="none"
       />
 
-      {/* sixteen step dots, sized by metric weight */}
+      {/* sixteen step dots, sized by metric weight — stroke only until tapped */}
       {dots.map((d, i) => {
+        const isOn = on[i];
         const current = i === loopStep;
-        const passed = i <= loopStep;
         return (
           <View
             key={i}
@@ -120,8 +144,8 @@ export default function SixteenStep() {
               height: d.size,
               borderRadius: d.size / 2,
               borderWidth: 1.5,
-              borderColor: current ? ACCENT : passed ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.2)',
-              backgroundColor: current ? ACCENT : passed ? 'rgba(255,255,255,0.9)' : 'transparent',
+              borderColor: current ? ACCENT : isOn ? '#fff' : 'rgba(255,255,255,0.32)',
+              backgroundColor: isOn ? (current ? ACCENT : '#fff') : 'transparent',
             }}
           />
         );
@@ -145,7 +169,8 @@ export default function SixteenStep() {
           ))}
         </View>
       </View>
-    </View>
+      </View>
+    </GestureDetector>
   );
 }
 

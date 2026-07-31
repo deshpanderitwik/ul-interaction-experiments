@@ -44,6 +44,14 @@ export type Experiment = {
 
 export const experiments: Experiment[] = [
   {
+    id: 'time',
+    title: 'Time',
+    blurb: 'Explorations of looping a chunk of time. First: a clock that counts up to a set number of bars, snaps back to 0, and counts up again — a sweeping hand, a ring of beat dots that fill as it goes, and −/+ to set the loop length.',
+    accent: '#a0b4ff',
+    audio: true,
+    load: () => import('./time'),
+  },
+  {
     id: 'combinations',
     title: 'Combinations',
     blurb: 'Several experiments playing at once on one shared clock. First up: Path Explorations + drum Subdivisions, phase-locked — flip between them with the bottom nav.',

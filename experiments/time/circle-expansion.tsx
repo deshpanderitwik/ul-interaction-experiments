@@ -52,9 +52,11 @@ export default function CircleExpansion() {
   const clock = sharedClock ?? localClock;
   const { width, height } = useWindowDimensions();
 
+  const TOP = 96; // clearance for the top nav
+  const BOTTOM = 110; // clearance for the bottom controls
   const cx = width / 2;
-  const cy = height * 0.46;
-  const R = (height * 0.74) / (2 * Math.PI); // sized so the vertical unrolled line fits the height
+  const cy = (TOP + (height - BOTTOM)) / 2; // centered in the band between them
+  const R = ((height - TOP - BOTTOM) * 0.94) / (2 * Math.PI); // line fits that band
 
   const tempoSV = useSharedValue(tempo);
   const phase = useSharedValue(0);

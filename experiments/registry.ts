@@ -75,6 +75,12 @@ export const experiments: Experiment[] = [
         blurb: 'The loop as a ring or a timeline. Tap and the circle of beat-dots unrolls into a straight line — a true length-preserving unroll (each point rides a flattening arc), not a slide — and tap again to roll it back. A playhead travels the shape either way.',
         load: () => import('./time/circle-expansion'),
       },
+      {
+        id: 'overlapping-rings',
+        title: 'Overlapping Rings',
+        blurb: 'A stack of same-size loop rings. Top-down they overlap into one — swipe either direction to cycle which ring is showing. Tap to tilt the camera and see the whole stack at once, the current ring held in front; tap again to drop back to top-down. Back-swipe navigation is off so both swipe directions cycle.',
+        load: () => import('./time/overlapping-rings'),
+      },
     ],
   },
   {

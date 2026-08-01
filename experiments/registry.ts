@@ -63,6 +63,12 @@ export const experiments: Experiment[] = [
         blurb: 'One bar of sixteenths wrapped onto the ring — sixteen stops, each sized by its metric weight: downbeat biggest, then beat 3, then beats 2 & 4, then the 8th “ands,” then the weak 16ths smallest. The metric skeleton, made visible.',
         load: () => import('./time/sixteen-step'),
       },
+      {
+        id: 'clock-3d',
+        title: '3D Clock',
+        blurb: 'Three concentric clocks looping at different lengths (1, 2, 4 bars). Tap to tilt the “camera”: the rings flatten and separate into a stack seen from the side; tap again to lie flat, top-down. The same loops read as nested rings or a depth stack.',
+        load: () => import('./time/clock-3d'),
+      },
     ],
   },
   {

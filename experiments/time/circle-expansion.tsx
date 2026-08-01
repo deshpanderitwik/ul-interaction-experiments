@@ -115,7 +115,10 @@ function Dot({ index, t, R, cx, cy }: { index: number; t: SharedValue<number>; R
   const beat = index % BEATS_PER_BAR === 0;
   const size = beat ? 12 : 7;
   const style = useAnimatedStyle(() => {
-    const p = shapePos(index + 0.5, t.value, R, cx, cy); // step center
+    // Step-centered on the circle (distinct, evenly spaced), spreading to run
+    // edge-to-edge as it flattens: dot 0 → top edge, last dot → bottom edge.
+    const f = (index + 0.5) * (1 - t.value) + index * (N / (N - 1)) * t.value;
+    const p = shapePos(f, t.value, R, cx, cy);
     return { transform: [{ translateX: p.x - size / 2 }, { translateY: p.y - size / 2 }] };
   });
   return (

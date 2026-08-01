@@ -117,17 +117,19 @@ function Ring({
   ringColor: string;
   dotColor: string;
 }) {
+  // Dot centers relative to the box center (R, R).
   const dots = useMemo(
     () =>
       Array.from({ length: count }, (_, i) => {
         const a = (i / count) * 2 * Math.PI - Math.PI / 2;
-        return { x: R * Math.cos(a), y: R * Math.sin(a), bar: i % BEATS_PER_BAR === 0 };
+        return { x: R + R * Math.cos(a), y: R + R * Math.sin(a), bar: i % BEATS_PER_BAR === 0 };
       }),
     [R, count]
   );
 
-  // The whole ring pivots around its center (cx, cy): tilt squashes it vertically
-  // and slides it to its stacked layer.
+  // A 2R×2R box centered at (cx, cy) — a real, sized view so scaleY and the hand's
+  // rotate both pivot cleanly around its center. Tilt squashes it and slides it
+  // to its stacked layer.
   const containerStyle = useAnimatedStyle(() => {
     const t = tilt.value;
     return { transform: [{ translateY: t * offset }, { scaleY: 1 - t * (1 - FLATTEN) }] };
@@ -135,10 +137,8 @@ function Ring({
   const handStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${phase.value * 360}deg` }] }));
 
   return (
-    <Animated.View style={[{ position: 'absolute', left: cx, top: cy, width: 0, height: 0 }, containerStyle]} pointerEvents="none">
-      <View
-        style={{ position: 'absolute', left: -R, top: -R, width: 2 * R, height: 2 * R, borderRadius: R, borderWidth: 1, borderColor: ringColor }}
-      />
+    <Animated.View style={[{ position: 'absolute', left: cx - R, top: cy - R, width: 2 * R, height: 2 * R }, containerStyle]} pointerEvents="none">
+      <View style={{ position: 'absolute', left: 0, top: 0, width: 2 * R, height: 2 * R, borderRadius: R, borderWidth: 1, borderColor: ringColor }} />
       {dots.map((d, i) => {
         const size = d.bar ? 9 : 5;
         return (
@@ -148,9 +148,11 @@ function Ring({
           />
         );
       })}
-      <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: 0, height: 0 }, handStyle]}>
-        <View style={{ position: 'absolute', left: -1.5, top: -R, width: 3, height: R, borderRadius: 1.5, backgroundColor: '#fff' }} />
-        <View style={{ position: 'absolute', left: -3.5, top: -R - 3.5, width: 7, height: 7, borderRadius: 3.5, backgroundColor: dotColor }} />
+      {/* hand: a 2R×2R box that rotates around its center; the line runs from the
+          top-center down to the center, so it stays pinned no matter the angle */}
+      <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: 2 * R, height: 2 * R }, handStyle]}>
+        <View style={{ position: 'absolute', left: R - 1.5, top: 0, width: 3, height: R, borderRadius: 1.5, backgroundColor: '#fff' }} />
+        <View style={{ position: 'absolute', left: R - 3.5, top: -3.5, width: 7, height: 7, borderRadius: 3.5, backgroundColor: dotColor }} />
       </Animated.View>
     </Animated.View>
   );

@@ -69,6 +69,12 @@ export const experiments: Experiment[] = [
         blurb: 'Three concentric clocks looping at different lengths (1, 2, 4 bars). Tap to tilt the “camera”: the rings flatten and separate into a stack seen from the side; tap again to lie flat, top-down. The same loops read as nested rings or a depth stack.',
         load: () => import('./time/clock-3d'),
       },
+      {
+        id: 'circle-expansion',
+        title: 'Circle Expansion',
+        blurb: 'The loop as a ring or a timeline. Tap and the circle of beat-dots unrolls into a straight line — a true length-preserving unroll (each point rides a flattening arc), not a slide — and tap again to roll it back. A playhead travels the shape either way.',
+        load: () => import('./time/circle-expansion'),
+      },
     ],
   },
   {

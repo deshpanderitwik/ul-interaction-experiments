@@ -15,11 +15,13 @@ import { useSharedClock } from '../combinations/clock';
 import { useTempo } from '../tempo';
 
 // Time · Circle Expansion — the loop as a ring or a timeline, and the morph
-// between. Tap and the circle of beat-dots unrolls into a straight line; each
-// point rides a constant-curvature arc that flattens (curvature → 0) while its
-// arc-length position is preserved, so it's a true unroll, not a slide. Tap again
-// and it rolls back into a circle. A playhead dot travels the shape either way —
-// orbiting the ring, or sweeping the line.
+// between. Tap and the circle of beat-dots unrolls into a straight vertical line;
+// each point rides a constant-curvature arc that flattens (curvature → 0) while
+// its arc-length position is preserved, so it's a true unroll, not a slide. Tap
+// again and it rolls back into a circle. A playhead dot travels the shape either
+// way — orbiting the ring, or sweeping down the line. Dots sit at step *centers*,
+// so the loop's seam is split evenly and the playhead crosses the same 16 dots in
+// both states (no phantom extra beat at the end).
 
 const N = 16; // sixteenths
 const BEATS_PER_BAR = 4;
@@ -27,8 +29,8 @@ const LOOP_BARS = 2;
 const ACCENT = '#a0b4ff';
 
 // Position of arc-length index `f` (0..N) along a shape that morphs from a full
-// circle (t=0) to a straight line (t=1), keeping total length and staying
-// vertically centered on (cx, cy).
+// circle (t=0) to a straight vertical line (t=1), keeping total length and
+// staying centered on (cx, cy). The line runs top→bottom; the arc bulges in x.
 function shapePos(f: number, t: number, R: number, cx: number, cy: number) {
   'worklet';
   const C = 2 * Math.PI * R;
@@ -37,9 +39,9 @@ function shapePos(f: number, t: number, R: number, cx: number, cy: number) {
   const k = u / R; // curvature
   const ds = (f / N) * C - C / 2; // signed arc length from the middle
   const alpha = ds * k;
-  const h = r * (1 - Math.cos(Math.PI * u)); // arc height, for centering
-  const my = cy + h / 2; // middle-point y so the shape stays centered
-  return { x: cx + r * Math.sin(alpha), y: my - r * (1 - Math.cos(alpha)) };
+  const h = r * (1 - Math.cos(Math.PI * u)); // arc bulge, for centering
+  const mx = cx + h / 2; // middle-point x so the shape stays centered
+  return { x: mx - r * (1 - Math.cos(alpha)), y: cy + r * Math.sin(alpha) };
 }
 
 export default function CircleExpansion() {
@@ -51,8 +53,8 @@ export default function CircleExpansion() {
   const { width, height } = useWindowDimensions();
 
   const cx = width / 2;
-  const cy = height * 0.42;
-  const R = (width - 44) / (2 * Math.PI); // so the unrolled line fits the width
+  const cy = height * 0.46;
+  const R = (height * 0.74) / (2 * Math.PI); // sized so the vertical unrolled line fits the height
 
   const tempoSV = useSharedValue(tempo);
   const phase = useSharedValue(0);
@@ -111,7 +113,7 @@ function Dot({ index, t, R, cx, cy }: { index: number; t: SharedValue<number>; R
   const beat = index % BEATS_PER_BAR === 0;
   const size = beat ? 12 : 7;
   const style = useAnimatedStyle(() => {
-    const p = shapePos(index, t.value, R, cx, cy);
+    const p = shapePos(index + 0.5, t.value, R, cx, cy); // step center
     return { transform: [{ translateX: p.x - size / 2 }, { translateY: p.y - size / 2 }] };
   });
   return (

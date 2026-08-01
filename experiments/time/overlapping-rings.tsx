@@ -19,12 +19,13 @@ const BEATS_PER_BAR = 4;
 const FLATTEN = 0.3; // vertical squash when tilted
 const GAP = 50; // vertical separation between layers when tilted
 
+const LOOP_BARS = 2; // every ring shares this one clock
 const RINGS = [
-  { bars: 1, color: '#7ad0ff', dots: 8 },
-  { bars: 2, color: '#a0b4ff', dots: 8 },
-  { bars: 3, color: '#c9a0ff', dots: 8 },
-  { bars: 4, color: '#ff9db0', dots: 8 },
-  { bars: 6, color: '#ffd166', dots: 8 },
+  { color: '#7ad0ff', dots: 8 },
+  { color: '#a0b4ff', dots: 8 },
+  { color: '#c9a0ff', dots: 8 },
+  { color: '#ff9db0', dots: 8 },
+  { color: '#ffd166', dots: 8 },
 ];
 const N = RINGS.length;
 
@@ -45,7 +46,7 @@ export default function OverlappingRings() {
   const tilt = useSharedValue(0);
   const tilted = useSharedValue(0);
   const tempoSV = useSharedValue(tempo);
-  const phases = RINGS.map(() => useSharedValue(0));
+  const phase = useSharedValue(0); // one clock shared by every ring
   const focus = RINGS.map((_, i) => useSharedValue(i === 0 ? 1 : 0));
   useEffect(() => {
     tempoSV.value = tempo;
@@ -67,10 +68,8 @@ export default function OverlappingRings() {
     'worklet';
     const now = clock.value;
     const beatMs = 60000 / tempoSV.value;
-    for (let i = 0; i < N; i++) {
-      const loopMs = RINGS[i].bars * BEATS_PER_BAR * beatMs;
-      phases[i].value = (now % loopMs) / loopMs;
-    }
+    const loopMs = LOOP_BARS * BEATS_PER_BAR * beatMs;
+    phase.value = (now % loopMs) / loopMs;
   }, false);
 
   useEffect(() => {
@@ -104,7 +103,7 @@ export default function OverlappingRings() {
             R={R}
             color={r.color}
             dots={r.dots}
-            phase={phases[i]}
+            phase={phase}
             tilt={tilt}
             focus={focus[i]}
             offset={(i - (N - 1) / 2) * GAP}

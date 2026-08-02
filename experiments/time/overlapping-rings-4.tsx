@@ -340,9 +340,10 @@ export default function OverlappingRings4() {
       }
     });
 
-  // Centre tap-tempo target: fades out when tilted, flashes on each tap.
+  // Centre tap-tempo target: solid (opaque) so the clock hand runs under it and
+  // emerges at its edge; fades out when tilted, gives a little scale pop per tap.
   const centerStyle = useAnimatedStyle(() => ({
-    opacity: (1 - tilt.value) * (0.55 + 0.45 * tapPulse.value),
+    opacity: 1 - tilt.value,
     transform: [{ scale: 1 + 0.16 * tapPulse.value }],
   }));
 
@@ -370,15 +371,17 @@ export default function OverlappingRings4() {
           />
         ))}
 
-        {/* centre tap-tempo target (hit-tested in `tap`) */}
+        {/* centre tap-tempo target (hit-tested in `tap`) — solid disc over the
+            hands, showing the live BPM */}
         <Animated.View
           pointerEvents="none"
           style={[
-            { position: 'absolute', left: cx - CENTER_R, top: cy - CENTER_R, width: 2 * CENTER_R, height: 2 * CENTER_R, borderRadius: CENTER_R, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.4)', backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center', zIndex: 200 },
+            { position: 'absolute', left: cx - CENTER_R, top: cy - CENTER_R, width: 2 * CENTER_R, height: 2 * CENTER_R, borderRadius: CENTER_R, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.4)', backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', zIndex: 200 },
             centerStyle,
           ]}
         >
-          <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: '800', letterSpacing: 1.5 }}>TAP</Text>
+          <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700', fontVariant: ['tabular-nums'] }}>{tempo}</Text>
+          <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 9, fontWeight: '800', letterSpacing: 1.5, marginTop: -1 }}>BPM</Text>
         </Animated.View>
 
         <View style={styles.repTimer} pointerEvents="none">

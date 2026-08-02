@@ -307,7 +307,6 @@ export default function OverlappingRings2() {
         {editing && (
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
             <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.4)' }]} />
-            <Text style={[styles.editLabel, { top: cy - BTN / 2 - 30 }]}>play every … rotations</Text>
             {EVERY_VALUES.map((v, i) => {
               const rowW = EVERY_VALUES.length * BTN + (EVERY_VALUES.length - 1) * BTN_GAP;
               const bx = cx - rowW / 2 + i * (BTN + BTN_GAP);
@@ -489,5 +488,4 @@ function ActiveDot({
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
   pager: { position: 'absolute', bottom: 60, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  editLabel: { position: 'absolute', left: 0, right: 0, textAlign: 'center', color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
 });

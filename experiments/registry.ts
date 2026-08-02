@@ -84,9 +84,16 @@ export const experiments: Experiment[] = [
       {
         id: 'overlapping-rings-2',
         title: 'Overlapping Rings II',
-        blurb: 'Each ring is a layer: tap a slot to activate a point, and every layer’s points composite, in colour, over the top-down view; when the hand touches a hit it pops, ripples, and sounds a soft note (one scale pitch per layer). Drag up/down to change the subdivisions (4→32), double-tap to tilt into the isometric stack, swipe left/right to change the layer, tap a ring in the stack to land on it. Long-press a slot to set how many rotations it skips.',
+        blurb: 'Each ring is a layer: tap a slot to activate a point, and every layer’s points composite, in colour, over the top-down view; when the hand touches a hit it pops, ripples, and sounds a soft note (one scale pitch per layer). Slide down to tilt into the isometric stack, slide up to return; swipe left/right to change the layer, tap a ring in the stack to land on it. Long-press a slot to set how many rotations it skips.',
         audio: true,
         load: () => import('./time/overlapping-rings-2'),
+      },
+      {
+        id: 'overlapping-rings-3',
+        title: 'Overlapping Rings III',
+        blurb: 'Overlapping Rings II reworked around a live resolution: the pattern lives on a fixed 32-slot grid, and dragging up/down changes how many subdivisions you see and edit (4→32) without losing your dots. Double-tap tilts into the isometric stack (freeing vertical drag), swipe left/right changes the layer, and long-press sets a slot’s rotation skip.',
+        audio: true,
+        load: () => import('./time/overlapping-rings-3'),
       },
     ],
   },

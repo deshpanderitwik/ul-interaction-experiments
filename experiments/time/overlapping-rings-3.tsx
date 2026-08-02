@@ -441,9 +441,6 @@ export default function OverlappingRings3() {
   return (
     <GestureDetector gesture={Gesture.Simultaneous(pinch, Gesture.Race(vDrag, hPan, longPress, Gesture.Exclusive(doubleTap, tap)))}>
       <View style={styles.fill}>
-        <Text style={styles.subdivLabel} pointerEvents="none">
-          {subdiv} subdivisions
-        </Text>
         {/* rings live in the zoom wrapper (outer pan, inner scale); UI stays fixed */}
         <Animated.View style={[StyleSheet.absoluteFill, panStyle]} pointerEvents="none">
           <Animated.View style={[StyleSheet.absoluteFill, scaleStyle]}>
@@ -674,5 +671,4 @@ const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
   repTimer: { position: 'absolute', bottom: 108, left: 0, right: 0, alignItems: 'center' },
   repText: { color: '#fff', fontSize: 30, fontWeight: '300', fontVariant: ['tabular-nums'] },
-  subdivLabel: { position: 'absolute', top: 56, left: 0, right: 0, textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
 });

@@ -75,7 +75,7 @@ const EDIT_BOT = 128; // bottom margin (timer + picker) for the editor box
 const NUMBERS_H = EVERY_VALUES.length * NUM_CHIP + (EVERY_VALUES.length - 1) * NUM_GAP;
 const VEL_GAIN_MIN = 0.04; // pluck gain at velocity 0
 const VEL_GAIN_MAX = 0.3; // pluck gain at velocity 1
-const VEL_DEFAULT = 0.5; // velocity a fresh hit starts at
+const VEL_DEFAULT = 0.8; // velocity a fresh hit starts at
 const PICK_SIZE = 30; // diameter of a ring-picker circle at the bottom
 const PICK_GAP = 16; // gap between ring-picker circles
 const CENTER_R = 42; // radius of the centre tap-tempo target
@@ -122,6 +122,7 @@ export default function OverlappingRings4() {
   const alignOffset = useSharedValue(0); // clock-time the tapped downbeat lands on
   const tapPulse = useSharedValue(0); // centre-target flash on each tap
   const editVel = useSharedValue(VEL_DEFAULT); // live velocity for the editor bar
+  const editP = useSharedValue(0); // editor morph: 0 = dot, 1 = full bar
   const editBarLeft = useSharedValue(0);
   const editBarTop = useSharedValue(0);
   const editNumX = useSharedValue(0);
@@ -235,15 +236,18 @@ export default function OverlappingRings4() {
   }, [editing, cx, cy, R, width, height]);
 
   useEffect(() => {
-    editingSV.value = editing ? 1 : 0;
     if (editing && editAnchor) {
+      editingSV.value = 1;
       editBarLeft.value = editAnchor.barLeft;
       editBarTop.value = editAnchor.barTop;
       editNumX.value = editAnchor.numX;
       editNumTop.value = editAnchor.numTop;
       editVel.value = velocityRef.current[editing.ring][editing.step];
+      editP.value = 0;
+      editP.value = withSpring(1, { damping: 15, stiffness: 200, mass: 0.6 }); // dot → bar
     }
-  }, [editing, editAnchor, editingSV, editBarLeft, editBarTop, editNumX, editNumTop, editVel]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, editAnchor]);
 
   const toggle = (ring: number, step: number) => {
     setActive((prev) => {
@@ -271,7 +275,14 @@ export default function OverlappingRings4() {
     });
   };
   const openEdit = (ring: number, step: number) => setEditing({ ring, step });
-  const closeEdit = () => setEditing(null);
+  const onClosed = () => setEditing(null);
+  const closeEdit = () => {
+    editingSV.value = 0; // stop intercepting immediately
+    editP.value = withTiming(0, { duration: 190 }, (fin) => {
+      'worklet';
+      if (fin) runOnJS(onClosed)(); // bar → dot, then unmount
+    });
+  };
   const applyEvery = (n: number) => {
     // Keep the editor open so velocity and every-N can both be set; tap-outside
     // (closeEdit) dismisses it.
@@ -428,6 +439,9 @@ export default function OverlappingRings4() {
     opacity: 1 - tilt.value,
     transform: [{ scale: 1 + 0.16 * tapPulse.value }],
   }));
+  // Numbers fade/scale in with the same morph progress as the bar.
+  const numbersStyle = useAnimatedStyle(() => ({ opacity: editP.value, transform: [{ scale: 0.8 + 0.2 * editP.value }] }));
+  const scrimStyle = useAnimatedStyle(() => ({ opacity: editP.value }));
 
   return (
     <GestureDetector gesture={Gesture.Race(vDrag, longPress, tap)}>
@@ -495,22 +509,24 @@ export default function OverlappingRings4() {
 
         {editing && editAnchor && (
           <View style={[StyleSheet.absoluteFill, { zIndex: 1000 }]} pointerEvents="none">
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
+            <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }, scrimStyle]} />
             {/* the dot morphed into a velocity bar */}
-            <VelocityBar color={RINGS[editing.ring].color} editVel={editVel} left={editAnchor.barLeft} top={editAnchor.barTop} originX={editAnchor.x} originY={editAnchor.y} />
+            <VelocityBar color={RINGS[editing.ring].color} editVel={editVel} editP={editP} left={editAnchor.barLeft} top={editAnchor.barTop} originX={editAnchor.x} originY={editAnchor.y} />
             {/* every-N numbers stacked beside the bar (2 top → 8 bottom) */}
-            {EVERY_VALUES.map((v, i) => {
-              const ny = editAnchor.numTop + i * (NUM_CHIP + NUM_GAP);
-              const on = every[editing.ring][editing.step] === v;
-              return (
-                <View
-                  key={v}
-                  style={{ position: 'absolute', left: editAnchor.numX, top: ny, width: NUM_CHIP, height: NUM_CHIP, borderRadius: NUM_CHIP / 2, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, backgroundColor: on ? '#fff' : 'rgba(14,14,16,0.96)', borderColor: on ? '#fff' : 'rgba(255,255,255,0.5)' }}
-                >
-                  <Text style={{ color: on ? '#0a0a0a' : '#fff', fontSize: 16, fontWeight: '700' }}>{v}</Text>
-                </View>
-              );
-            })}
+            <Animated.View style={[StyleSheet.absoluteFill, numbersStyle]}>
+              {EVERY_VALUES.map((v, i) => {
+                const ny = editAnchor.numTop + i * (NUM_CHIP + NUM_GAP);
+                const on = every[editing.ring][editing.step] === v;
+                return (
+                  <View
+                    key={v}
+                    style={{ position: 'absolute', left: editAnchor.numX, top: ny, width: NUM_CHIP, height: NUM_CHIP, borderRadius: NUM_CHIP / 2, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, backgroundColor: on ? '#fff' : 'rgba(14,14,16,0.96)', borderColor: on ? '#fff' : 'rgba(255,255,255,0.5)' }}
+                  >
+                    <Text style={{ color: on ? '#0a0a0a' : '#fff', fontSize: 16, fontWeight: '700' }}>{v}</Text>
+                  </View>
+                );
+              })}
+            </Animated.View>
           </View>
         )}
       </View>
@@ -695,26 +711,21 @@ function ActiveDot({
   );
 }
 
-// The selected dot morphed into a velocity bar: a track that grows from the dot
-// on open, filled from the bottom to the hit's velocity (drag/tap to change).
-function VelocityBar({ color, editVel, left, top, originX, originY }: { color: string; editVel: SharedValue<number>; left: number; top: number; originX: number; originY: number }) {
-  const grow = useSharedValue(0);
-  useEffect(() => {
-    grow.value = withSpring(1, { damping: 15, stiffness: 200, mass: 0.6 });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  // Emerge from the dot: interpolate position/height from the dot point to the bar.
+// The selected dot morphed into a velocity bar: on open it grows out of the dot,
+// on close it shrinks back into it (driven by editP). Filled from the bottom to
+// the hit's velocity (drag/tap to change).
+function VelocityBar({ color, editVel, editP, left, top, originX, originY }: { color: string; editVel: SharedValue<number>; editP: SharedValue<number>; left: number; top: number; originX: number; originY: number }) {
+  // Interpolate position/height from the dot point (editP 0) to the bar (editP 1).
   const barCX = left + VBAR_W / 2;
   const containerStyle = useAnimatedStyle(() => {
-    const g = grow.value;
+    const g = editP.value;
     const inv = 1 - g;
-    const h = VBAR_H * g;
     return {
       opacity: Math.min(1, g * 1.6),
       left: barCX - VBAR_W / 2,
       top: originY * inv + top * g,
       width: VBAR_W,
-      height: h,
+      height: VBAR_H * g,
       transform: [{ translateX: (originX - barCX) * inv }],
     };
   });

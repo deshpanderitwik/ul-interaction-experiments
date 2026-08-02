@@ -81,6 +81,12 @@ export const experiments: Experiment[] = [
         blurb: 'A stack of same-size loop rings. Top-down they overlap into one — swipe either direction to cycle which ring is showing. Tap to tilt the camera and see the whole stack at once, the current ring held in front; tap again to drop back to top-down. Back-swipe navigation is off so both swipe directions cycle.',
         load: () => import('./time/overlapping-rings'),
       },
+      {
+        id: 'overlapping-rings-2',
+        title: 'Overlapping Rings II',
+        blurb: 'Each ring is a layer you build on: tap a slot to activate a point on the current ring, and every layer’s points composite, in colour, over the top-down view. Slide down to tilt into the isometric stack (each layer with its own points), slide up to return; swipe left/right to change the layer, tap a ring in the stack to land on it.',
+        load: () => import('./time/overlapping-rings-2'),
+      },
     ],
   },
   {

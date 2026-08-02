@@ -248,18 +248,29 @@ export default function OverlappingRings3() {
       if (s < 1) s = 1;
       else if (s > MAXZOOM) s = MAXZOOM;
       zoomScale.value = s;
-      if (s <= 1.0001) {
-        zoomTX.value = 0;
-        zoomTY.value = 0;
-      } else {
-        const k = s / pStartScale.value;
-        zoomTX.value = e.focalX - scx - k * (pOriginX.value - scx - pStartTX.value);
-        zoomTY.value = e.focalY - scy - k * (pOriginY.value - scy - pStartTY.value);
+      const k = s / pStartScale.value;
+      // Focal-point-aware translate, clamped to the zoom bounds so content can
+      // never slide off. As s → 1 the bound → 0, so it eases back to centre
+      // rather than snapping there.
+      const maxTX = (s - 1) * scx;
+      const maxTY = (s - 1) * scy;
+      const tx = e.focalX - scx - k * (pOriginX.value - scx - pStartTX.value);
+      const ty = e.focalY - scy - k * (pOriginY.value - scy - pStartTY.value);
+      zoomTX.value = tx > maxTX ? maxTX : tx < -maxTX ? -maxTX : tx;
+      zoomTY.value = ty > maxTY ? maxTY : ty < -maxTY ? -maxTY : ty;
+    })
+    .onEnd(() => {
+      // Settle cleanly to 1x / centred when released near the bottom of the range.
+      if (zoomScale.value <= 1.02) {
+        zoomScale.value = withTiming(1, { duration: 160 });
+        zoomTX.value = withTiming(0, { duration: 160 });
+        zoomTY.value = withTiming(0, { duration: 160 });
       }
     });
 
   // Drag up/down = change subdivisions (4 → 32). Vertical-only.
   const vDrag = Gesture.Pan()
+    .maxPointers(1)
     .activeOffsetY([-14, 14])
     .failOffsetX([-28, 28])
     .onBegin(() => {
@@ -279,6 +290,7 @@ export default function OverlappingRings3() {
   // change the layer; over the circle's empty interior it pans the zoomed camera
   // instead, so you can move around a close-up without flipping rings.
   const hPan = Gesture.Pan()
+    .maxPointers(1)
     .activeOffsetX([-14, 14])
     .failOffsetY([-28, 28])
     .onBegin((e) => {
@@ -382,7 +394,7 @@ export default function OverlappingRings3() {
   }));
 
   return (
-    <GestureDetector gesture={Gesture.Race(pinch, vDrag, hPan, longPress, Gesture.Exclusive(doubleTap, tap))}>
+    <GestureDetector gesture={Gesture.Simultaneous(pinch, Gesture.Race(vDrag, hPan, longPress, Gesture.Exclusive(doubleTap, tap)))}>
       <View style={styles.fill}>
         <Text style={styles.subdivLabel} pointerEvents="none">
           {subdiv} subdivisions

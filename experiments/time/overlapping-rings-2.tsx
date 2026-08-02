@@ -1,7 +1,7 @@
 import { useClock } from '@shopify/react-native-skia';
 import { useNavigation } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import { StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useFrameCallback, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
 import { NoteSynth } from '../../modules/note-synth';
@@ -70,7 +70,13 @@ export default function OverlappingRings2() {
 
   const [current, setCurrent] = useState(0);
   const [active, setActive] = useState<boolean[][]>(() => RINGS.map(() => new Array(M).fill(false)));
+  const [every, setEvery] = useState<number[][]>(() => RINGS.map(() => new Array(M).fill(1))); // play once per N rotations
+  const [editing, setEditing] = useState<{ ring: number; step: number } | null>(null);
+  const [editText, setEditText] = useState('1');
   const currentSV = useSharedValue(0);
+  const editingSV = useSharedValue(0);
+  const rotation = useSharedValue(0);
+  const prevPhase = useSharedValue(0);
   const tilt = useSharedValue(0);
   const tilted = useSharedValue(0);
   const tempoSV = useSharedValue(tempo);
@@ -90,12 +96,20 @@ export default function OverlappingRings2() {
   }, [scale]);
   const activeRef = useRef(active);
   activeRef.current = active;
+  const everyRef = useRef(every);
+  everyRef.current = every;
   const freqsRef = useRef(freqs);
   freqsRef.current = freqs;
   const fireStep = (s: number) => {
     const a = activeRef.current;
+    const ev = everyRef.current;
     const f = freqsRef.current;
-    for (let i = 0; i < N; i++) if (a[i][s]) NoteSynth?.pluck(f[i], 0.16, 0.5).catch(() => {});
+    const rot = rotation.value;
+    for (let i = 0; i < N; i++) {
+      if (!a[i][s]) continue;
+      const e = ev[i][s] || 1;
+      if (rot % e === 0) NoteSynth?.pluck(f[i], 0.16, 0.5).catch(() => {}); // once per e rotations
+    }
   };
   useEffect(() => {
     currentSV.value = current;
@@ -116,9 +130,12 @@ export default function OverlappingRings2() {
     const now = clock.value;
     const beatMs = 60000 / tempoSV.value;
     const loopMs = LOOP_BARS * BEATS_PER_BAR * beatMs;
-    phase.value = (now % loopMs) / loopMs;
+    const p = (now % loopMs) / loopMs;
+    if (hitStarted.value === 1 && p < prevPhase.value - 0.5) rotation.value += 1; // a full spin elapsed
+    prevPhase.value = p;
+    phase.value = p;
     // The hand reaches dot s when floor(phase*M) becomes s → fire that step.
-    const step = Math.floor(phase.value * M) % M;
+    const step = Math.floor(p * M) % M;
     if (hitStarted.value === 0) {
       lastHit.value = step;
       hitStarted.value = 1;
@@ -145,13 +162,36 @@ export default function OverlappingRings2() {
     return map;
   }, [active]);
 
+  useEffect(() => {
+    editingSV.value = editing ? 1 : 0;
+  }, [editing, editingSV]);
+
   const cycle = (dir: number) => setCurrent((c) => (c + dir + N) % N);
-  const toggle = (ring: number, step: number) =>
+  const toggle = (ring: number, step: number) => {
     setActive((prev) => {
       const next = prev.map((row) => row.slice());
       next[ring][step] = !next[ring][step];
       return next;
     });
+    setEvery((prev) => {
+      const next = prev.map((row) => row.slice());
+      if (activeRef.current[ring][step]) next[ring][step] = 1; // was on → turning off, reset
+      return next;
+    });
+  };
+  const setEveryAt = (ring: number, step: number, n: number) =>
+    setEvery((prev) => prev.map((row, i) => (i === ring ? row.map((v, s) => (s === step ? n : v)) : row)));
+  const openEdit = (ring: number, step: number) => {
+    if (!activeRef.current[ring][step]) return;
+    setEditing({ ring, step });
+    setEditText(String(everyRef.current[ring][step] || 1));
+  };
+  const closeEdit = () => setEditing(null);
+  const onEditText = (t: string) => {
+    const c = t.replace(/[^0-9]/g, '').slice(0, 2);
+    setEditText(c);
+    if (editing) setEveryAt(editing.ring, editing.step, c === '' ? 1 : Math.max(1, parseInt(c, 10)));
+  };
   const goTilt = (v: number) => {
     'worklet';
     tilted.value = v;
@@ -169,10 +209,30 @@ export default function OverlappingRings2() {
     }
   });
 
+  // Long-press an active dot (top-down) to edit how many rotations it skips.
+  const longPress = Gesture.LongPress()
+    .minDuration(380)
+    .maxDistance(16)
+    .onStart((e) => {
+      if (tilted.value !== 0) return;
+      const dx = e.x - cx;
+      const dy = e.y - cy;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      if (r < R - 42 || r > R + 42) return;
+      const a = Math.atan2(dy, dx);
+      let s = Math.round(((a + Math.PI / 2) / (2 * Math.PI)) * M);
+      s = ((s % M) + M) % M;
+      runOnJS(openEdit)(currentSV.value, s);
+    });
+
   // Tap activates a point (top-down) or lands on a ring (isometric).
   const tap = Gesture.Tap()
     .maxDistance(16)
     .onEnd((e) => {
+      if (editingSV.value === 1) {
+        runOnJS(closeEdit)();
+        return;
+      }
       if (tilted.value === 0) {
         const dx = e.x - cx;
         const dy = e.y - cy;
@@ -199,7 +259,7 @@ export default function OverlappingRings2() {
     });
 
   return (
-    <GestureDetector gesture={Gesture.Race(tap, pan)}>
+    <GestureDetector gesture={Gesture.Race(longPress, tap, pan)}>
       <View style={styles.fill}>
         {RINGS.map((r, i) => (
           <RingLayer
@@ -209,8 +269,10 @@ export default function OverlappingRings2() {
             R={R}
             color={r.color}
             active={active[i]}
+            every={every[i]}
             fan={fan[i]}
             phase={phase}
+            rotation={rotation}
             tilt={tilt}
             focus={focus[i]}
             isCurrent={i === current}
@@ -226,6 +288,24 @@ export default function OverlappingRings2() {
             />
           ))}
         </View>
+
+        {/* center editor for "play every N rotations" */}
+        {editing && (
+          <View style={{ position: 'absolute', left: cx - 70, top: cy - 44, width: 140, alignItems: 'center' }}>
+            <TextInput
+              value={editText}
+              onChangeText={onEditText}
+              keyboardType="number-pad"
+              returnKeyType="done"
+              autoFocus
+              selectTextOnFocus
+              onSubmitEditing={closeEdit}
+              onBlur={closeEdit}
+              style={styles.editNum}
+            />
+            <Text style={styles.editLabel}>every {editText || 1} {Number(editText || 1) === 1 ? 'rotation' : 'rotations'}</Text>
+          </View>
+        )}
       </View>
     </GestureDetector>
   );
@@ -237,8 +317,10 @@ function RingLayer({
   R,
   color,
   active,
+  every,
   fan,
   phase,
+  rotation,
   tilt,
   focus,
   isCurrent,
@@ -250,8 +332,10 @@ function RingLayer({
   R: number;
   color: string;
   active: boolean[];
+  every: number[];
   fan: Fan[];
   phase: SharedValue<number>;
+  rotation: SharedValue<number>;
   tilt: SharedValue<number>;
   focus: SharedValue<number>;
   isCurrent: boolean;
@@ -319,7 +403,7 @@ function RingLayer({
         return (
           <View key={s} pointerEvents="none">
             {extras}
-            <ActiveDot phase={phase} step={s} x={dx} y={dy} size={sz} color={color} isCurrent={isCurrent} />
+            <ActiveDot phase={phase} rotation={rotation} step={s} every={every[s] || 1} x={dx} y={dy} size={sz} color={color} isCurrent={isCurrent} />
           </View>
         );
       })}
@@ -331,7 +415,9 @@ function RingLayer({
 // keyed off the loop phase, so it re-fires every pass without any per-dot state.
 function ActiveDot({
   phase,
+  rotation,
   step,
+  every,
   x,
   y,
   size,
@@ -339,23 +425,28 @@ function ActiveDot({
   isCurrent,
 }: {
   phase: SharedValue<number>;
+  rotation: SharedValue<number>;
   step: number;
+  every: number;
   x: number;
   y: number;
   size: number;
   color: string;
   isCurrent: boolean;
 }) {
+  // Only pop/ripple on a rotation this dot actually plays (rotation % every === 0).
   const dotStyle = useAnimatedStyle(() => {
+    const plays = every <= 1 || rotation.value % every === 0;
     let g = phase.value - step / M;
     g = g - Math.floor(g); // time since this dot was last touched (0..1 of a loop)
-    const w = g < PULSE ? 1 - g / PULSE : 0;
+    const w = plays && g < PULSE ? 1 - g / PULSE : 0;
     return { transform: [{ scale: 1 + POP * w }] };
   });
   const rippleStyle = useAnimatedStyle(() => {
+    const plays = every <= 1 || rotation.value % every === 0;
     let g = phase.value - step / M;
     g = g - Math.floor(g);
-    if (g >= PULSE) return { opacity: 0, transform: [{ scale: 0.3 }] };
+    if (!plays || g >= PULSE) return { opacity: 0, transform: [{ scale: 0.3 }] };
     const t = g / PULSE;
     return { opacity: (1 - t) * 0.5, transform: [{ scale: 0.3 + t * 1.4 }] };
   });
@@ -369,6 +460,11 @@ function ActiveDot({
         pointerEvents="none"
         style={[{ position: 'absolute', left: x - size / 2, top: y - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }, dotStyle]}
       />
+      {every > 1 && (
+        <View pointerEvents="none" style={{ position: 'absolute', left: x + size / 2 - 2, top: y - size / 2 - 10, minWidth: 14, paddingHorizontal: 3, height: 14, borderRadius: 7, backgroundColor: '#000', borderWidth: 1, borderColor: color, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color, fontSize: 9, fontWeight: '800' }}>{every}</Text>
+        </View>
+      )}
     </>
   );
 }
@@ -376,4 +472,6 @@ function ActiveDot({
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
   pager: { position: 'absolute', bottom: 60, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+  editNum: { color: '#fff', fontSize: 52, fontWeight: '200', textAlign: 'center', minWidth: 90, fontVariant: ['tabular-nums'] },
+  editLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
 });

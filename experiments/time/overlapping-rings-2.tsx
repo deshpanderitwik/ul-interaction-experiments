@@ -109,11 +109,11 @@ export default function OverlappingRings2() {
     const a = activeRef.current;
     const ev = everyRef.current;
     const f = freqsRef.current;
-    const c = (rotation.value % ROT_CYCLE) + 1; // current rotation 1..16
+    const pos = rotation.value % ROT_CYCLE; // current rotation 0..15
     for (let i = 0; i < N; i++) {
       if (!a[i][s]) continue;
       const e = ev[i][s] || 1;
-      if (c % e === 0) NoteSynth?.pluck(f[i], 0.16, 0.5).catch(() => {}); // on its subdivision within 16
+      if (pos % e === 0) NoteSynth?.pluck(f[i], 0.16, 0.5).catch(() => {}); // fires on 0, e, 2e, …
     }
   };
   useEffect(() => {
@@ -309,10 +309,10 @@ export default function OverlappingRings2() {
             zIndex={i === current ? 100 : i}
           />
         ))}
-        {/* global rotation counter — runs 1..16 and resets; numbered hits sound
-            on their subdivision within it */}
+        {/* global rotation counter — runs 0..15 and resets; a numbered hit sounds
+            when this is a multiple of its number (a "4" on 0, 4, 8, 12) */}
         <View style={styles.repTimer} pointerEvents="none">
-          <Text style={styles.repText}>{(rotCount % ROT_CYCLE) + 1}</Text>
+          <Text style={styles.repText}>{rotCount % ROT_CYCLE}</Text>
         </View>
 
         <View style={styles.pager} pointerEvents="none">
@@ -474,14 +474,14 @@ function ActiveDot({
 }) {
   // Only pop/ripple on a rotation this dot actually plays (rotation % every === 0).
   const dotStyle = useAnimatedStyle(() => {
-    const plays = every <= 1 || ((rotation.value % ROT_CYCLE) + 1) % every === 0;
+    const plays = every <= 1 || (rotation.value % ROT_CYCLE) % every === 0;
     let g = phase.value - step / M;
     g = g - Math.floor(g); // time since this dot was last touched (0..1 of a loop)
     const w = plays && g < PULSE ? 1 - g / PULSE : 0;
     return { transform: [{ scale: 1 + POP * w }] };
   });
   const rippleStyle = useAnimatedStyle(() => {
-    const plays = every <= 1 || ((rotation.value % ROT_CYCLE) + 1) % every === 0;
+    const plays = every <= 1 || (rotation.value % ROT_CYCLE) % every === 0;
     let g = phase.value - step / M;
     g = g - Math.floor(g);
     if (!plays || g >= PULSE) return { opacity: 0, transform: [{ scale: 0.3 }] };

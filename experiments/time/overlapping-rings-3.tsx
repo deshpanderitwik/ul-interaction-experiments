@@ -58,6 +58,7 @@ const ROT_CYCLE = 16; // the global rotation counter runs 0..15 then resets
 const BTN = 54;
 const BTN_GAP = 14;
 const DRAG_PER_STEP = 70; // px of vertical drag per subdivision step
+const MAXZOOM = 4; // pinch-zoom ceiling
 
 type Fan = { idx: number; total: number } | null;
 
@@ -73,6 +74,8 @@ export default function OverlappingRings3() {
   const cx = width / 2;
   const cy = height * 0.44;
   const R = Math.min(width * 0.36, height * 0.2);
+  const scx = width / 2; // zoom wrapper (full screen) center
+  const scy = height / 2;
 
   const [current, setCurrent] = useState(0);
   const [subdivIdx, setSubdivIdx] = useState(SUBDIVS.length - 1); // start at 32
@@ -93,6 +96,15 @@ export default function OverlappingRings3() {
   const hitStarted = useSharedValue(0);
   const subdivIdxSV = useSharedValue(SUBDIVS.length - 1);
   const dragStartIdx = useSharedValue(SUBDIVS.length - 1);
+  // pinch-zoom transform (applied to the ring wrapper) + gesture bookkeeping
+  const zoomScale = useSharedValue(1);
+  const zoomTX = useSharedValue(0);
+  const zoomTY = useSharedValue(0);
+  const pStartScale = useSharedValue(1);
+  const pStartTX = useSharedValue(0);
+  const pStartTY = useSharedValue(0);
+  const pOriginX = useSharedValue(0);
+  const pOriginY = useSharedValue(0);
   const focus = RINGS.map((_, i) => useSharedValue(i === 0 ? 1 : 0));
   useEffect(() => {
     tempoSV.value = tempo;
@@ -219,6 +231,31 @@ export default function OverlappingRings3() {
     tilt.value = withTiming(v, { duration: 550 });
   };
 
+  // Pinch to zoom into a part of the circle (focal-point aware) so finer
+  // subdivisions are easier to edit; pinch back out to 1x to reset.
+  const pinch = Gesture.Pinch()
+    .onStart((e) => {
+      pOriginX.value = e.focalX;
+      pOriginY.value = e.focalY;
+      pStartScale.value = zoomScale.value;
+      pStartTX.value = zoomTX.value;
+      pStartTY.value = zoomTY.value;
+    })
+    .onUpdate((e) => {
+      let s = pStartScale.value * e.scale;
+      if (s < 1) s = 1;
+      else if (s > MAXZOOM) s = MAXZOOM;
+      zoomScale.value = s;
+      if (s <= 1.0001) {
+        zoomTX.value = 0;
+        zoomTY.value = 0;
+      } else {
+        const k = s / pStartScale.value;
+        zoomTX.value = e.focalX - scx - k * (pOriginX.value - scx - pStartTX.value);
+        zoomTY.value = e.focalY - scy - k * (pOriginY.value - scy - pStartTY.value);
+      }
+    });
+
   // Drag up/down = change subdivisions (4 → 32). Vertical-only.
   const vDrag = Gesture.Pan()
     .activeOffsetY([-14, 14])
@@ -258,8 +295,8 @@ export default function OverlappingRings3() {
     .maxDistance(16)
     .onStart((e) => {
       if (tilted.value !== 0) return;
-      const dx = e.x - cx;
-      const dy = e.y - cy;
+      const dx = scx + (e.x - scx - zoomTX.value) / zoomScale.value - cx;
+      const dy = scy + (e.y - scy - zoomTY.value) / zoomScale.value - cy;
       const r = Math.sqrt(dx * dx + dy * dy);
       if (r < R - 42 || r > R + 42) return;
       const subdivW = 4 << subdivIdxSV.value;
@@ -289,9 +326,12 @@ export default function OverlappingRings3() {
         else runOnJS(closeEdit)();
         return;
       }
+      // undo the zoom transform so hit-testing is in ring space
+      const Lx = scx + (e.x - scx - zoomTX.value) / zoomScale.value;
+      const Ly = scy + (e.y - scy - zoomTY.value) / zoomScale.value;
       if (tilted.value === 0) {
-        const dx = e.x - cx;
-        const dy = e.y - cy;
+        const dx = Lx - cx;
+        const dy = Ly - cy;
         const r = Math.sqrt(dx * dx + dy * dy);
         if (r < R - 42 || r > R + 42) return;
         const subdivW = 4 << subdivIdxSV.value;
@@ -304,7 +344,7 @@ export default function OverlappingRings3() {
         let bestD = 1e9;
         for (let i = 0; i < N; i++) {
           const yi = cy + (i - (N - 1) / 2) * GAP;
-          const d = Math.abs(e.y - yi);
+          const d = Math.abs(Ly - yi);
           if (d < bestD) {
             bestD = d;
             best = i;
@@ -315,32 +355,39 @@ export default function OverlappingRings3() {
       }
     });
 
+  const zoomStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: zoomTX.value }, { translateY: zoomTY.value }, { scale: zoomScale.value }],
+  }));
+
   return (
-    <GestureDetector gesture={Gesture.Race(vDrag, hSwipe, longPress, Gesture.Exclusive(doubleTap, tap))}>
+    <GestureDetector gesture={Gesture.Race(pinch, vDrag, hSwipe, longPress, Gesture.Exclusive(doubleTap, tap))}>
       <View style={styles.fill}>
         <Text style={styles.subdivLabel} pointerEvents="none">
           {subdiv} subdivisions
         </Text>
-        {RINGS.map((r, i) => (
-          <RingLayer
-            key={i}
-            cx={cx}
-            cy={cy}
-            R={R}
-            color={r.color}
-            active={active[i]}
-            every={every[i]}
-            fan={fan[i]}
-            subdiv={subdiv}
-            phase={phase}
-            rotation={rotation}
-            tilt={tilt}
-            focus={focus[i]}
-            isCurrent={i === current}
-            offset={(i - (N - 1) / 2) * GAP}
-            zIndex={i === current ? 100 : i}
-          />
-        ))}
+        {/* rings live in the zoom wrapper; UI (counter, pager, editor) stays fixed */}
+        <Animated.View style={[StyleSheet.absoluteFill, zoomStyle]} pointerEvents="none">
+          {RINGS.map((r, i) => (
+            <RingLayer
+              key={i}
+              cx={cx}
+              cy={cy}
+              R={R}
+              color={r.color}
+              active={active[i]}
+              every={every[i]}
+              fan={fan[i]}
+              subdiv={subdiv}
+              phase={phase}
+              rotation={rotation}
+              tilt={tilt}
+              focus={focus[i]}
+              isCurrent={i === current}
+              offset={(i - (N - 1) / 2) * GAP}
+              zIndex={i === current ? 100 : i}
+            />
+          ))}
+        </Animated.View>
         <View style={styles.repTimer} pointerEvents="none">
           <Text style={styles.repText}>{rotCount % ROT_CYCLE}</Text>
         </View>
@@ -440,7 +487,7 @@ function RingLayer({
       <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: 2 * R, height: 2 * R }, slotStyle]}>
         {slots.map((slot) => {
           const sz = SLOT_SIZE[metricLevel(slot.p)];
-          return <View key={slot.p} style={{ position: 'absolute', left: slot.x - sz / 2, top: slot.y - sz / 2, width: sz, height: sz, borderRadius: sz / 2, borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)' }} />;
+          return <View key={slot.p} style={{ position: 'absolute', left: slot.x - sz / 2, top: slot.y - sz / 2, width: sz, height: sz, borderRadius: sz / 2, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.7)', backgroundColor: 'rgba(255,255,255,0.1)' }} />;
         })}
       </Animated.View>
 

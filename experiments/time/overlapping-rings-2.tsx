@@ -63,6 +63,7 @@ const RR = 26; // ripple base radius
 const PULSE = 0.1; // pop/ripple duration as a fraction of the loop
 const POP = 0.6; // extra scale at the moment the hand touches a dot
 const EVERY_VALUES = [2, 4, 6, 8]; // the skip options in the editor
+const DEFAULT_CYCLE = 8; // orientation cycle for the global timer when nothing is throttled
 const BTN = 54; // editor button diameter
 const BTN_GAP = 14;
 
@@ -325,15 +326,15 @@ export default function OverlappingRings2() {
             zIndex={i === current ? 100 : i}
           />
         ))}
-        {/* global repetition timer — the count all numbered hits adhere to */}
-        {globalCycle > 1 && (
-          <View style={styles.repTimer} pointerEvents="none">
-            <Text style={styles.repText}>
-              {(rotCount % globalCycle) + 1}
-              <Text style={styles.repTotal}> / {globalCycle}</Text>
-            </Text>
-          </View>
-        )}
+        {/* global repetition timer — always running so the global clock is
+            readable; its cycle is the LCM of the active skips, or a default when
+            nothing is throttled. */}
+        <View style={[styles.repTimer, { opacity: globalCycle > 1 ? 1 : 0.5 }]} pointerEvents="none">
+          <Text style={styles.repText}>
+            {(rotCount % (globalCycle > 1 ? globalCycle : DEFAULT_CYCLE)) + 1}
+            <Text style={styles.repTotal}> / {globalCycle > 1 ? globalCycle : DEFAULT_CYCLE}</Text>
+          </Text>
+        </View>
 
         <View style={styles.pager} pointerEvents="none">
           {RINGS.map((r, i) => (

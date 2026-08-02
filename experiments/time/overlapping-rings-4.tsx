@@ -492,9 +492,10 @@ function RingLayer({
       <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: 2 * R, height: 2 * R }, slotStyle]}>
         {slots.map((slot) => {
           const sz = SLOT_SIZE[metricLevel(slot.p)];
-          // A bead in the ring's own colour, centred on the stroke, so it reads
-          // as a node the line swells into rather than a marker drawn on top.
-          return <View key={slot.p} style={{ position: 'absolute', left: slot.x - sz / 2, top: slot.y - sz / 2, width: sz, height: sz, borderRadius: sz / 2, borderWidth: 1.5, borderColor: withAlpha(color, 0.9), backgroundColor: withAlpha(color, 0.3) }} />;
+          // An empty socket: a ring-colour rim centred on the stroke with a
+          // background-matching fill, so it reads as a node in the line that
+          // fills in solid when activated.
+          return <View key={slot.p} style={{ position: 'absolute', left: slot.x - sz / 2, top: slot.y - sz / 2, width: sz, height: sz, borderRadius: sz / 2, borderWidth: 1.5, borderColor: withAlpha(color, 0.9), backgroundColor: '#000' }} />;
         })}
       </Animated.View>
 
@@ -574,11 +575,8 @@ function ActiveDot({
   return (
     <>
       <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: x - RR, top: y - RR, width: 2 * RR, height: 2 * RR, borderRadius: RR, borderWidth: 2, borderColor: color }, rippleStyle]} />
-      {/* raised bead: solid fill in the ring's colour + a top-left specular
-          highlight, so it looks like it swelled up out of the line. */}
-      <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: x - size / 2, top: y - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff', overflow: 'hidden' }, dotStyle]}>
-        <View style={{ position: 'absolute', top: size * 0.13, left: size * 0.17, width: size * 0.44, height: size * 0.44, borderRadius: size * 0.22, backgroundColor: 'rgba(255,255,255,0.55)' }} />
-      </Animated.View>
+      {/* filled socket: solid fill in the ring's colour */}
+      <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: x - size / 2, top: y - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }, dotStyle]} />
       {every > 1 && (
         <View pointerEvents="none" style={{ position: 'absolute', left: x + size / 2 - 2, top: y - size / 2 - 10, minWidth: 14, paddingHorizontal: 3, height: 14, borderRadius: 7, backgroundColor: '#000', borderWidth: 1, borderColor: color, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color, fontSize: 9, fontWeight: '800' }}>{every}</Text>

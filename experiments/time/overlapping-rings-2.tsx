@@ -30,11 +30,14 @@ const RINGS = [
   { color: '#ffd166' },
 ];
 const N = RINGS.length;
+const SPREAD = 15; // px between fanned-out co-located dots
 
 function stepPos(s: number, R: number) {
   const a = (s / M) * 2 * Math.PI - Math.PI / 2;
   return { x: R + R * Math.cos(a), y: R + R * Math.sin(a) };
 }
+
+type Fan = { idx: number; total: number } | null;
 
 export default function OverlappingRings2() {
   const live = useExperimentActive();
@@ -87,6 +90,16 @@ export default function OverlappingRings2() {
     return () => frame.setActive(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, frame]);
+
+  // For each step, how many layers have it active and this layer's slot among
+  // them — so co-located dots can fan out next to each other instead of stacking.
+  const fan = useMemo(() => {
+    const perStep: number[][] = Array.from({ length: M }, () => []);
+    for (let i = 0; i < N; i++) for (let s = 0; s < M; s++) if (active[i][s]) perStep[s].push(i);
+    const map: Fan[][] = RINGS.map(() => new Array<Fan>(M).fill(null));
+    for (let s = 0; s < M; s++) perStep[s].forEach((li, idx) => (map[li][s] = { idx, total: perStep[s].length }));
+    return map;
+  }, [active]);
 
   const cycle = (dir: number) => setCurrent((c) => (c + dir + N) % N);
   const toggle = (ring: number, step: number) =>
@@ -152,6 +165,7 @@ export default function OverlappingRings2() {
             R={R}
             color={r.color}
             active={active[i]}
+            fan={fan[i]}
             phase={phase}
             tilt={tilt}
             focus={focus[i]}
@@ -179,6 +193,7 @@ function RingLayer({
   R,
   color,
   active,
+  fan,
   phase,
   tilt,
   focus,
@@ -191,6 +206,7 @@ function RingLayer({
   R: number;
   color: string;
   active: boolean[];
+  fan: Fan[];
   phase: SharedValue<number>;
   tilt: SharedValue<number>;
   focus: SharedValue<number>;
@@ -224,12 +240,26 @@ function RingLayer({
         ))}
       </Animated.View>
 
-      {/* activated points — always shown, so all layers composite in top-down */}
-      {slots.map((p, s) =>
-        active[s] ? (
-          <View key={s} style={{ position: 'absolute', left: p.x - 7, top: p.y - 7, width: 14, height: 14, borderRadius: 7, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }} />
-        ) : null
-      )}
+      {/* activated points — always shown, so all layers composite in top-down.
+          Co-located dots fan out tangentially so none is hidden. */}
+      {slots.map((p, s) => {
+        if (!active[s]) return null;
+        const info = fan[s];
+        let ox = 0;
+        let oy = 0;
+        if (info && info.total > 1) {
+          const a = (s / M) * 2 * Math.PI - Math.PI / 2;
+          const k = info.idx - (info.total - 1) / 2; // centered rank
+          ox = k * SPREAD * -Math.sin(a); // tangent direction
+          oy = k * SPREAD * Math.cos(a);
+        }
+        return (
+          <View
+            key={s}
+            style={{ position: 'absolute', left: p.x + ox - 7, top: p.y + oy - 7, width: 14, height: 14, borderRadius: 7, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }}
+          />
+        );
+      })}
     </Animated.View>
   );
 }

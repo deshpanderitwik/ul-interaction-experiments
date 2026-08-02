@@ -98,7 +98,7 @@ export const experiments: Experiment[] = [
       {
         id: 'overlapping-rings-4',
         title: 'Overlapping Rings IV',
-        blurb: 'Overlapping Rings III with the pinch-zoom removed and the isometric camera back on a swipe instead of a double-tap. Fixed at 32 subdivisions with bigger rings and dots. Tap out a tempo on the centre target and the clock re-aligns to it; swipe up/down to tilt into the isometric stack (down) and back (up); tap a coloured circle at the bottom to switch layers; long-press sets a slot’s rotation skip.',
+        blurb: 'Overlapping Rings III with the pinch-zoom removed and the isometric camera back on a swipe instead of a double-tap. Fixed at 32 subdivisions with bigger rings and dots. Tap out a tempo on the centre target and the clock re-aligns to it; swipe up/down to tilt into the isometric stack (down) and back (up); tap a coloured circle at the bottom to switch layers; long-press a dot to morph it into a velocity bar (drag to set the hit’s loudness) with the every-N rotation numbers stacked beside it.',
         audio: true,
         load: () => import('./time/overlapping-rings-4'),
       },

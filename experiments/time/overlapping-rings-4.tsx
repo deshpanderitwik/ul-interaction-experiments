@@ -11,18 +11,16 @@ import { scaleFrequencies, useScale } from '../scale';
 import { useTempo } from '../tempo';
 
 // Time · Overlapping Rings IV — Overlapping Rings III with the pinch-zoom taken
-// out and the isometric camera back on a swipe instead of a double-tap. Tap a
-// slot to activate a point; every layer's points composite, in colour, over the
-// top-down view. Drag up/down ON the circumference to change the ring's
-// subdivisions (4 → 32); swipe up/down from the interior to tilt into the
+// out and the isometric camera back on a swipe instead of a double-tap. Fixed at
+// 32 subdivisions. Tap a slot to activate a point; every layer's points
+// composite, in colour, over the top-down view. Swipe up/down to tilt into the
 // isometric stack (down) and back to top-down (up); tap a coloured circle at the
 // bottom to switch layers; long-press a slot to set its rotation skip. Back-swipe
 // nav is disabled so gestures stay ours.
 
 const BEATS_PER_BAR = 4;
 const LOOP_BARS = 2;
-const MAX_M = 32; // pattern is stored at this resolution; subdivisions are a subset
-const SUBDIVS = [4, 8, 16, 32]; // drag up/down cycles these
+const MAX_M = 32; // fixed resolution — the pattern lives on a 32-slot grid
 const FLATTEN = 0.3;
 const GAP = 78; // vertical separation between layers when tilted
 
@@ -50,8 +48,8 @@ function metricLevel(s: number) {
   }
   return Math.min(lvl, LEVELS - 1);
 }
-const ACT_SIZE = [10, 12, 14, 17, 20, 24]; // activated dot diameter by level
-const SLOT_SIZE = [6, 8, 10, 12, 15, 19]; // empty slot diameter by level
+const ACT_SIZE = [13, 16, 19, 22, 26, 30]; // activated dot diameter by level
+const SLOT_SIZE = [9, 11, 13, 16, 19, 23]; // empty slot diameter by level
 const RR = 26; // ripple base radius
 const PULSE = 0.1; // pop/ripple duration as a fraction of the loop
 const POP = 0.6; // extra scale at the moment the hand touches a dot
@@ -59,8 +57,7 @@ const EVERY_VALUES = [2, 4, 6, 8]; // the skip options in the editor
 const ROT_CYCLE = 16; // the global rotation counter runs 0..15 then resets
 const BTN = 54;
 const BTN_GAP = 14;
-const DRAG_PER_STEP = 70; // px of vertical drag per subdivision step
-const SWIPE_TILT = 40; // px of vertical swipe (off the band) to flip the camera
+const SWIPE_TILT = 40; // px of vertical swipe to flip the camera
 const PICK_SIZE = 30; // diameter of a ring-picker circle at the bottom
 const PICK_GAP = 16; // gap between ring-picker circles
 
@@ -77,15 +74,14 @@ export default function OverlappingRings4() {
 
   const cx = width / 2;
   const cy = height * 0.44;
-  const R = Math.min(width * 0.36, height * 0.2);
+  const R = Math.min(width * 0.42, height * 0.24);
   // bottom ring-picker row geometry (also used for tap hit-testing)
   const pickRowW = N * PICK_SIZE + (N - 1) * PICK_GAP;
   const pickStartX = cx - pickRowW / 2;
   const pickTop = height - 84;
 
   const [current, setCurrent] = useState(0);
-  const [subdivIdx, setSubdivIdx] = useState(SUBDIVS.length - 1); // start at 32
-  const subdiv = SUBDIVS[subdivIdx];
+  const subdiv = MAX_M; // fixed at 32
   const [active, setActive] = useState<boolean[][]>(() => RINGS.map(() => new Array(MAX_M).fill(false)));
   const [every, setEvery] = useState<number[][]>(() => RINGS.map(() => new Array(MAX_M).fill(1)));
   const [editing, setEditing] = useState<{ ring: number; step: number } | null>(null);
@@ -100,17 +96,10 @@ export default function OverlappingRings4() {
   const phase = useSharedValue(0);
   const lastHit = useSharedValue(-1);
   const hitStarted = useSharedValue(0);
-  const subdivIdxSV = useSharedValue(SUBDIVS.length - 1);
-  const dragStartIdx = useSharedValue(SUBDIVS.length - 1);
-  const vBandStart = useSharedValue(0); // 1 if a vertical drag began on the dot band
   const focus = RINGS.map((_, i) => useSharedValue(i === 0 ? 1 : 0));
   useEffect(() => {
     tempoSV.value = tempo;
   }, [tempo, tempoSV]);
-  useEffect(() => {
-    subdivIdxSV.value = subdivIdx;
-    hitStarted.value = 0; // re-baseline the step detector on a resolution change
-  }, [subdivIdx, subdivIdxSV, hitStarted]);
 
   const scale = useScale();
   const freqs = useMemo(() => {
@@ -163,7 +152,7 @@ export default function OverlappingRings4() {
     }
     prevPhase.value = ph;
     phase.value = ph;
-    const subdivW = 4 << subdivIdxSV.value; // 4,8,16,32
+    const subdivW = MAX_M; // fixed 32
     const step = Math.floor(ph * subdivW) % subdivW;
     if (hitStarted.value === 0) {
       lastHit.value = step;
@@ -228,32 +217,13 @@ export default function OverlappingRings4() {
     tilt.value = withTiming(v, { duration: 550 });
   };
 
-  // Vertical drag. Started ON the circumference (top-down) it changes the ring's
-  // subdivisions (4 → 32); started anywhere else it's a swipe that tilts the
-  // camera — down into the isometric stack, up back to top-down.
+  // Vertical swipe tilts the camera — down into the isometric stack, up back to
+  // top-down.
   const vDrag = Gesture.Pan()
     .maxPointers(1)
     .activeOffsetY([-14, 14])
     .failOffsetX([-28, 28])
-    .onBegin((e) => {
-      const dx = e.x - cx;
-      const dy = e.y - cy;
-      const r = Math.sqrt(dx * dx + dy * dy);
-      vBandStart.value = tilted.value === 0 && r > R - 42 && r < R + 42 ? 1 : 0;
-      dragStartIdx.value = subdivIdxSV.value;
-    })
-    .onUpdate((e) => {
-      if (vBandStart.value !== 1) return; // interior swipe → tilt, handled onEnd
-      let idx = dragStartIdx.value + Math.round(-e.translationY / DRAG_PER_STEP);
-      if (idx < 0) idx = 0;
-      else if (idx > SUBDIVS.length - 1) idx = SUBDIVS.length - 1;
-      if (idx !== subdivIdxSV.value) {
-        subdivIdxSV.value = idx;
-        runOnJS(setSubdivIdx)(idx);
-      }
-    })
     .onEnd((e) => {
-      if (vBandStart.value === 1) return;
       if (e.translationY > SWIPE_TILT) goTilt(1); // swipe down → isometric
       else if (e.translationY < -SWIPE_TILT) goTilt(0); // swipe up → top-down
     });
@@ -267,7 +237,7 @@ export default function OverlappingRings4() {
       const dy = e.y - cy;
       const r = Math.sqrt(dx * dx + dy * dy);
       if (r < R - 42 || r > R + 42) return;
-      const subdivW = 4 << subdivIdxSV.value;
+      const subdivW = MAX_M;
       const a = Math.atan2(dy, dx);
       let j = Math.round(((a + Math.PI / 2) / (2 * Math.PI)) * subdivW);
       j = ((j % subdivW) + subdivW) % subdivW;
@@ -309,7 +279,7 @@ export default function OverlappingRings4() {
         const dy = e.y - cy;
         const r = Math.sqrt(dx * dx + dy * dy);
         if (r < R - 42 || r > R + 42) return;
-        const subdivW = 4 << subdivIdxSV.value;
+        const subdivW = MAX_M;
         const a = Math.atan2(dy, dx);
         let j = Math.round(((a + Math.PI / 2) / (2 * Math.PI)) * subdivW);
         j = ((j % subdivW) + subdivW) % subdivW;

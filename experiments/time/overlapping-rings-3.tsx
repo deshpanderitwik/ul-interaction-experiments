@@ -108,10 +108,9 @@ export default function OverlappingRings3() {
   const zoomTX = useSharedValue(0);
   const zoomTY = useSharedValue(0);
   const pStartScale = useSharedValue(1);
-  const pStartTX = useSharedValue(0);
-  const pStartTY = useSharedValue(0);
-  const pOriginX = useSharedValue(0);
+  const pOriginX = useSharedValue(0); // focal from the previous pinch frame
   const pOriginY = useSharedValue(0);
+  const prevPointers = useSharedValue(0); // touch count last frame, to detect finger add/remove
   const vBandStart = useSharedValue(0); // 1 if a vertical drag began on the dot band
   const panStartTX = useSharedValue(0); // camera translateX at the start of an interior drag
   const panStartTY = useSharedValue(0); // camera translateY at the start of an interior drag
@@ -240,31 +239,46 @@ export default function OverlappingRings3() {
     tilt.value = withTiming(v, { duration: 550 });
   };
 
-  // Pinch to zoom into a part of the circle (focal-point aware) so finer
-  // subdivisions are easier to edit; pinch back out to 1x to reset.
+  // Pinch to zoom into a part of the circle. Worked INCREMENTALLY: each frame
+  // applies only the delta (focal move + scale change) relative to the current
+  // transform, never from a fixed start anchor. That matters because the moment
+  // a finger lands or lifts, the OS recomputes the focal (the touch centroid)
+  // and the pinch's `scale` baseline, so both jump discontinuously. An
+  // anchor-based formula turns that jump straight into a translate lurch. Here we
+  // detect the pointer-count change and simply re-anchor at the new focal/scale
+  // without moving anything, so the zoom stays put no matter where a thumb lands.
   const pinch = Gesture.Pinch()
     .onStart((e) => {
       pOriginX.value = e.focalX;
       pOriginY.value = e.focalY;
       pStartScale.value = zoomScale.value;
-      pStartTX.value = zoomTX.value;
-      pStartTY.value = zoomTY.value;
+      prevPointers.value = e.numberOfPointers;
     })
     .onUpdate((e) => {
+      // Finger added or removed → focal & scale jump. Re-baseline, don't move.
+      if (e.numberOfPointers !== prevPointers.value) {
+        prevPointers.value = e.numberOfPointers;
+        pOriginX.value = e.focalX;
+        pOriginY.value = e.focalY;
+        pStartScale.value = zoomScale.value / e.scale; // keep pStartScale*e.scale continuous
+        return;
+      }
       let s = pStartScale.value * e.scale;
       if (s < 1) s = 1;
       else if (s > MAXZOOM) s = MAXZOOM;
+      // Incremental focal zoom: T' = (F - C) - k·(F_prev - C) + k·T, where
+      // k is this frame's scale ratio. Follows the focal as it moves (pan) and
+      // scales about it (zoom), using only current state — immune to jumps.
+      const k = s / zoomScale.value;
+      const tx = e.focalX - scx - k * (pOriginX.value - scx) + k * zoomTX.value;
+      const ty = e.focalY - scy - k * (pOriginY.value - scy) + k * zoomTY.value;
       zoomScale.value = s;
-      const k = s / pStartScale.value;
-      // Focal-point-aware translate, clamped to the zoom bounds so content can
-      // never slide off. As s → 1 the bound → 0, so it eases back to centre
-      // rather than snapping there.
       const maxTX = (s - 1) * scx;
       const maxTY = (s - 1) * scy;
-      const tx = e.focalX - scx - k * (pOriginX.value - scx - pStartTX.value);
-      const ty = e.focalY - scy - k * (pOriginY.value - scy - pStartTY.value);
       zoomTX.value = tx > maxTX ? maxTX : tx < -maxTX ? -maxTX : tx;
       zoomTY.value = ty > maxTY ? maxTY : ty < -maxTY ? -maxTY : ty;
+      pOriginX.value = e.focalX;
+      pOriginY.value = e.focalY;
     })
     .onEnd(() => {
       // Settle cleanly to 1x / centred when released near the bottom of the range.

@@ -30,7 +30,8 @@ const RINGS = [
   { color: '#ffd166' },
 ];
 const N = RINGS.length;
-const SPREAD = 15; // px between fanned-out co-located dots
+const SPREAD = 16; // px between fanned-out co-located dots
+const LIFT = 22; // px the fanned dots lift outward off the ring
 
 function stepPos(s: number, R: number) {
   const a = (s / M) * 2 * Math.PI - Math.PI / 2;
@@ -241,23 +242,45 @@ function RingLayer({
       </Animated.View>
 
       {/* activated points — always shown, so all layers composite in top-down.
-          Co-located dots fan out tangentially so none is hidden. */}
+          Co-located dots lift off and fan out side by side, each with a connector
+          back to the shared point on the circumference. */}
       {slots.map((p, s) => {
         if (!active[s]) return null;
         const info = fan[s];
-        let ox = 0;
-        let oy = 0;
-        if (info && info.total > 1) {
+        const fanned = info != null && info.total > 1;
+        let dx = p.x;
+        let dy = p.y;
+        let conn = null;
+        if (fanned) {
           const a = (s / M) * 2 * Math.PI - Math.PI / 2;
-          const k = info.idx - (info.total - 1) / 2; // centered rank
-          ox = k * SPREAD * -Math.sin(a); // tangent direction
-          oy = k * SPREAD * Math.cos(a);
+          const k = info!.idx - (info!.total - 1) / 2; // centered rank
+          dx = p.x + LIFT * Math.cos(a) + k * SPREAD * -Math.sin(a);
+          dy = p.y + LIFT * Math.sin(a) + k * SPREAD * Math.cos(a);
+          const len = Math.hypot(dx - p.x, dy - p.y);
+          const ang = (Math.atan2(dy - p.y, dx - p.x) * 180) / Math.PI;
+          conn = (
+            <View
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                left: (dx + p.x) / 2 - len / 2,
+                top: (dy + p.y) / 2 - 0.75,
+                width: len,
+                height: 1.5,
+                backgroundColor: color,
+                opacity: 0.6,
+                transform: [{ rotate: `${ang}deg` }],
+              }}
+            />
+          );
         }
         return (
-          <View
-            key={s}
-            style={{ position: 'absolute', left: p.x + ox - 7, top: p.y + oy - 7, width: 14, height: 14, borderRadius: 7, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }}
-          />
+          <View key={s} pointerEvents="none">
+            {conn}
+            <View
+              style={{ position: 'absolute', left: dx - 7, top: dy - 7, width: 14, height: 14, borderRadius: 7, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }}
+            />
+          </View>
         );
       })}
     </Animated.View>

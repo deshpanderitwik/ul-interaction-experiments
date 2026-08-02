@@ -69,6 +69,8 @@ const PICK_SIZE = 30; // diameter of a ring-picker circle at the bottom
 const PICK_GAP = 16; // gap between ring-picker circles
 const CENTER_R = 42; // radius of the centre tap-tempo target
 const TAP_RESET_MS = 2000; // gap after which a new tap-tempo take starts fresh
+const CLIP_M = 4; // screen-edge margin before a co-located stack grows inward
+const CLIP_TOP = 72; // extra top margin (nav) for the clip test
 
 type Fan = { idx: number; total: number } | null;
 
@@ -356,6 +358,8 @@ export default function OverlappingRings4() {
             cx={cx}
             cy={cy}
             R={R}
+            width={width}
+            height={height}
             color={r.color}
             active={active[i]}
             every={every[i]}
@@ -436,6 +440,8 @@ function RingLayer({
   cx,
   cy,
   R,
+  width,
+  height,
   color,
   active,
   every,
@@ -452,6 +458,8 @@ function RingLayer({
   cx: number;
   cy: number;
   R: number;
+  width: number;
+  height: number;
   color: string;
   active: boolean[];
   every: number[];
@@ -513,15 +521,30 @@ function RingLayer({
         let extras = null;
         if (total > 1) {
           const a = slot.frac * 2 * Math.PI - Math.PI / 2;
-          const kc = idx - (total - 1) / 2;
-          dx = slot.x + kc * SPREAD * Math.cos(a);
-          dy = slot.y + kc * SPREAD * Math.sin(a);
+          const ca = Math.cos(a);
+          const sa = Math.sin(a);
+          const dotR = ACT_SIZE[metricLevel(p)] / 2;
+          // Would the outward end of a centred fan clip off-screen (top-down)? If
+          // so, grow the stack inward from the circumference point instead, so no
+          // dot is cut off.
+          const tipR = R + ((total - 1) / 2) * SPREAD + dotR;
+          const tipX = cx + tipR * ca;
+          const tipY = cy + tipR * sa;
+          const inward = tipX < CLIP_M || tipX > width - CLIP_M || tipY < CLIP_TOP || tipY > height - CLIP_M;
+          const kc = inward ? -idx : idx - (total - 1) / 2;
+          dx = slot.x + kc * SPREAD * ca;
+          dy = slot.y + kc * SPREAD * sa;
           if (idx === 0) {
             const L = (total - 1) * SPREAD;
             const angDeg = (a * 180) / Math.PI;
+            // connector runs along the fan: centred on the point, or shifted
+            // inward when the stack grows inward.
+            const midKc = inward ? -(total - 1) / 2 : 0;
+            const lcx = slot.x + midKc * SPREAD * ca;
+            const lcy = slot.y + midKc * SPREAD * sa;
             extras = (
               <>
-                <View pointerEvents="none" style={{ position: 'absolute', left: slot.x - L / 2, top: slot.y - 0.75, width: L, height: 1.5, backgroundColor: 'rgba(255,255,255,0.5)', transform: [{ rotate: `${angDeg}deg` }] }} />
+                <View pointerEvents="none" style={{ position: 'absolute', left: lcx - L / 2, top: lcy - 0.75, width: L, height: 1.5, backgroundColor: 'rgba(255,255,255,0.5)', transform: [{ rotate: `${angDeg}deg` }] }} />
                 <View pointerEvents="none" style={{ position: 'absolute', left: slot.x - 3, top: slot.y - 3, width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff' }} />
               </>
             );

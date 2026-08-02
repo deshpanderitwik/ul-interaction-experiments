@@ -39,6 +39,16 @@ function stepPos(s: number, R: number) {
   return { x: R + R * Math.cos(a), y: R + R * Math.sin(a) };
 }
 
+function gcd(a: number, b: number): number {
+  while (b) {
+    const t = b;
+    b = a % b;
+    a = t;
+  }
+  return a;
+}
+const lcm = (a: number, b: number) => (a * b) / gcd(a, b);
+
 // Metric weight of a 16th position (0 weakest … 4 strongest) → dot size.
 function metricLevel(s: number) {
   if (s % 16 === 0) return 4; // downbeat
@@ -172,6 +182,14 @@ export default function OverlappingRings2() {
     editingSV.value = editing ? 1 : 0;
   }, [editing, editingSV]);
 
+  // The global repetition cycle = LCM of every active dot's skip; everything
+  // realigns at the top of it. 1 when nothing is throttled.
+  const globalCycle = useMemo(() => {
+    let l = 1;
+    for (let i = 0; i < N; i++) for (let s = 0; s < M; s++) if (active[i][s] && every[i][s] > 1) l = lcm(l, every[i][s]);
+    return l;
+  }, [active, every]);
+
   const cycle = (dir: number) => setCurrent((c) => (c + dir + N) % N);
   const toggle = (ring: number, step: number) => {
     setActive((prev) => {
@@ -297,7 +315,6 @@ export default function OverlappingRings2() {
             color={r.color}
             active={active[i]}
             every={every[i]}
-            rotCount={rotCount}
             fan={fan[i]}
             phase={phase}
             rotation={rotation}
@@ -308,6 +325,16 @@ export default function OverlappingRings2() {
             zIndex={i === current ? 100 : i}
           />
         ))}
+        {/* global repetition timer — the count all numbered hits adhere to */}
+        {globalCycle > 1 && (
+          <View style={styles.repTimer} pointerEvents="none">
+            <Text style={styles.repText}>
+              {(rotCount % globalCycle) + 1}
+              <Text style={styles.repTotal}> / {globalCycle}</Text>
+            </Text>
+          </View>
+        )}
+
         <View style={styles.pager} pointerEvents="none">
           {RINGS.map((r, i) => (
             <View
@@ -349,7 +376,6 @@ function RingLayer({
   color,
   active,
   every,
-  rotCount,
   fan,
   phase,
   rotation,
@@ -365,7 +391,6 @@ function RingLayer({
   color: string;
   active: boolean[];
   every: number[];
-  rotCount: number;
   fan: Fan[];
   phase: SharedValue<number>;
   rotation: SharedValue<number>;
@@ -436,7 +461,7 @@ function RingLayer({
         return (
           <View key={s} pointerEvents="none">
             {extras}
-            <ActiveDot phase={phase} rotation={rotation} rotCount={rotCount} step={s} every={every[s] || 1} x={dx} y={dy} size={sz} color={color} isCurrent={isCurrent} />
+            <ActiveDot phase={phase} rotation={rotation} step={s} every={every[s] || 1} x={dx} y={dy} size={sz} color={color} isCurrent={isCurrent} />
           </View>
         );
       })}
@@ -449,7 +474,6 @@ function RingLayer({
 function ActiveDot({
   phase,
   rotation,
-  rotCount,
   step,
   every,
   x,
@@ -460,7 +484,6 @@ function ActiveDot({
 }: {
   phase: SharedValue<number>;
   rotation: SharedValue<number>;
-  rotCount: number;
   step: number;
   every: number;
   x: number;
@@ -496,10 +519,8 @@ function ActiveDot({
         style={[{ position: 'absolute', left: x - size / 2, top: y - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }, dotStyle]}
       />
       {every > 1 && (
-        <View pointerEvents="none" style={{ position: 'absolute', left: x + size / 2 - 2, top: y - size / 2 - 11, minWidth: 22, paddingHorizontal: 4, height: 15, borderRadius: 7.5, backgroundColor: '#000', borderWidth: 1, borderColor: color, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color, fontSize: 9, fontWeight: '800', fontVariant: ['tabular-nums'] }}>
-            {(rotCount % every) + 1}/{every}
-          </Text>
+        <View pointerEvents="none" style={{ position: 'absolute', left: x + size / 2 - 2, top: y - size / 2 - 10, minWidth: 14, paddingHorizontal: 3, height: 14, borderRadius: 7, backgroundColor: '#000', borderWidth: 1, borderColor: color, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color, fontSize: 9, fontWeight: '800' }}>{every}</Text>
         </View>
       )}
     </>
@@ -509,4 +530,7 @@ function ActiveDot({
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
   pager: { position: 'absolute', bottom: 60, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+  repTimer: { position: 'absolute', bottom: 88, left: 0, right: 0, alignItems: 'center' },
+  repText: { color: '#fff', fontSize: 26, fontWeight: '300', fontVariant: ['tabular-nums'] },
+  repTotal: { color: 'rgba(255,255,255,0.45)', fontSize: 18, fontWeight: '400' },
 });

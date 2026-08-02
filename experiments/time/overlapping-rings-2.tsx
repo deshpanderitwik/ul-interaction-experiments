@@ -30,8 +30,7 @@ const RINGS = [
   { color: '#ffd166' },
 ];
 const N = RINGS.length;
-const SPREAD = 16; // px between fanned-out co-located dots
-const LIFT = 22; // px the fanned dots lift outward off the ring
+const SPREAD = 20; // radial px between co-located dots straddling the beat point
 
 function stepPos(s: number, R: number) {
   const a = (s / M) * 2 * Math.PI - Math.PI / 2;
@@ -242,41 +241,38 @@ function RingLayer({
       </Animated.View>
 
       {/* activated points — always shown, so all layers composite in top-down.
-          Co-located dots lift off and fan out side by side, each with a connector
-          back to the shared point on the circumference. */}
+          Co-located dots straddle the beat point along the radius (one to each
+          side of the circumference), with a connector through the landing spot. */}
       {slots.map((p, s) => {
         if (!active[s]) return null;
         const info = fan[s];
-        const fanned = info != null && info.total > 1;
+        const total = info ? info.total : 1;
+        const idx = info ? info.idx : 0;
         let dx = p.x;
         let dy = p.y;
-        let conn = null;
-        if (fanned) {
+        let extras = null;
+        if (total > 1) {
           const a = (s / M) * 2 * Math.PI - Math.PI / 2;
-          const k = info!.idx - (info!.total - 1) / 2; // centered rank
-          dx = p.x + LIFT * Math.cos(a) + k * SPREAD * -Math.sin(a);
-          dy = p.y + LIFT * Math.sin(a) + k * SPREAD * Math.cos(a);
-          const len = Math.hypot(dx - p.x, dy - p.y);
-          const ang = (Math.atan2(dy - p.y, dx - p.x) * 180) / Math.PI;
-          conn = (
-            <View
-              pointerEvents="none"
-              style={{
-                position: 'absolute',
-                left: (dx + p.x) / 2 - len / 2,
-                top: (dy + p.y) / 2 - 0.75,
-                width: len,
-                height: 1.5,
-                backgroundColor: color,
-                opacity: 0.6,
-                transform: [{ rotate: `${ang}deg` }],
-              }}
-            />
-          );
+          const kc = idx - (total - 1) / 2; // centered rank
+          dx = p.x + kc * SPREAD * Math.cos(a); // radial: either side of the point
+          dy = p.y + kc * SPREAD * Math.sin(a);
+          if (idx === 0) {
+            const L = (total - 1) * SPREAD;
+            const angDeg = (a * 180) / Math.PI;
+            extras = (
+              <>
+                <View
+                  pointerEvents="none"
+                  style={{ position: 'absolute', left: p.x - L / 2, top: p.y - 0.75, width: L, height: 1.5, backgroundColor: 'rgba(255,255,255,0.5)', transform: [{ rotate: `${angDeg}deg` }] }}
+                />
+                <View pointerEvents="none" style={{ position: 'absolute', left: p.x - 3, top: p.y - 3, width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff' }} />
+              </>
+            );
+          }
         }
         return (
           <View key={s} pointerEvents="none">
-            {conn}
+            {extras}
             <View
               style={{ position: 'absolute', left: dx - 7, top: dy - 7, width: 14, height: 14, borderRadius: 7, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }}
             />

@@ -106,7 +106,9 @@ export default function OverlappingRings3() {
   const pOriginX = useSharedValue(0);
   const pOriginY = useSharedValue(0);
   const bandStart = useSharedValue(0); // 1 if a horizontal drag began on the dot band
+  const vBandStart = useSharedValue(0); // 1 if a vertical drag began on the dot band
   const panStartTX = useSharedValue(0); // camera translateX at the start of an interior drag
+  const panStartTY = useSharedValue(0); // camera translateY at the start of an interior drag
   const focus = RINGS.map((_, i) => useSharedValue(i === 0 ? 1 : 0));
   useEffect(() => {
     tempoSV.value = tempo;
@@ -268,22 +270,40 @@ export default function OverlappingRings3() {
       }
     });
 
-  // Drag up/down = change subdivisions (4 → 32). Vertical-only.
+  // Vertical drag. Started on the dot band (or in the isometric stack) it changes
+  // the ring's subdivisions (4 → 32); started over the empty interior it pans the
+  // zoomed camera vertically, so you can move around a close-up.
   const vDrag = Gesture.Pan()
     .maxPointers(1)
     .activeOffsetY([-14, 14])
     .failOffsetX([-28, 28])
-    .onBegin(() => {
+    .onBegin((e) => {
+      const Lx = scx + (e.x - scx - zoomTX.value) / zoomScale.value;
+      const Ly = scy + (e.y - scy - zoomTY.value) / zoomScale.value;
+      const dx = Lx - cx;
+      const dy = Ly - cy;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      vBandStart.value = tilted.value !== 0 || (r > R - 42 && r < R + 42) ? 1 : 0;
       dragStartIdx.value = subdivIdxSV.value;
+      panStartTY.value = zoomTY.value;
     })
     .onUpdate((e) => {
-      let idx = dragStartIdx.value + Math.round(-e.translationY / DRAG_PER_STEP);
-      if (idx < 0) idx = 0;
-      else if (idx > SUBDIVS.length - 1) idx = SUBDIVS.length - 1;
-      if (idx !== subdivIdxSV.value) {
-        subdivIdxSV.value = idx;
-        runOnJS(setSubdivIdx)(idx);
+      if (vBandStart.value === 1) {
+        let idx = dragStartIdx.value + Math.round(-e.translationY / DRAG_PER_STEP);
+        if (idx < 0) idx = 0;
+        else if (idx > SUBDIVS.length - 1) idx = SUBDIVS.length - 1;
+        if (idx !== subdivIdxSV.value) {
+          subdivIdxSV.value = idx;
+          runOnJS(setSubdivIdx)(idx);
+        }
+        return;
       }
+      if (zoomScale.value <= 1.0001) return; // interior drag, nothing to pan at 1x
+      const maxTY = (zoomScale.value - 1) * scy;
+      let ty = panStartTY.value + e.translationY;
+      if (ty > maxTY) ty = maxTY;
+      else if (ty < -maxTY) ty = -maxTY;
+      zoomTY.value = ty;
     });
 
   // Horizontal drag. Over the dot band (or in the isometric stack) it swipes to

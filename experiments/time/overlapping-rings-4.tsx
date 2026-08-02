@@ -3,7 +3,7 @@ import { useNavigation } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { runOnJS, useAnimatedStyle, useFrameCallback, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
+import Animated, { runOnJS, useAnimatedStyle, useFrameCallback, useSharedValue, withDelay, withSpring, withTiming, type SharedValue } from 'react-native-reanimated';
 import { NoteSynth } from '../../modules/note-synth';
 import { useExperimentActive } from '../_host';
 import { useSharedClock } from '../combinations/clock';
@@ -62,9 +62,28 @@ const PULSE = 0.1; // pop/ripple duration as a fraction of the loop
 const POP = 0.6; // extra scale at the moment the hand touches a dot
 const EVERY_VALUES = [2, 4, 6, 8]; // the skip options in the editor
 const ROT_CYCLE = 16; // the global rotation counter runs 0..15 then resets
-const BTN = 54;
-const BTN_GAP = 14;
+const EDIT_R = 66; // radius of the every-N picker ring around the selected dot
+const EDIT_CHIP = 46; // diameter of a picker chip
+const EDIT_HIT = 40; // tap-hit radius per chip
+const EDIT_STAGGER = 30; // ms between successive chips blooming out
 const SWIPE_TILT = 40; // px of vertical swipe to flip the camera
+
+// Angle of the i-th item on a ring of `count`, starting straight up (like Paths).
+function radialAngle(i: number, count: number) {
+  return -Math.PI / 2 + (i * 2 * Math.PI) / count;
+}
+function radialItemPos(i: number, count: number, cx: number, cy: number) {
+  const th = radialAngle(i, count);
+  return { x: cx + EDIT_R * Math.cos(th), y: cy + EDIT_R * Math.sin(th) };
+}
+// Keep the picker ring on screen when the selected dot sits near an edge.
+function clampRadialCenter(x: number, y: number, width: number, height: number) {
+  const padX = EDIT_R + 16;
+  return {
+    cx: Math.max(padX, Math.min(width - padX, x)),
+    cy: Math.max(EDIT_R + 60, Math.min(height - EDIT_R - 60, y)),
+  };
+}
 const PICK_SIZE = 30; // diameter of a ring-picker circle at the bottom
 const PICK_GAP = 16; // gap between ring-picker circles
 const CENTER_R = 42; // radius of the centre tap-tempo target
@@ -109,6 +128,8 @@ export default function OverlappingRings4() {
   const hitStarted = useSharedValue(0);
   const alignOffset = useSharedValue(0); // clock-time the tapped downbeat lands on
   const tapPulse = useSharedValue(0); // centre-target flash on each tap
+  const editCX = useSharedValue(0); // clamped centre of the every-N picker ring
+  const editCY = useSharedValue(0);
   const focus = RINGS.map((_, i) => useSharedValue(i === 0 ? 1 : 0));
   useEffect(() => {
     tempoSV.value = tempo;
@@ -192,9 +213,24 @@ export default function OverlappingRings4() {
     return map;
   }, [active]);
 
+  // The selected dot's circumference point, and the clamped centre of the picker
+  // ring that blooms around it.
+  const editAnchor = useMemo(() => {
+    if (!editing) return null;
+    const a = (editing.step / MAX_M) * 2 * Math.PI - Math.PI / 2;
+    const x = cx + R * Math.cos(a);
+    const y = cy + R * Math.sin(a);
+    const c = clampRadialCenter(x, y, width, height);
+    return { x, y, cx: c.cx, cy: c.cy };
+  }, [editing, cx, cy, R, width, height]);
+
   useEffect(() => {
     editingSV.value = editing ? 1 : 0;
-  }, [editing, editingSV]);
+    if (editAnchor) {
+      editCX.value = editAnchor.cx;
+      editCY.value = editAnchor.cy;
+    }
+  }, [editing, editAnchor, editingSV, editCX, editCY]);
 
   const toggle = (ring: number, step: number) => {
     setActive((prev) => {
@@ -287,13 +323,16 @@ export default function OverlappingRings4() {
     .maxDistance(16)
     .onEnd((e) => {
       if (editingSV.value === 1) {
-        const rowW = EVERY_VALUES.length * BTN + (EVERY_VALUES.length - 1) * BTN_GAP;
-        const startX = cx - rowW / 2;
-        const by = cy - BTN / 2;
+        // radial picker: hit-test each chip around the clamped ring centre.
+        const n = EVERY_VALUES.length;
         let picked = 0;
-        for (let i = 0; i < EVERY_VALUES.length; i++) {
-          const bx = startX + i * (BTN + BTN_GAP);
-          if (e.x >= bx && e.x <= bx + BTN && e.y >= by && e.y <= by + BTN) {
+        for (let i = 0; i < n; i++) {
+          const th = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+          const chx = editCX.value + EDIT_R * Math.cos(th);
+          const chy = editCY.value + EDIT_R * Math.sin(th);
+          const ddx = e.x - chx;
+          const ddy = e.y - chy;
+          if (ddx * ddx + ddy * ddy <= EDIT_HIT * EDIT_HIT) {
             picked = EVERY_VALUES[i];
             break;
           }
@@ -413,20 +452,24 @@ export default function OverlappingRings4() {
           ))}
         </View>
 
-        {editing && (
-          <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.4)' }]} />
+        {editing && editAnchor && (
+          <View style={[StyleSheet.absoluteFill, { zIndex: 1000 }]} pointerEvents="none">
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
+            {/* marker on the selected dot */}
+            <View style={{ position: 'absolute', left: editAnchor.x - 5, top: editAnchor.y - 5, width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff' }} />
             {EVERY_VALUES.map((v, i) => {
-              const rowW = EVERY_VALUES.length * BTN + (EVERY_VALUES.length - 1) * BTN_GAP;
-              const bx = cx - rowW / 2 + i * (BTN + BTN_GAP);
-              const isCur = editing && every[editing.ring][editing.step] === v;
+              const pos = radialItemPos(i, EVERY_VALUES.length, editAnchor.cx, editAnchor.cy);
               return (
-                <View
+                <EveryChip
                   key={v}
-                  style={{ position: 'absolute', left: bx, top: cy - BTN / 2, width: BTN, height: BTN, borderRadius: BTN / 2, borderWidth: 2, borderColor: isCur ? '#fff' : 'rgba(255,255,255,0.4)', backgroundColor: isCur ? 'rgba(255,255,255,0.16)' : 'transparent', alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <Text style={{ color: '#fff', fontSize: 22, fontWeight: '600' }}>{v}</Text>
-                </View>
+                  value={v}
+                  tx={pos.x}
+                  ty={pos.y}
+                  ox={editAnchor.cx}
+                  oy={editAnchor.cy}
+                  index={i}
+                  on={every[editing.ring][editing.step] === v}
+                />
               );
             })}
           </View>
@@ -610,6 +653,35 @@ function ActiveDot({
         </View>
       )}
     </>
+  );
+}
+
+// One every-N chip. It springs out from the ring centre to its seat on the ring,
+// staggered by index (the Paths radial pattern); the chip matching the slot's
+// current value shows filled.
+function EveryChip({ value, tx, ty, ox, oy, index, on }: { value: number; tx: number; ty: number; ox: number; oy: number; index: number; on: boolean }) {
+  const a = useSharedValue(0);
+  useEffect(() => {
+    a.value = withDelay(index * EDIT_STAGGER, withSpring(1, { damping: 13, stiffness: 200, mass: 0.7 }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const style = useAnimatedStyle(() => {
+    const inv = 1 - a.value;
+    return {
+      opacity: a.value,
+      transform: [{ translateX: (ox - tx) * inv }, { translateY: (oy - ty) * inv }, { scale: 0.3 + 0.7 * a.value }],
+    };
+  });
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        { position: 'absolute', left: tx - EDIT_CHIP / 2, top: ty - EDIT_CHIP / 2, width: EDIT_CHIP, height: EDIT_CHIP, borderRadius: EDIT_CHIP / 2, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, backgroundColor: on ? '#fff' : 'rgba(14,14,16,0.96)', borderColor: on ? '#fff' : 'rgba(255,255,255,0.5)' },
+        style,
+      ]}
+    >
+      <Text style={{ color: on ? '#0a0a0a' : '#fff', fontSize: 19, fontWeight: '700' }}>{value}</Text>
+    </Animated.View>
   );
 }
 

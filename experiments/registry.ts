@@ -91,7 +91,7 @@ export const experiments: Experiment[] = [
       {
         id: 'overlapping-rings-3',
         title: 'Overlapping Rings III',
-        blurb: 'Overlapping Rings II reworked around a live resolution: the pattern lives on a fixed 32-slot grid, and dragging up/down changes how many subdivisions you see and edit (4→32) without losing your dots. Double-tap tilts into the isometric stack (freeing vertical drag), swipe left/right changes the layer, and long-press sets a slot’s rotation skip.',
+        blurb: 'Overlapping Rings II reworked around a live resolution: the pattern lives on a fixed 32-slot grid, and dragging up/down on the circumference changes how many subdivisions you see and edit (4→32) without losing your dots. Pinch to zoom into a region and drag its interior to pan around; double-tap tilts into the isometric stack; tap a coloured circle at the bottom to switch layers; long-press sets a slot’s rotation skip.',
         audio: true,
         load: () => import('./time/overlapping-rings-3'),
       },

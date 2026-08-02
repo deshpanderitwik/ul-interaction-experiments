@@ -12,10 +12,11 @@ import { useTempo } from '../tempo';
 
 // Time · Overlapping Rings III — Overlapping Rings II reworked around a live
 // resolution. Tap a slot to activate a point; every layer's points composite, in
-// colour, over the top-down view. Drag up/down to change the ring's subdivisions
-// (4 → 32), double-tap to tilt into the isometric stack, swipe left/right to
-// change the layer, tap a ring in the stack to land on it. Back-swipe nav is
-// disabled so gestures stay ours.
+// colour, over the top-down view. Drag up/down on the circumference to change the
+// ring's subdivisions (4 → 32); pinch to zoom into a region and drag the interior
+// to pan around it; double-tap to tilt into the isometric stack; tap a coloured
+// circle at the bottom to switch layers. Back-swipe nav is disabled so gestures
+// stay ours.
 
 const BEATS_PER_BAR = 4;
 const LOOP_BARS = 2;
@@ -59,6 +60,8 @@ const BTN = 54;
 const BTN_GAP = 14;
 const DRAG_PER_STEP = 70; // px of vertical drag per subdivision step
 const MAXZOOM = 4; // pinch-zoom ceiling
+const PICK_SIZE = 30; // diameter of a ring-picker circle at the bottom
+const PICK_GAP = 16; // gap between ring-picker circles
 
 type Fan = { idx: number; total: number } | null;
 
@@ -76,6 +79,10 @@ export default function OverlappingRings3() {
   const R = Math.min(width * 0.36, height * 0.2);
   const scx = width / 2; // zoom wrapper (full screen) center
   const scy = height / 2;
+  // bottom ring-picker row geometry (also used for tap hit-testing)
+  const pickRowW = N * PICK_SIZE + (N - 1) * PICK_GAP;
+  const pickStartX = cx - pickRowW / 2;
+  const pickTop = height - 84;
 
   const [current, setCurrent] = useState(0);
   const [subdivIdx, setSubdivIdx] = useState(SUBDIVS.length - 1); // start at 32
@@ -105,7 +112,6 @@ export default function OverlappingRings3() {
   const pStartTY = useSharedValue(0);
   const pOriginX = useSharedValue(0);
   const pOriginY = useSharedValue(0);
-  const bandStart = useSharedValue(0); // 1 if a horizontal drag began on the dot band
   const vBandStart = useSharedValue(0); // 1 if a vertical drag began on the dot band
   const panStartTX = useSharedValue(0); // camera translateX at the start of an interior drag
   const panStartTY = useSharedValue(0); // camera translateY at the start of an interior drag
@@ -199,7 +205,6 @@ export default function OverlappingRings3() {
     editingSV.value = editing ? 1 : 0;
   }, [editing, editingSV]);
 
-  const cycle = (dir: number) => setCurrent((c) => (c + dir + N) % N);
   const toggle = (ring: number, step: number) => {
     setActive((prev) => {
       const next = prev.map((row) => row.slice());
@@ -306,33 +311,22 @@ export default function OverlappingRings3() {
       zoomTY.value = ty;
     });
 
-  // Horizontal drag. Over the dot band (or in the isometric stack) it swipes to
-  // change the layer; over the circle's empty interior it pans the zoomed camera
-  // instead, so you can move around a close-up without flipping rings.
+  // Horizontal drag pans the zoomed camera. (Ring switching now lives in the
+  // bottom picker, so a horizontal drag is purely a camera move.)
   const hPan = Gesture.Pan()
     .maxPointers(1)
     .activeOffsetX([-14, 14])
     .failOffsetY([-28, 28])
-    .onBegin((e) => {
-      const Lx = scx + (e.x - scx - zoomTX.value) / zoomScale.value;
-      const Ly = scy + (e.y - scy - zoomTY.value) / zoomScale.value;
-      const dx = Lx - cx;
-      const dy = Ly - cy;
-      const r = Math.sqrt(dx * dx + dy * dy);
-      bandStart.value = tilted.value !== 0 || (r > R - 42 && r < R + 42) ? 1 : 0;
+    .onBegin(() => {
       panStartTX.value = zoomTX.value;
     })
     .onUpdate((e) => {
-      if (bandStart.value === 1) return; // dot band → ring change (handled onEnd)
       if (zoomScale.value <= 1.0001) return; // nothing to pan at 1x
       const maxTX = (zoomScale.value - 1) * scx;
       let tx = panStartTX.value + e.translationX;
       if (tx > maxTX) tx = maxTX;
       else if (tx < -maxTX) tx = -maxTX;
       zoomTX.value = tx;
-    })
-    .onEnd((e) => {
-      if (bandStart.value === 1 && Math.abs(e.translationX) > 40) runOnJS(cycle)(e.translationX < 0 ? 1 : -1);
     });
 
   // Double-tap = toggle the isometric camera.
@@ -380,6 +374,16 @@ export default function OverlappingRings3() {
         else runOnJS(closeEdit)();
         return;
       }
+      // bottom ring picker (drawn in fixed screen space, so no zoom inverse)
+      if (e.y >= pickTop - 10 && e.y <= pickTop + PICK_SIZE + 10) {
+        for (let i = 0; i < N; i++) {
+          const bx = pickStartX + i * (PICK_SIZE + PICK_GAP);
+          if (e.x >= bx - 8 && e.x <= bx + PICK_SIZE + 8) {
+            runOnJS(setCurrent)(i);
+            return;
+          }
+        }
+      }
       // undo the zoom transform so hit-testing is in ring space
       const Lx = scx + (e.x - scx - zoomTX.value) / zoomScale.value;
       const Ly = scy + (e.y - scy - zoomTY.value) / zoomScale.value;
@@ -409,8 +413,15 @@ export default function OverlappingRings3() {
       }
     });
 
-  const zoomStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: zoomTX.value }, { translateY: zoomTY.value }, { scale: zoomScale.value }],
+  // Keep translate and scale on SEPARATE nested views: iOS composes a single
+  // view's [translate, scale] so the translate gets multiplied by the scale
+  // (a 4x zoom quadruples the pan → the ring snaps off-screen). Nesting makes
+  // the outer translate a true screen-space pan, independent of the inner scale.
+  const panStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: zoomTX.value }, { translateY: zoomTY.value }],
+  }));
+  const scaleStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: zoomScale.value }],
   }));
 
   return (
@@ -419,10 +430,11 @@ export default function OverlappingRings3() {
         <Text style={styles.subdivLabel} pointerEvents="none">
           {subdiv} subdivisions
         </Text>
-        {/* rings live in the zoom wrapper; UI (counter, pager, editor) stays fixed */}
-        <Animated.View style={[StyleSheet.absoluteFill, zoomStyle]} pointerEvents="none">
-          {RINGS.map((r, i) => (
-            <RingLayer
+        {/* rings live in the zoom wrapper (outer pan, inner scale); UI stays fixed */}
+        <Animated.View style={[StyleSheet.absoluteFill, panStyle]} pointerEvents="none">
+          <Animated.View style={[StyleSheet.absoluteFill, scaleStyle]}>
+            {RINGS.map((r, i) => (
+              <RingLayer
               key={i}
               cx={cx}
               cy={cy}
@@ -439,18 +451,31 @@ export default function OverlappingRings3() {
               isCurrent={i === current}
               offset={(i - (N - 1) / 2) * GAP}
               zIndex={i === current ? 100 : i}
-            />
-          ))}
+              />
+            ))}
+          </Animated.View>
         </Animated.View>
         <View style={styles.repTimer} pointerEvents="none">
           <Text style={styles.repText}>{rotCount % ROT_CYCLE}</Text>
         </View>
 
-        <View style={styles.pager} pointerEvents="none">
+        {/* ring picker: tap a circle to switch to that ring (hit-tested in `tap`) */}
+        <View pointerEvents="none">
           {RINGS.map((r, i) => (
             <View
               key={i}
-              style={{ width: i === current ? 9 : 6, height: i === current ? 9 : 6, borderRadius: 5, marginHorizontal: 4, backgroundColor: i === current ? r.color : 'rgba(255,255,255,0.25)' }}
+              style={{
+                position: 'absolute',
+                left: pickStartX + i * (PICK_SIZE + PICK_GAP),
+                top: pickTop,
+                width: PICK_SIZE,
+                height: PICK_SIZE,
+                borderRadius: PICK_SIZE / 2,
+                backgroundColor: r.color,
+                opacity: i === current ? 1 : 0.32,
+                borderWidth: i === current ? 3 : 0,
+                borderColor: '#fff',
+              }}
             />
           ))}
         </View>
@@ -633,8 +658,7 @@ function ActiveDot({
 
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
-  pager: { position: 'absolute', bottom: 60, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  repTimer: { position: 'absolute', bottom: 88, left: 0, right: 0, alignItems: 'center' },
+  repTimer: { position: 'absolute', bottom: 108, left: 0, right: 0, alignItems: 'center' },
   repText: { color: '#fff', fontSize: 30, fontWeight: '300', fontVariant: ['tabular-nums'] },
   subdivLabel: { position: 'absolute', top: 56, left: 0, right: 0, textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
 });

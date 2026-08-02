@@ -39,15 +39,6 @@ function stepPos(s: number, R: number) {
   return { x: R + R * Math.cos(a), y: R + R * Math.sin(a) };
 }
 
-function gcd(a: number, b: number): number {
-  while (b) {
-    const t = b;
-    b = a % b;
-    a = t;
-  }
-  return a;
-}
-const lcm = (a: number, b: number) => (a * b) / gcd(a, b);
 
 // Metric weight of a 16th position (0 weakest … 4 strongest) → dot size.
 function metricLevel(s: number) {
@@ -63,7 +54,7 @@ const RR = 26; // ripple base radius
 const PULSE = 0.1; // pop/ripple duration as a fraction of the loop
 const POP = 0.6; // extra scale at the moment the hand touches a dot
 const EVERY_VALUES = [2, 4, 6, 8]; // the skip options in the editor
-const DEFAULT_CYCLE = 8; // orientation cycle for the global timer when nothing is throttled
+const ROT_CYCLE = 16; // the global rotation counter runs 1..16 then resets
 const BTN = 54; // editor button diameter
 const BTN_GAP = 14;
 
@@ -118,11 +109,11 @@ export default function OverlappingRings2() {
     const a = activeRef.current;
     const ev = everyRef.current;
     const f = freqsRef.current;
-    const rot = rotation.value;
+    const c = (rotation.value % ROT_CYCLE) + 1; // current rotation 1..16
     for (let i = 0; i < N; i++) {
       if (!a[i][s]) continue;
       const e = ev[i][s] || 1;
-      if (rot % e === 0) NoteSynth?.pluck(f[i], 0.16, 0.5).catch(() => {}); // once per e rotations
+      if (c % e === 0) NoteSynth?.pluck(f[i], 0.16, 0.5).catch(() => {}); // on its subdivision within 16
     }
   };
   useEffect(() => {
@@ -182,14 +173,6 @@ export default function OverlappingRings2() {
   useEffect(() => {
     editingSV.value = editing ? 1 : 0;
   }, [editing, editingSV]);
-
-  // The global repetition cycle = LCM of every active dot's skip; everything
-  // realigns at the top of it. 1 when nothing is throttled.
-  const globalCycle = useMemo(() => {
-    let l = 1;
-    for (let i = 0; i < N; i++) for (let s = 0; s < M; s++) if (active[i][s] && every[i][s] > 1) l = lcm(l, every[i][s]);
-    return l;
-  }, [active, every]);
 
   const cycle = (dir: number) => setCurrent((c) => (c + dir + N) % N);
   const toggle = (ring: number, step: number) => {
@@ -326,14 +309,10 @@ export default function OverlappingRings2() {
             zIndex={i === current ? 100 : i}
           />
         ))}
-        {/* global repetition timer — always running so the global clock is
-            readable; its cycle is the LCM of the active skips, or a default when
-            nothing is throttled. */}
-        <View style={[styles.repTimer, { opacity: globalCycle > 1 ? 1 : 0.5 }]} pointerEvents="none">
-          <Text style={styles.repText}>
-            {(rotCount % (globalCycle > 1 ? globalCycle : DEFAULT_CYCLE)) + 1}
-            <Text style={styles.repTotal}> / {globalCycle > 1 ? globalCycle : DEFAULT_CYCLE}</Text>
-          </Text>
+        {/* global rotation counter — runs 1..16 and resets; numbered hits sound
+            on their subdivision within it */}
+        <View style={styles.repTimer} pointerEvents="none">
+          <Text style={styles.repText}>{(rotCount % ROT_CYCLE) + 1}</Text>
         </View>
 
         <View style={styles.pager} pointerEvents="none">
@@ -495,14 +474,14 @@ function ActiveDot({
 }) {
   // Only pop/ripple on a rotation this dot actually plays (rotation % every === 0).
   const dotStyle = useAnimatedStyle(() => {
-    const plays = every <= 1 || rotation.value % every === 0;
+    const plays = every <= 1 || ((rotation.value % ROT_CYCLE) + 1) % every === 0;
     let g = phase.value - step / M;
     g = g - Math.floor(g); // time since this dot was last touched (0..1 of a loop)
     const w = plays && g < PULSE ? 1 - g / PULSE : 0;
     return { transform: [{ scale: 1 + POP * w }] };
   });
   const rippleStyle = useAnimatedStyle(() => {
-    const plays = every <= 1 || rotation.value % every === 0;
+    const plays = every <= 1 || ((rotation.value % ROT_CYCLE) + 1) % every === 0;
     let g = phase.value - step / M;
     g = g - Math.floor(g);
     if (!plays || g >= PULSE) return { opacity: 0, transform: [{ scale: 0.3 }] };
@@ -532,6 +511,5 @@ const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
   pager: { position: 'absolute', bottom: 60, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   repTimer: { position: 'absolute', bottom: 88, left: 0, right: 0, alignItems: 'center' },
-  repText: { color: '#fff', fontSize: 26, fontWeight: '300', fontVariant: ['tabular-nums'] },
-  repTotal: { color: 'rgba(255,255,255,0.45)', fontSize: 18, fontWeight: '400' },
+  repText: { color: '#fff', fontSize: 30, fontWeight: '300', fontVariant: ['tabular-nums'] },
 });

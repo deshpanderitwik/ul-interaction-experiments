@@ -80,10 +80,28 @@ export default function OverlappingRings() {
 
   const cycle = (dir: number) => setCurrent((c) => (c + dir + N) % N);
 
-  const tap = Gesture.Tap().onEnd(() => {
+  const tap = Gesture.Tap().onEnd((e) => {
     'worklet';
-    tilted.value = tilted.value === 0 ? 1 : 0;
-    tilt.value = withTiming(tilted.value, { duration: 550 });
+    if (tilted.value === 0) {
+      // top-down → tilt up to the isometric stack
+      tilted.value = 1;
+      tilt.value = withTiming(1, { duration: 550 });
+    } else {
+      // isometric → land on the ring nearest the tap, back to top-down
+      let best = 0;
+      let bestD = 1e9;
+      for (let i = 0; i < N; i++) {
+        const yi = cy + (i - (N - 1) / 2) * GAP;
+        const d = Math.abs(e.y - yi);
+        if (d < bestD) {
+          bestD = d;
+          best = i;
+        }
+      }
+      runOnJS(setCurrent)(best);
+      tilted.value = 0;
+      tilt.value = withTiming(0, { duration: 550 });
+    }
   });
   const swipe = Gesture.Pan()
     .activeOffsetX([-16, 16])

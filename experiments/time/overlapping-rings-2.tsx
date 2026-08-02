@@ -12,17 +12,17 @@ import { useTempo } from '../tempo';
 
 // Time · Overlapping Rings II — each ring is a layer you build on. Tap a slot to
 // activate a point on the current ring; every ring's activated points show, in
-// its colour, over the top-down view — a composite of all the layers. Slide DOWN
-// to tilt into the isometric stack (each layer with its own points), slide UP to
-// return to the top-down composite. Swipe left/right to change the layer you're
-// editing; tap a ring in the stack to land on it. Back-swipe nav is disabled so
-// gestures stay ours.
+// its colour, over the top-down view. Drag up/down to change the ring's
+// subdivisions (4 → 32), double-tap to tilt into the isometric stack (each layer
+// with its own points), swipe left/right to change the layer, tap a ring in the
+// stack to land on it. Back-swipe nav is disabled so gestures stay ours.
 
 const BEATS_PER_BAR = 4;
 const LOOP_BARS = 2;
-const M = 32; // slots per ring
+const MAX_M = 32; // pattern is stored at this resolution; subdivisions are a subset
+const SUBDIVS = [4, 8, 16, 32]; // drag up/down cycles these
 const FLATTEN = 0.3;
-const GAP = 78; // vertical separation between layers when tilted (bigger = easier to tap)
+const GAP = 78; // vertical separation between layers when tilted
 
 const RINGS = [
   { color: '#7ad0ff' },
@@ -34,15 +34,10 @@ const RINGS = [
 const N = RINGS.length;
 const SPREAD = 28; // radial px between co-located dots straddling the beat point
 
-function stepPos(s: number, R: number) {
-  const a = (s / M) * 2 * Math.PI - Math.PI / 2;
-  return { x: R + R * Math.cos(a), y: R + R * Math.sin(a) };
-}
-
-
-// Metric weight of a position (0 weakest … strongest) = how many times 2 divides
-// it; the downbeat (0) is the strongest. Works for any power-of-two ring.
-const LEVELS = 6; // 0..5 for a 32-slot ring
+// Metric weight of a slot (0 weakest … strongest) = how many times 2 divides it;
+// the downbeat (0) is strongest. Computed on the 32-grid so a beat stays "big"
+// at any display resolution.
+const LEVELS = 6;
 function metricLevel(s: number) {
   if (s === 0) return LEVELS - 1;
   let lvl = 0;
@@ -59,9 +54,10 @@ const RR = 26; // ripple base radius
 const PULSE = 0.1; // pop/ripple duration as a fraction of the loop
 const POP = 0.6; // extra scale at the moment the hand touches a dot
 const EVERY_VALUES = [2, 4, 6, 8]; // the skip options in the editor
-const ROT_CYCLE = 16; // the global rotation counter runs 1..16 then resets
-const BTN = 54; // editor button diameter
+const ROT_CYCLE = 16; // the global rotation counter runs 0..15 then resets
+const BTN = 54;
 const BTN_GAP = 14;
+const DRAG_PER_STEP = 70; // px of vertical drag per subdivision step
 
 type Fan = { idx: number; total: number } | null;
 
@@ -79,10 +75,12 @@ export default function OverlappingRings2() {
   const R = Math.min(width * 0.36, height * 0.2);
 
   const [current, setCurrent] = useState(0);
-  const [active, setActive] = useState<boolean[][]>(() => RINGS.map(() => new Array(M).fill(false)));
-  const [every, setEvery] = useState<number[][]>(() => RINGS.map(() => new Array(M).fill(1))); // play once per N rotations
+  const [subdivIdx, setSubdivIdx] = useState(SUBDIVS.length - 1); // start at 32
+  const subdiv = SUBDIVS[subdivIdx];
+  const [active, setActive] = useState<boolean[][]>(() => RINGS.map(() => new Array(MAX_M).fill(false)));
+  const [every, setEvery] = useState<number[][]>(() => RINGS.map(() => new Array(MAX_M).fill(1)));
   const [editing, setEditing] = useState<{ ring: number; step: number } | null>(null);
-  const [rotCount, setRotCount] = useState(0); // completed spins, for the per-dot cycle counter
+  const [rotCount, setRotCount] = useState(0);
   const currentSV = useSharedValue(0);
   const editingSV = useSharedValue(0);
   const rotation = useSharedValue(0);
@@ -93,12 +91,17 @@ export default function OverlappingRings2() {
   const phase = useSharedValue(0);
   const lastHit = useSharedValue(-1);
   const hitStarted = useSharedValue(0);
+  const subdivIdxSV = useSharedValue(SUBDIVS.length - 1);
+  const dragStartIdx = useSharedValue(SUBDIVS.length - 1);
   const focus = RINGS.map((_, i) => useSharedValue(i === 0 ? 1 : 0));
   useEffect(() => {
     tempoSV.value = tempo;
   }, [tempo, tempoSV]);
+  useEffect(() => {
+    subdivIdxSV.value = subdivIdx;
+    hitStarted.value = 0; // re-baseline the step detector on a resolution change
+  }, [subdivIdx, subdivIdxSV, hitStarted]);
 
-  // One scale pitch per ring (inner low → outer high) for the note each hit sounds.
   const scale = useScale();
   const freqs = useMemo(() => {
     const pool = scaleFrequencies(scale, 48, 76);
@@ -110,15 +113,18 @@ export default function OverlappingRings2() {
   everyRef.current = every;
   const freqsRef = useRef(freqs);
   freqsRef.current = freqs;
-  const fireStep = (s: number) => {
+  const subdivRef = useRef(subdiv);
+  subdivRef.current = subdiv;
+  const fireStep = (j: number) => {
     const a = activeRef.current;
     const ev = everyRef.current;
     const f = freqsRef.current;
-    const pos = rotation.value % ROT_CYCLE; // current rotation 0..15
+    const pos = rotation.value % ROT_CYCLE;
+    const p = j * (MAX_M / subdivRef.current); // display index → data slot
     for (let i = 0; i < N; i++) {
-      if (!a[i][s]) continue;
-      const e = ev[i][s] || 1;
-      if (pos % e === 0) NoteSynth?.pluck(f[i], 0.16, 0.5).catch(() => {}); // fires on 0, e, 2e, …
+      if (!a[i][p]) continue;
+      const e = ev[i][p] || 1;
+      if (pos % e === 0) NoteSynth?.pluck(f[i], 0.16, 0.5).catch(() => {});
     }
   };
   useEffect(() => {
@@ -140,15 +146,15 @@ export default function OverlappingRings2() {
     const now = clock.value;
     const beatMs = 60000 / tempoSV.value;
     const loopMs = LOOP_BARS * BEATS_PER_BAR * beatMs;
-    const p = (now % loopMs) / loopMs;
-    if (hitStarted.value === 1 && p < prevPhase.value - 0.5) {
-      rotation.value += 1; // a full spin elapsed
+    const ph = (now % loopMs) / loopMs;
+    if (hitStarted.value === 1 && ph < prevPhase.value - 0.5) {
+      rotation.value += 1;
       runOnJS(setRotCount)(rotation.value);
     }
-    prevPhase.value = p;
-    phase.value = p;
-    // The hand reaches dot s when floor(phase*M) becomes s → fire that step.
-    const step = Math.floor(p * M) % M;
+    prevPhase.value = ph;
+    phase.value = ph;
+    const subdivW = 4 << subdivIdxSV.value; // 4,8,16,32
+    const step = Math.floor(ph * subdivW) % subdivW;
     if (hitStarted.value === 0) {
       lastHit.value = step;
       hitStarted.value = 1;
@@ -159,19 +165,17 @@ export default function OverlappingRings2() {
   }, false);
 
   useEffect(() => {
-    hitStarted.value = 0; // re-baseline so it doesn't fire on (re)entry
+    hitStarted.value = 0;
     frame.setActive(live);
     return () => frame.setActive(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, frame]);
 
-  // For each step, how many layers have it active and this layer's slot among
-  // them — so co-located dots can fan out next to each other instead of stacking.
   const fan = useMemo(() => {
-    const perStep: number[][] = Array.from({ length: M }, () => []);
-    for (let i = 0; i < N; i++) for (let s = 0; s < M; s++) if (active[i][s]) perStep[s].push(i);
-    const map: Fan[][] = RINGS.map(() => new Array<Fan>(M).fill(null));
-    for (let s = 0; s < M; s++) perStep[s].forEach((li, idx) => (map[li][s] = { idx, total: perStep[s].length }));
+    const perStep: number[][] = Array.from({ length: MAX_M }, () => []);
+    for (let i = 0; i < N; i++) for (let s = 0; s < MAX_M; s++) if (active[i][s]) perStep[s].push(i);
+    const map: Fan[][] = RINGS.map(() => new Array<Fan>(MAX_M).fill(null));
+    for (let s = 0; s < MAX_M; s++) perStep[s].forEach((li, idx) => (map[li][s] = { idx, total: perStep[s].length }));
     return map;
   }, [active]);
 
@@ -188,21 +192,18 @@ export default function OverlappingRings2() {
     });
     setEvery((prev) => {
       const next = prev.map((row) => row.slice());
-      if (activeRef.current[ring][step]) next[ring][step] = 1; // was on → turning off, reset
+      if (activeRef.current[ring][step]) next[ring][step] = 1;
       return next;
     });
   };
   const setEveryAt = (ring: number, step: number, n: number) =>
     setEvery((prev) => prev.map((row, i) => (i === ring ? row.map((v, s) => (s === step ? n : v)) : row)));
-  const openEdit = (ring: number, step: number) => {
-    setEditing({ ring, step }); // works whether or not the dot is filled
-  };
+  const openEdit = (ring: number, step: number) => setEditing({ ring, step });
   const closeEdit = () => setEditing(null);
   const applyEvery = (n: number) => {
     if (editing) {
       const { ring, step } = editing;
       setEveryAt(ring, step, n);
-      // picking a number also fills the dot if it wasn't already
       setActive((prev) => {
         if (prev[ring][step]) return prev;
         const next = prev.map((row) => row.slice());
@@ -218,19 +219,40 @@ export default function OverlappingRings2() {
     tilt.value = withTiming(v, { duration: 550 });
   };
 
-  // Vertical swipe drives the camera; horizontal swipe changes the layer.
-  const pan = Gesture.Pan().onEnd((e) => {
-    const ax = Math.abs(e.translationX);
-    const ay = Math.abs(e.translationY);
-    if (ax > ay && ax > 40) {
-      runOnJS(cycle)(e.translationX < 0 ? 1 : -1);
-    } else if (ay > ax && ay > 40) {
-      goTilt(e.translationY > 0 ? 1 : 0); // down → isometric, up → top-down
-    }
-  });
+  // Drag up/down = change subdivisions (4 → 32). Vertical-only.
+  const vDrag = Gesture.Pan()
+    .activeOffsetY([-14, 14])
+    .failOffsetX([-28, 28])
+    .onBegin(() => {
+      dragStartIdx.value = subdivIdxSV.value;
+    })
+    .onUpdate((e) => {
+      let idx = dragStartIdx.value + Math.round(-e.translationY / DRAG_PER_STEP);
+      if (idx < 0) idx = 0;
+      else if (idx > SUBDIVS.length - 1) idx = SUBDIVS.length - 1;
+      if (idx !== subdivIdxSV.value) {
+        subdivIdxSV.value = idx;
+        runOnJS(setSubdivIdx)(idx);
+      }
+    });
 
-  // Long-press any dot (top-down) to set how many rotations it skips; picking a
-  // number fills the dot if it was empty.
+  // Swipe left/right = change the layer. Horizontal-only.
+  const hSwipe = Gesture.Pan()
+    .activeOffsetX([-14, 14])
+    .failOffsetY([-28, 28])
+    .onEnd((e) => {
+      if (Math.abs(e.translationX) > 40) runOnJS(cycle)(e.translationX < 0 ? 1 : -1);
+    });
+
+  // Double-tap = toggle the isometric camera.
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .maxDistance(28)
+    .onEnd(() => {
+      'worklet';
+      goTilt(tilted.value === 0 ? 1 : 0);
+    });
+
   const longPress = Gesture.LongPress()
     .minDuration(380)
     .maxDistance(16)
@@ -240,18 +262,18 @@ export default function OverlappingRings2() {
       const dy = e.y - cy;
       const r = Math.sqrt(dx * dx + dy * dy);
       if (r < R - 42 || r > R + 42) return;
+      const subdivW = 4 << subdivIdxSV.value;
       const a = Math.atan2(dy, dx);
-      let s = Math.round(((a + Math.PI / 2) / (2 * Math.PI)) * M);
-      s = ((s % M) + M) % M;
-      runOnJS(openEdit)(currentSV.value, s);
+      let j = Math.round(((a + Math.PI / 2) / (2 * Math.PI)) * subdivW);
+      j = ((j % subdivW) + subdivW) % subdivW;
+      runOnJS(openEdit)(currentSV.value, j * (MAX_M / subdivW));
     });
 
-  // Tap activates a point (top-down) or lands on a ring (isometric).
   const tap = Gesture.Tap()
+    .numberOfTaps(1)
     .maxDistance(16)
     .onEnd((e) => {
       if (editingSV.value === 1) {
-        // hit-test the 2/4/6/8 buttons; a tap elsewhere dismisses
         const rowW = EVERY_VALUES.length * BTN + (EVERY_VALUES.length - 1) * BTN_GAP;
         const startX = cx - rowW / 2;
         const by = cy - BTN / 2;
@@ -272,10 +294,11 @@ export default function OverlappingRings2() {
         const dy = e.y - cy;
         const r = Math.sqrt(dx * dx + dy * dy);
         if (r < R - 42 || r > R + 42) return;
+        const subdivW = 4 << subdivIdxSV.value;
         const a = Math.atan2(dy, dx);
-        let s = Math.round(((a + Math.PI / 2) / (2 * Math.PI)) * M);
-        s = ((s % M) + M) % M;
-        runOnJS(toggle)(currentSV.value, s);
+        let j = Math.round(((a + Math.PI / 2) / (2 * Math.PI)) * subdivW);
+        j = ((j % subdivW) + subdivW) % subdivW;
+        runOnJS(toggle)(currentSV.value, j * (MAX_M / subdivW));
       } else {
         let best = 0;
         let bestD = 1e9;
@@ -293,8 +316,11 @@ export default function OverlappingRings2() {
     });
 
   return (
-    <GestureDetector gesture={Gesture.Race(longPress, tap, pan)}>
+    <GestureDetector gesture={Gesture.Race(vDrag, hSwipe, longPress, Gesture.Exclusive(doubleTap, tap))}>
       <View style={styles.fill}>
+        <Text style={styles.subdivLabel} pointerEvents="none">
+          {subdiv} subdivisions
+        </Text>
         {RINGS.map((r, i) => (
           <RingLayer
             key={i}
@@ -305,6 +331,7 @@ export default function OverlappingRings2() {
             active={active[i]}
             every={every[i]}
             fan={fan[i]}
+            subdiv={subdiv}
             phase={phase}
             rotation={rotation}
             tilt={tilt}
@@ -314,8 +341,6 @@ export default function OverlappingRings2() {
             zIndex={i === current ? 100 : i}
           />
         ))}
-        {/* global rotation counter — runs 0..15 and resets; a numbered hit sounds
-            when this is a multiple of its number (a "4" on 0, 4, 8, 12) */}
         <View style={styles.repTimer} pointerEvents="none">
           <Text style={styles.repText}>{rotCount % ROT_CYCLE}</Text>
         </View>
@@ -329,8 +354,6 @@ export default function OverlappingRings2() {
           ))}
         </View>
 
-        {/* center overlay: pick how many rotations this dot skips. Purely visual —
-            the tap gesture hit-tests the buttons, so no gesture conflict. */}
         {editing && (
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
             <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.4)' }]} />
@@ -362,6 +385,7 @@ function RingLayer({
   active,
   every,
   fan,
+  subdiv,
   phase,
   rotation,
   tilt,
@@ -377,6 +401,7 @@ function RingLayer({
   active: boolean[];
   every: number[];
   fan: Fan[];
+  subdiv: number;
   phase: SharedValue<number>;
   rotation: SharedValue<number>;
   tilt: SharedValue<number>;
@@ -385,14 +410,21 @@ function RingLayer({
   offset: number;
   zIndex: number;
 }) {
-  const slots = useMemo(() => Array.from({ length: M }, (_, s) => stepPos(s, R)), [R]);
+  // Display positions on the current grid; each maps to a data slot p on the
+  // fixed 32-slot pattern.
+  const slots = useMemo(() => {
+    const stride = MAX_M / subdiv;
+    return Array.from({ length: subdiv }, (_, j) => {
+      const p = j * stride;
+      const a = (j / subdiv) * 2 * Math.PI - Math.PI / 2;
+      return { p, frac: j / subdiv, x: R + R * Math.cos(a), y: R + R * Math.sin(a) };
+    });
+  }, [R, subdiv]);
 
   const boxStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: tilt.value * offset }, { scaleY: 1 - tilt.value * (1 - FLATTEN) }],
   }));
-  // Outline + hand: the current ring in top-down, every ring when tilted.
   const frameStyle = useAnimatedStyle(() => ({ opacity: Math.max(focus.value, tilt.value * 0.7) }));
-  // Faint tappable slots: only the current ring, only top-down.
   const slotStyle = useAnimatedStyle(() => ({ opacity: focus.value * (1 - tilt.value) }));
   const handStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${phase.value * 360}deg` }] }));
 
@@ -406,47 +438,42 @@ function RingLayer({
       </Animated.View>
 
       <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: 2 * R, height: 2 * R }, slotStyle]}>
-        {slots.map((p, s) => {
-          const sz = SLOT_SIZE[metricLevel(s)];
-          return <View key={s} style={{ position: 'absolute', left: p.x - sz / 2, top: p.y - sz / 2, width: sz, height: sz, borderRadius: sz / 2, borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)' }} />;
+        {slots.map((slot) => {
+          const sz = SLOT_SIZE[metricLevel(slot.p)];
+          return <View key={slot.p} style={{ position: 'absolute', left: slot.x - sz / 2, top: slot.y - sz / 2, width: sz, height: sz, borderRadius: sz / 2, borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)' }} />;
         })}
       </Animated.View>
 
-      {/* activated points — always shown, so all layers composite in top-down.
-          Co-located dots straddle the beat point along the radius (one to each
-          side of the circumference), with a connector through the landing spot. */}
-      {slots.map((p, s) => {
-        if (!active[s]) return null;
-        const info = fan[s];
+      {slots.map((slot) => {
+        const p = slot.p;
+        if (!active[p]) return null;
+        const info = fan[p];
         const total = info ? info.total : 1;
         const idx = info ? info.idx : 0;
-        let dx = p.x;
-        let dy = p.y;
+        let dx = slot.x;
+        let dy = slot.y;
         let extras = null;
         if (total > 1) {
-          const a = (s / M) * 2 * Math.PI - Math.PI / 2;
-          const kc = idx - (total - 1) / 2; // centered rank
-          dx = p.x + kc * SPREAD * Math.cos(a); // radial: either side of the point
-          dy = p.y + kc * SPREAD * Math.sin(a);
+          const a = slot.frac * 2 * Math.PI - Math.PI / 2;
+          const kc = idx - (total - 1) / 2;
+          dx = slot.x + kc * SPREAD * Math.cos(a);
+          dy = slot.y + kc * SPREAD * Math.sin(a);
           if (idx === 0) {
             const L = (total - 1) * SPREAD;
             const angDeg = (a * 180) / Math.PI;
             extras = (
               <>
-                <View
-                  pointerEvents="none"
-                  style={{ position: 'absolute', left: p.x - L / 2, top: p.y - 0.75, width: L, height: 1.5, backgroundColor: 'rgba(255,255,255,0.5)', transform: [{ rotate: `${angDeg}deg` }] }}
-                />
-                <View pointerEvents="none" style={{ position: 'absolute', left: p.x - 3, top: p.y - 3, width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff' }} />
+                <View pointerEvents="none" style={{ position: 'absolute', left: slot.x - L / 2, top: slot.y - 0.75, width: L, height: 1.5, backgroundColor: 'rgba(255,255,255,0.5)', transform: [{ rotate: `${angDeg}deg` }] }} />
+                <View pointerEvents="none" style={{ position: 'absolute', left: slot.x - 3, top: slot.y - 3, width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff' }} />
               </>
             );
           }
         }
-        const sz = ACT_SIZE[metricLevel(s)];
+        const sz = ACT_SIZE[metricLevel(p)];
         return (
-          <View key={s} pointerEvents="none">
+          <View key={p} pointerEvents="none">
             {extras}
-            <ActiveDot phase={phase} rotation={rotation} step={s} every={every[s] || 1} x={dx} y={dy} size={sz} color={color} isCurrent={isCurrent} />
+            <ActiveDot phase={phase} rotation={rotation} frac={slot.frac} every={every[p] || 1} x={dx} y={dy} size={sz} color={color} isCurrent={isCurrent} />
           </View>
         );
       })}
@@ -454,12 +481,10 @@ function RingLayer({
   );
 }
 
-// A placed hit: pops and radiates a ripple each time the clock hand touches it —
-// keyed off the loop phase, so it re-fires every pass without any per-dot state.
 function ActiveDot({
   phase,
   rotation,
-  step,
+  frac,
   every,
   x,
   y,
@@ -469,7 +494,7 @@ function ActiveDot({
 }: {
   phase: SharedValue<number>;
   rotation: SharedValue<number>;
-  step: number;
+  frac: number;
   every: number;
   x: number;
   y: number;
@@ -477,17 +502,16 @@ function ActiveDot({
   color: string;
   isCurrent: boolean;
 }) {
-  // Only pop/ripple on a rotation this dot actually plays (rotation % every === 0).
   const dotStyle = useAnimatedStyle(() => {
     const plays = every <= 1 || (rotation.value % ROT_CYCLE) % every === 0;
-    let g = phase.value - step / M;
-    g = g - Math.floor(g); // time since this dot was last touched (0..1 of a loop)
+    let g = phase.value - frac;
+    g = g - Math.floor(g);
     const w = plays && g < PULSE ? 1 - g / PULSE : 0;
     return { transform: [{ scale: 1 + POP * w }] };
   });
   const rippleStyle = useAnimatedStyle(() => {
     const plays = every <= 1 || (rotation.value % ROT_CYCLE) % every === 0;
-    let g = phase.value - step / M;
+    let g = phase.value - frac;
     g = g - Math.floor(g);
     if (!plays || g >= PULSE) return { opacity: 0, transform: [{ scale: 0.3 }] };
     const t = g / PULSE;
@@ -495,14 +519,8 @@ function ActiveDot({
   });
   return (
     <>
-      <Animated.View
-        pointerEvents="none"
-        style={[{ position: 'absolute', left: x - RR, top: y - RR, width: 2 * RR, height: 2 * RR, borderRadius: RR, borderWidth: 2, borderColor: color }, rippleStyle]}
-      />
-      <Animated.View
-        pointerEvents="none"
-        style={[{ position: 'absolute', left: x - size / 2, top: y - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }, dotStyle]}
-      />
+      <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: x - RR, top: y - RR, width: 2 * RR, height: 2 * RR, borderRadius: RR, borderWidth: 2, borderColor: color }, rippleStyle]} />
+      <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: x - size / 2, top: y - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }, dotStyle]} />
       {every > 1 && (
         <View pointerEvents="none" style={{ position: 'absolute', left: x + size / 2 - 2, top: y - size / 2 - 10, minWidth: 14, paddingHorizontal: 3, height: 14, borderRadius: 7, backgroundColor: '#000', borderWidth: 1, borderColor: color, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color, fontSize: 9, fontWeight: '800' }}>{every}</Text>
@@ -517,4 +535,5 @@ const styles = StyleSheet.create({
   pager: { position: 'absolute', bottom: 60, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   repTimer: { position: 'absolute', bottom: 88, left: 0, right: 0, alignItems: 'center' },
   repText: { color: '#fff', fontSize: 30, fontWeight: '300', fontVariant: ['tabular-nums'] },
+  subdivLabel: { position: 'absolute', top: 56, left: 0, right: 0, textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
 });

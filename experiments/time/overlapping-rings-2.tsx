@@ -22,7 +22,7 @@ const BEATS_PER_BAR = 4;
 const LOOP_BARS = 2;
 const M = 16; // slots per ring
 const FLATTEN = 0.3;
-const GAP = 50;
+const GAP = 78; // vertical separation between layers when tilted (bigger = easier to tap)
 
 const RINGS = [
   { color: '#7ad0ff' },

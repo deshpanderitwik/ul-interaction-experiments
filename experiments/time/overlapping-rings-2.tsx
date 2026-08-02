@@ -20,7 +20,7 @@ import { useTempo } from '../tempo';
 
 const BEATS_PER_BAR = 4;
 const LOOP_BARS = 2;
-const M = 16; // slots per ring
+const M = 32; // slots per ring
 const FLATTEN = 0.3;
 const GAP = 78; // vertical separation between layers when tilted (bigger = easier to tap)
 
@@ -40,16 +40,21 @@ function stepPos(s: number, R: number) {
 }
 
 
-// Metric weight of a 16th position (0 weakest … 4 strongest) → dot size.
+// Metric weight of a position (0 weakest … strongest) = how many times 2 divides
+// it; the downbeat (0) is the strongest. Works for any power-of-two ring.
+const LEVELS = 6; // 0..5 for a 32-slot ring
 function metricLevel(s: number) {
-  if (s % 16 === 0) return 4; // downbeat
-  if (s % 8 === 0) return 3; // beat 3
-  if (s % 4 === 0) return 2; // beats 2 & 4
-  if (s % 2 === 0) return 1; // 8th "ands"
-  return 0; // weak 16ths
+  if (s === 0) return LEVELS - 1;
+  let lvl = 0;
+  let v = s;
+  while (v % 2 === 0) {
+    v /= 2;
+    lvl++;
+  }
+  return Math.min(lvl, LEVELS - 1);
 }
-const ACT_SIZE = [15, 18, 22, 26, 30]; // activated dot diameter by level
-const SLOT_SIZE = [12, 15, 18, 22, 26]; // empty slot diameter by level
+const ACT_SIZE = [10, 12, 14, 17, 20, 24]; // activated dot diameter by level
+const SLOT_SIZE = [6, 8, 10, 12, 15, 19]; // empty slot diameter by level
 const RR = 26; // ripple base radius
 const PULSE = 0.1; // pop/ripple duration as a fraction of the loop
 const POP = 0.6; // extra scale at the moment the hand touches a dot

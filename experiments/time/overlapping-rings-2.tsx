@@ -37,6 +37,17 @@ function stepPos(s: number, R: number) {
   return { x: R + R * Math.cos(a), y: R + R * Math.sin(a) };
 }
 
+// Metric weight of a 16th position (0 weakest … 4 strongest) → dot size.
+function metricLevel(s: number) {
+  if (s % 16 === 0) return 4; // downbeat
+  if (s % 8 === 0) return 3; // beat 3
+  if (s % 4 === 0) return 2; // beats 2 & 4
+  if (s % 2 === 0) return 1; // 8th "ands"
+  return 0; // weak 16ths
+}
+const ACT_SIZE = [10, 12, 15, 18, 22]; // activated dot diameter by level
+const SLOT_SIZE = [5, 6, 7, 9, 11]; // empty slot diameter by level
+
 type Fan = { idx: number; total: number } | null;
 
 export default function OverlappingRings2() {
@@ -235,9 +246,10 @@ function RingLayer({
       </Animated.View>
 
       <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: 2 * R, height: 2 * R }, slotStyle]}>
-        {slots.map((p, s) => (
-          <View key={s} style={{ position: 'absolute', left: p.x - 3, top: p.y - 3, width: 6, height: 6, borderRadius: 3, borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)' }} />
-        ))}
+        {slots.map((p, s) => {
+          const sz = SLOT_SIZE[metricLevel(s)];
+          return <View key={s} style={{ position: 'absolute', left: p.x - sz / 2, top: p.y - sz / 2, width: sz, height: sz, borderRadius: sz / 2, borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)' }} />;
+        })}
       </Animated.View>
 
       {/* activated points — always shown, so all layers composite in top-down.
@@ -270,11 +282,12 @@ function RingLayer({
             );
           }
         }
+        const sz = ACT_SIZE[metricLevel(s)];
         return (
           <View key={s} pointerEvents="none">
             {extras}
             <View
-              style={{ position: 'absolute', left: dx - 7, top: dy - 7, width: 14, height: 14, borderRadius: 7, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }}
+              style={{ position: 'absolute', left: dx - sz / 2, top: dy - sz / 2, width: sz, height: sz, borderRadius: sz / 2, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }}
             />
           </View>
         );

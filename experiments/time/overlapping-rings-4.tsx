@@ -8,7 +8,7 @@ import { NoteSynth } from '../../modules/note-synth';
 import { useExperimentActive } from '../_host';
 import { useSharedClock } from '../combinations/clock';
 import { scaleFrequencies, useScale } from '../scale';
-import { useTempo } from '../tempo';
+import { setTempo, useTempo } from '../tempo';
 
 // Time · Overlapping Rings IV — Overlapping Rings III with the pinch-zoom taken
 // out and the isometric camera back on a swipe instead of a double-tap. Fixed at
@@ -60,6 +60,8 @@ const BTN_GAP = 14;
 const SWIPE_TILT = 40; // px of vertical swipe to flip the camera
 const PICK_SIZE = 30; // diameter of a ring-picker circle at the bottom
 const PICK_GAP = 16; // gap between ring-picker circles
+const CENTER_R = 42; // radius of the centre tap-tempo target
+const TAP_RESET_MS = 2000; // gap after which a new tap-tempo take starts fresh
 
 type Fan = { idx: number; total: number } | null;
 
@@ -96,6 +98,8 @@ export default function OverlappingRings4() {
   const phase = useSharedValue(0);
   const lastHit = useSharedValue(-1);
   const hitStarted = useSharedValue(0);
+  const alignOffset = useSharedValue(0); // clock-time the tapped downbeat lands on
+  const tapPulse = useSharedValue(0); // centre-target flash on each tap
   const focus = RINGS.map((_, i) => useSharedValue(i === 0 ? 1 : 0));
   useEffect(() => {
     tempoSV.value = tempo;
@@ -145,7 +149,8 @@ export default function OverlappingRings4() {
     const now = clock.value;
     const beatMs = 60000 / tempoSV.value;
     const loopMs = LOOP_BARS * BEATS_PER_BAR * beatMs;
-    const ph = (now % loopMs) / loopMs;
+    // align to the tapped downbeat: phase 0 sits at alignOffset.
+    const ph = ((((now - alignOffset.value) % loopMs) + loopMs) % loopMs) / loopMs;
     if (hitStarted.value === 1 && ph < prevPhase.value - 0.5) {
       rotation.value += 1;
       runOnJS(setRotCount)(rotation.value);
@@ -217,6 +222,30 @@ export default function OverlappingRings4() {
     tilt.value = withTiming(v, { duration: 550 });
   };
 
+  // Tap tempo: each centre tap is a beat. Average the recent intervals into a
+  // BPM, and align the clock so the tapped beat becomes the downbeat.
+  const tapTimesRef = useRef<number[]>([]);
+  const onTapTempo = (t: number) => {
+    const times = tapTimesRef.current;
+    const last = times.length ? times[times.length - 1] : 0;
+    if (times.length && t - last > TAP_RESET_MS) times.length = 0; // stale → restart
+    times.push(t);
+    if (times.length > 6) times.shift();
+    // align: this tap is the downbeat; rebaseline the step + rotation detectors.
+    alignOffset.value = t;
+    hitStarted.value = 0;
+    rotation.value = 0;
+    setRotCount(0);
+    if (times.length >= 2) {
+      let sum = 0;
+      for (let i = 1; i < times.length; i++) sum += times[i] - times[i - 1];
+      const beatMs = sum / (times.length - 1);
+      if (beatMs > 0) setTempo(60000 / beatMs);
+    }
+    tapPulse.value = 1;
+    tapPulse.value = withTiming(0, { duration: 260 });
+  };
+
   // Vertical swipe tilts the camera — down into the isometric stack, up back to
   // top-down.
   const vDrag = Gesture.Pan()
@@ -278,6 +307,10 @@ export default function OverlappingRings4() {
         const dx = e.x - cx;
         const dy = e.y - cy;
         const r = Math.sqrt(dx * dx + dy * dy);
+        if (r < CENTER_R) {
+          runOnJS(onTapTempo)(clock.value);
+          return;
+        }
         if (r < R - 42 || r > R + 42) return;
         const subdivW = MAX_M;
         const a = Math.atan2(dy, dx);
@@ -299,6 +332,12 @@ export default function OverlappingRings4() {
         goTilt(0);
       }
     });
+
+  // Centre tap-tempo target: fades out when tilted, flashes on each tap.
+  const centerStyle = useAnimatedStyle(() => ({
+    opacity: (1 - tilt.value) * (0.55 + 0.45 * tapPulse.value),
+    transform: [{ scale: 1 + 0.16 * tapPulse.value }],
+  }));
 
   return (
     <GestureDetector gesture={Gesture.Race(vDrag, longPress, tap)}>
@@ -323,6 +362,18 @@ export default function OverlappingRings4() {
             zIndex={i === current ? 100 : i}
           />
         ))}
+
+        {/* centre tap-tempo target (hit-tested in `tap`) */}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            { position: 'absolute', left: cx - CENTER_R, top: cy - CENTER_R, width: 2 * CENTER_R, height: 2 * CENTER_R, borderRadius: CENTER_R, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.4)', backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center', zIndex: 200 },
+            centerStyle,
+          ]}
+        >
+          <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: '800', letterSpacing: 1.5 }}>TAP</Text>
+        </Animated.View>
+
         <View style={styles.repTimer} pointerEvents="none">
           <Text style={styles.repText}>{rotCount % ROT_CYCLE}</Text>
         </View>

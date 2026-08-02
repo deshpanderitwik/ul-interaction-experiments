@@ -95,6 +95,13 @@ export const experiments: Experiment[] = [
         audio: true,
         load: () => import('./time/overlapping-rings-3'),
       },
+      {
+        id: 'overlapping-rings-4',
+        title: 'Overlapping Rings IV',
+        blurb: 'Overlapping Rings III with the pinch-zoom removed and the isometric camera back on a swipe instead of a double-tap. Drag up/down on the circumference to change subdivisions (4→32); swipe up/down from the interior to tilt into the isometric stack (down) and back (up); tap a coloured circle at the bottom to switch layers; long-press sets a slot’s rotation skip.',
+        audio: true,
+        load: () => import('./time/overlapping-rings-4'),
+      },
     ],
   },
   {

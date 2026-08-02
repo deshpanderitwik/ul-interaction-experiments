@@ -37,6 +37,13 @@ const SPREAD = 28; // radial px between co-located dots straddling the beat poin
 // Metric weight of a slot (0 weakest … strongest) = how many times 2 divides it;
 // the downbeat (0) is strongest. Computed on the 32-grid so a beat stays "big"
 // at any display resolution.
+function withAlpha(hex: string, a: number) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
 const LEVELS = 6;
 function metricLevel(s: number) {
   if (s === 0) return LEVELS - 1;
@@ -485,7 +492,9 @@ function RingLayer({
       <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: 2 * R, height: 2 * R }, slotStyle]}>
         {slots.map((slot) => {
           const sz = SLOT_SIZE[metricLevel(slot.p)];
-          return <View key={slot.p} style={{ position: 'absolute', left: slot.x - sz / 2, top: slot.y - sz / 2, width: sz, height: sz, borderRadius: sz / 2, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.7)', backgroundColor: 'rgba(255,255,255,0.1)' }} />;
+          // A bead in the ring's own colour, centred on the stroke, so it reads
+          // as a node the line swells into rather than a marker drawn on top.
+          return <View key={slot.p} style={{ position: 'absolute', left: slot.x - sz / 2, top: slot.y - sz / 2, width: sz, height: sz, borderRadius: sz / 2, borderWidth: 1.5, borderColor: withAlpha(color, 0.9), backgroundColor: withAlpha(color, 0.3) }} />;
         })}
       </Animated.View>
 
@@ -565,7 +574,11 @@ function ActiveDot({
   return (
     <>
       <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: x - RR, top: y - RR, width: 2 * RR, height: 2 * RR, borderRadius: RR, borderWidth: 2, borderColor: color }, rippleStyle]} />
-      <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: x - size / 2, top: y - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }, dotStyle]} />
+      {/* raised bead: solid fill in the ring's colour + a top-left specular
+          highlight, so it looks like it swelled up out of the line. */}
+      <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: x - size / 2, top: y - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff', overflow: 'hidden' }, dotStyle]}>
+        <View style={{ position: 'absolute', top: size * 0.13, left: size * 0.17, width: size * 0.44, height: size * 0.44, borderRadius: size * 0.22, backgroundColor: 'rgba(255,255,255,0.55)' }} />
+      </Animated.View>
       {every > 1 && (
         <View pointerEvents="none" style={{ position: 'absolute', left: x + size / 2 - 2, top: y - size / 2 - 10, minWidth: 14, paddingHorizontal: 3, height: 14, borderRadius: 7, backgroundColor: '#000', borderWidth: 1, borderColor: color, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color, fontSize: 9, fontWeight: '800' }}>{every}</Text>

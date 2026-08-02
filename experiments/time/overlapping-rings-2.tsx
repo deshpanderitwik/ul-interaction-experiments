@@ -184,12 +184,21 @@ export default function OverlappingRings2() {
   const setEveryAt = (ring: number, step: number, n: number) =>
     setEvery((prev) => prev.map((row, i) => (i === ring ? row.map((v, s) => (s === step ? n : v)) : row)));
   const openEdit = (ring: number, step: number) => {
-    if (!activeRef.current[ring][step]) return;
-    setEditing({ ring, step });
+    setEditing({ ring, step }); // works whether or not the dot is filled
   };
   const closeEdit = () => setEditing(null);
   const applyEvery = (n: number) => {
-    if (editing) setEveryAt(editing.ring, editing.step, n);
+    if (editing) {
+      const { ring, step } = editing;
+      setEveryAt(ring, step, n);
+      // picking a number also fills the dot if it wasn't already
+      setActive((prev) => {
+        if (prev[ring][step]) return prev;
+        const next = prev.map((row) => row.slice());
+        next[ring][step] = true;
+        return next;
+      });
+    }
     setEditing(null);
   };
   const goTilt = (v: number) => {
@@ -209,7 +218,8 @@ export default function OverlappingRings2() {
     }
   });
 
-  // Long-press an active dot (top-down) to edit how many rotations it skips.
+  // Long-press any dot (top-down) to set how many rotations it skips; picking a
+  // number fills the dot if it was empty.
   const longPress = Gesture.LongPress()
     .minDuration(380)
     .maxDistance(16)

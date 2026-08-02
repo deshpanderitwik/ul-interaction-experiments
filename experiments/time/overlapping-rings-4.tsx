@@ -242,7 +242,14 @@ export default function OverlappingRings4() {
       editBarTop.value = editAnchor.barTop;
       editNumX.value = editAnchor.numX;
       editNumTop.value = editAnchor.numTop;
-      editVel.value = velocityRef.current[editing.ring][editing.step];
+      // Active hit → start at its current velocity; a fresh hit → start at 0 and
+      // rise to the default (80%).
+      if (activeRef.current[editing.ring][editing.step]) {
+        editVel.value = velocityRef.current[editing.ring][editing.step];
+      } else {
+        editVel.value = 0;
+        editVel.value = withTiming(VEL_DEFAULT, { duration: 320 });
+      }
       editP.value = 0;
       editP.value = withSpring(1, { damping: 15, stiffness: 200, mass: 0.6 }); // dot → bar
     }
@@ -729,7 +736,9 @@ function VelocityBar({ color, editVel, editP, left, top, originX, originY }: { c
       transform: [{ translateX: (originX - barCX) * inv }],
     };
   });
-  const fillStyle = useAnimatedStyle(() => ({ height: Math.max(3, editVel.value * VBAR_H) }));
+  // Fill is always the velocity fraction of the CURRENT (morphing) bar height, so
+  // it reads correctly throughout the open/close instead of clipping to full.
+  const fillStyle = useAnimatedStyle(() => ({ height: editVel.value * VBAR_H * editP.value }));
   return (
     <Animated.View pointerEvents="none" style={[{ position: 'absolute', borderRadius: VBAR_W / 2, backgroundColor: 'rgba(255,255,255,0.14)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', overflow: 'hidden', justifyContent: 'flex-end' }, containerStyle]}>
       <Animated.View style={[{ width: '100%', backgroundColor: color, borderRadius: VBAR_W / 2 }, fillStyle]} />

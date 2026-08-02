@@ -106,7 +106,7 @@ export default function OverlappingRings4() {
   const subdiv = MAX_M; // fixed at 32
   const [active, setActive] = useState<boolean[][]>(() => RINGS.map(() => new Array(MAX_M).fill(false)));
   const [every, setEvery] = useState<number[][]>(() => RINGS.map(() => new Array(MAX_M).fill(1)));
-  const [velocity, setVelocity] = useState<number[][]>(() => RINGS.map(() => new Array(MAX_M).fill(VEL_DEFAULT)));
+  const [velocity, setVelocity] = useState<number[][]>(() => RINGS.map(() => new Array(MAX_M).fill(0)));
   const [editing, setEditing] = useState<{ ring: number; step: number } | null>(null);
   const [rotCount, setRotCount] = useState(0);
   const currentSV = useSharedValue(0);
@@ -242,14 +242,9 @@ export default function OverlappingRings4() {
       editBarTop.value = editAnchor.barTop;
       editNumX.value = editAnchor.numX;
       editNumTop.value = editAnchor.numTop;
-      // Active hit → start at its current velocity; a fresh hit → start at 0 and
-      // rise to the default (80%).
-      if (activeRef.current[editing.ring][editing.step]) {
-        editVel.value = velocityRef.current[editing.ring][editing.step];
-      } else {
-        editVel.value = 0;
-        editVel.value = withTiming(VEL_DEFAULT, { duration: 320 });
-      }
+      // Show the stored velocity — 0 for an inactive dot (stays empty until the
+      // user fills it), its current value for an active one.
+      editVel.value = velocityRef.current[editing.ring][editing.step];
       editP.value = 0;
       editP.value = withSpring(1, { damping: 15, stiffness: 200, mass: 0.6 }); // dot → bar
     }
@@ -257,6 +252,7 @@ export default function OverlappingRings4() {
   }, [editing, editAnchor]);
 
   const toggle = (ring: number, step: number) => {
+    const wasActive = activeRef.current[ring][step];
     setActive((prev) => {
       const next = prev.map((row) => row.slice());
       next[ring][step] = !next[ring][step];
@@ -264,15 +260,19 @@ export default function OverlappingRings4() {
     });
     setEvery((prev) => {
       const next = prev.map((row) => row.slice());
-      if (activeRef.current[ring][step]) next[ring][step] = 1;
+      if (wasActive) next[ring][step] = 1;
       return next;
     });
+    // Activating seeds the default velocity; deactivating clears it.
+    setVelocity((prev) => prev.map((row, i) => (i === ring ? row.map((v, s) => (s === step ? (wasActive ? 0 : VEL_DEFAULT) : v)) : row)));
   };
   const setEveryAt = (ring: number, step: number, n: number) =>
     setEvery((prev) => prev.map((row, i) => (i === ring ? row.map((v, s) => (s === step ? n : v)) : row)));
   const commitVel = (v: number) => {
     if (!editing) return;
     const { ring, step } = editing;
+    // A fresh dot only activates once it's actually been filled.
+    if (!activeRef.current[ring][step] && v <= 0.02) return;
     setVelocity((prev) => prev.map((row, i) => (i === ring ? row.map((val, s) => (s === step ? v : val)) : row)));
     setActive((prev) => {
       if (prev[ring][step]) return prev;
@@ -296,12 +296,19 @@ export default function OverlappingRings4() {
     if (!editing) return;
     const { ring, step } = editing;
     setEveryAt(ring, step, n);
+    const wasActive = activeRef.current[ring][step];
     setActive((prev) => {
       if (prev[ring][step]) return prev;
       const next = prev.map((row) => row.slice());
       next[ring][step] = true;
       return next;
     });
+    // Picking a number on a fresh dot activates it at the default velocity, and
+    // the bar fills up to show it.
+    if (!wasActive) {
+      setVelocity((prev) => prev.map((row, i) => (i === ring ? row.map((v, s) => (s === step ? VEL_DEFAULT : v)) : row)));
+      editVel.value = withTiming(VEL_DEFAULT, { duration: 220 });
+    }
   };
   const goTilt = (v: number) => {
     'worklet';
@@ -464,6 +471,7 @@ export default function OverlappingRings4() {
             color={r.color}
             active={active[i]}
             every={every[i]}
+            velocity={velocity[i]}
             fan={fan[i]}
             subdiv={subdiv}
             phase={phase}
@@ -550,6 +558,7 @@ function RingLayer({
   color,
   active,
   every,
+  velocity,
   fan,
   subdiv,
   phase,
@@ -568,6 +577,7 @@ function RingLayer({
   color: string;
   active: boolean[];
   every: number[];
+  velocity: number[];
   fan: Fan[];
   subdiv: number;
   phase: SharedValue<number>;
@@ -660,7 +670,7 @@ function RingLayer({
         return (
           <View key={p} pointerEvents="none">
             {extras}
-            <ActiveDot phase={phase} rotation={rotation} frac={slot.frac} every={every[p] || 1} x={dx} y={dy} size={sz} color={color} isCurrent={isCurrent} />
+            <ActiveDot phase={phase} rotation={rotation} frac={slot.frac} every={every[p] || 1} vel={velocity[p]} x={dx} y={dy} size={sz} color={color} isCurrent={isCurrent} />
           </View>
         );
       })}
@@ -673,6 +683,7 @@ function ActiveDot({
   rotation,
   frac,
   every,
+  vel,
   x,
   y,
   size,
@@ -683,12 +694,15 @@ function ActiveDot({
   rotation: SharedValue<number>;
   frac: number;
   every: number;
+  vel: number;
   x: number;
   y: number;
   size: number;
   color: string;
   isCurrent: boolean;
 }) {
+  // Louder hits read more solid: opacity tracks velocity (with a faint floor).
+  const dotOpacity = Math.max(0.12, Math.min(1, vel));
   const dotStyle = useAnimatedStyle(() => {
     const plays = every <= 1 || (rotation.value % ROT_CYCLE) % every === 0;
     let g = phase.value - frac;
@@ -707,8 +721,8 @@ function ActiveDot({
   return (
     <>
       <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: x - RR, top: y - RR, width: 2 * RR, height: 2 * RR, borderRadius: RR, borderWidth: 2, borderColor: color }, rippleStyle]} />
-      {/* filled socket: solid fill in the ring's colour */}
-      <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: x - size / 2, top: y - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }, dotStyle]} />
+      {/* filled socket: solid fill in the ring's colour, opacity = velocity */}
+      <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: x - size / 2, top: y - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: color, opacity: dotOpacity, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }, dotStyle]} />
       {every > 1 && (
         <View pointerEvents="none" style={{ position: 'absolute', left: x + size / 2 - 2, top: y - size / 2 - 10, minWidth: 14, paddingHorizontal: 3, height: 14, borderRadius: 7, backgroundColor: '#000', borderWidth: 1, borderColor: color, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color, fontSize: 9, fontWeight: '800' }}>{every}</Text>

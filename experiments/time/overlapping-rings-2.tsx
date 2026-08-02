@@ -30,7 +30,7 @@ const RINGS = [
   { color: '#ffd166' },
 ];
 const N = RINGS.length;
-const SPREAD = 20; // radial px between co-located dots straddling the beat point
+const SPREAD = 28; // radial px between co-located dots straddling the beat point
 
 function stepPos(s: number, R: number) {
   const a = (s / M) * 2 * Math.PI - Math.PI / 2;
@@ -45,8 +45,8 @@ function metricLevel(s: number) {
   if (s % 2 === 0) return 1; // 8th "ands"
   return 0; // weak 16ths
 }
-const ACT_SIZE = [10, 12, 15, 18, 22]; // activated dot diameter by level
-const SLOT_SIZE = [5, 6, 7, 9, 11]; // empty slot diameter by level
+const ACT_SIZE = [15, 18, 22, 26, 30]; // activated dot diameter by level
+const SLOT_SIZE = [12, 15, 18, 22, 26]; // empty slot diameter by level
 
 type Fan = { idx: number; total: number } | null;
 

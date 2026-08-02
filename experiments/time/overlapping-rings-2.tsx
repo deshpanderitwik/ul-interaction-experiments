@@ -1,11 +1,13 @@
 import { useClock } from '@shopify/react-native-skia';
 import { useNavigation } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useFrameCallback, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
+import { NoteSynth } from '../../modules/note-synth';
 import { useExperimentActive } from '../_host';
 import { useSharedClock } from '../combinations/clock';
+import { scaleFrequencies, useScale } from '../scale';
 import { useTempo } from '../tempo';
 
 // Time · Overlapping Rings II — each ring is a layer you build on. Tap a slot to
@@ -47,6 +49,9 @@ function metricLevel(s: number) {
 }
 const ACT_SIZE = [15, 18, 22, 26, 30]; // activated dot diameter by level
 const SLOT_SIZE = [12, 15, 18, 22, 26]; // empty slot diameter by level
+const RR = 26; // ripple base radius
+const PULSE = 0.1; // pop/ripple duration as a fraction of the loop
+const POP = 0.6; // extra scale at the moment the hand touches a dot
 
 type Fan = { idx: number; total: number } | null;
 
@@ -70,10 +75,28 @@ export default function OverlappingRings2() {
   const tilted = useSharedValue(0);
   const tempoSV = useSharedValue(tempo);
   const phase = useSharedValue(0);
+  const lastHit = useSharedValue(-1);
+  const hitStarted = useSharedValue(0);
   const focus = RINGS.map((_, i) => useSharedValue(i === 0 ? 1 : 0));
   useEffect(() => {
     tempoSV.value = tempo;
   }, [tempo, tempoSV]);
+
+  // One scale pitch per ring (inner low → outer high) for the note each hit sounds.
+  const scale = useScale();
+  const freqs = useMemo(() => {
+    const pool = scaleFrequencies(scale, 48, 76);
+    return RINGS.map((_, i) => pool[Math.round((i / (N - 1)) * (pool.length - 1))]);
+  }, [scale]);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const freqsRef = useRef(freqs);
+  freqsRef.current = freqs;
+  const fireStep = (s: number) => {
+    const a = activeRef.current;
+    const f = freqsRef.current;
+    for (let i = 0; i < N; i++) if (a[i][s]) NoteSynth?.pluck(f[i], 0.16, 0.5).catch(() => {});
+  };
   useEffect(() => {
     currentSV.value = current;
   }, [current, currentSV]);
@@ -94,9 +117,19 @@ export default function OverlappingRings2() {
     const beatMs = 60000 / tempoSV.value;
     const loopMs = LOOP_BARS * BEATS_PER_BAR * beatMs;
     phase.value = (now % loopMs) / loopMs;
+    // The hand reaches dot s when floor(phase*M) becomes s → fire that step.
+    const step = Math.floor(phase.value * M) % M;
+    if (hitStarted.value === 0) {
+      lastHit.value = step;
+      hitStarted.value = 1;
+    } else if (step !== lastHit.value) {
+      lastHit.value = step;
+      runOnJS(fireStep)(step);
+    }
   }, false);
 
   useEffect(() => {
+    hitStarted.value = 0; // re-baseline so it doesn't fire on (re)entry
     frame.setActive(live);
     return () => frame.setActive(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -286,13 +319,57 @@ function RingLayer({
         return (
           <View key={s} pointerEvents="none">
             {extras}
-            <View
-              style={{ position: 'absolute', left: dx - sz / 2, top: dy - sz / 2, width: sz, height: sz, borderRadius: sz / 2, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }}
-            />
+            <ActiveDot phase={phase} step={s} x={dx} y={dy} size={sz} color={color} isCurrent={isCurrent} />
           </View>
         );
       })}
     </Animated.View>
+  );
+}
+
+// A placed hit: pops and radiates a ripple each time the clock hand touches it —
+// keyed off the loop phase, so it re-fires every pass without any per-dot state.
+function ActiveDot({
+  phase,
+  step,
+  x,
+  y,
+  size,
+  color,
+  isCurrent,
+}: {
+  phase: SharedValue<number>;
+  step: number;
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+  isCurrent: boolean;
+}) {
+  const dotStyle = useAnimatedStyle(() => {
+    let g = phase.value - step / M;
+    g = g - Math.floor(g); // time since this dot was last touched (0..1 of a loop)
+    const w = g < PULSE ? 1 - g / PULSE : 0;
+    return { transform: [{ scale: 1 + POP * w }] };
+  });
+  const rippleStyle = useAnimatedStyle(() => {
+    let g = phase.value - step / M;
+    g = g - Math.floor(g);
+    if (g >= PULSE) return { opacity: 0, transform: [{ scale: 0.3 }] };
+    const t = g / PULSE;
+    return { opacity: (1 - t) * 0.5, transform: [{ scale: 0.3 + t * 1.4 }] };
+  });
+  return (
+    <>
+      <Animated.View
+        pointerEvents="none"
+        style={[{ position: 'absolute', left: x - RR, top: y - RR, width: 2 * RR, height: 2 * RR, borderRadius: RR, borderWidth: 2, borderColor: color }, rippleStyle]}
+      />
+      <Animated.View
+        pointerEvents="none"
+        style={[{ position: 'absolute', left: x - size / 2, top: y - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }, dotStyle]}
+      />
+    </>
   );
 }
 

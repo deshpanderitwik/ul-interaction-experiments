@@ -84,7 +84,8 @@ export const experiments: Experiment[] = [
       {
         id: 'overlapping-rings-2',
         title: 'Overlapping Rings II',
-        blurb: 'Each ring is a layer you build on: tap a slot to activate a point on the current ring, and every layer’s points composite, in colour, over the top-down view. Slide down to tilt into the isometric stack (each layer with its own points), slide up to return; swipe left/right to change the layer, tap a ring in the stack to land on it.',
+        blurb: 'Each ring is a layer you build on: tap a slot to activate a point on the current ring, and every layer’s points composite, in colour, over the top-down view. When the hand touches a hit it pops and radiates a ripple and sounds a soft note (one scale pitch per layer). Slide down to tilt into the isometric stack, slide up to return; swipe left/right to change the layer, tap a ring in the stack to land on it.',
+        audio: true,
         load: () => import('./time/overlapping-rings-2'),
       },
     ],

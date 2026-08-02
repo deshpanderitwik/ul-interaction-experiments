@@ -155,7 +155,7 @@ export default function OverlappingRings4() {
     const pos = rotation.value % ROT_CYCLE;
     const p = j * (MAX_M / subdivRef.current); // display index → data slot
     for (let i = 0; i < N; i++) {
-      if (!a[i][p]) continue;
+      if (!a[i][p] || vl[i][p] <= 0) continue; // velocity 0 = off
       const e = ev[i][p] || 1;
       if (pos % e === 0) {
         const gain = VEL_GAIN_MIN + vl[i][p] * (VEL_GAIN_MAX - VEL_GAIN_MIN);
@@ -210,11 +210,11 @@ export default function OverlappingRings4() {
 
   const fan = useMemo(() => {
     const perStep: number[][] = Array.from({ length: MAX_M }, () => []);
-    for (let i = 0; i < N; i++) for (let s = 0; s < MAX_M; s++) if (active[i][s]) perStep[s].push(i);
+    for (let i = 0; i < N; i++) for (let s = 0; s < MAX_M; s++) if (active[i][s] && velocity[i][s] > 0) perStep[s].push(i);
     const map: Fan[][] = RINGS.map(() => new Array<Fan>(MAX_M).fill(null));
     for (let s = 0; s < MAX_M; s++) perStep[s].forEach((li, idx) => (map[li][s] = { idx, total: perStep[s].length }));
     return map;
-  }, [active]);
+  }, [active, velocity]);
 
   // The selected dot's circumference point, plus the on-screen layout of the
   // velocity bar (centred on the dot) and the every-N number stack beside it.
@@ -271,13 +271,13 @@ export default function OverlappingRings4() {
   const commitVel = (v: number) => {
     if (!editing) return;
     const { ring, step } = editing;
-    // A fresh dot only activates once it's actually been filled.
-    if (!activeRef.current[ring][step] && v <= 0.02) return;
     setVelocity((prev) => prev.map((row, i) => (i === ring ? row.map((val, s) => (s === step ? v : val)) : row)));
+    // Velocity 0 = off: empty it out; any velocity turns the dot on.
     setActive((prev) => {
-      if (prev[ring][step]) return prev;
+      const on = v > 0.02;
+      if (prev[ring][step] === on) return prev;
       const next = prev.map((row) => row.slice());
-      next[ring][step] = true;
+      next[ring][step] = on;
       return next;
     });
   };
@@ -628,7 +628,7 @@ function RingLayer({
 
       {slots.map((slot) => {
         const p = slot.p;
-        if (!active[p]) return null;
+        if (!active[p] || velocity[p] <= 0) return null; // velocity 0 = off
         const info = fan[p];
         const total = info ? info.total : 1;
         const idx = info ? info.idx : 0;

@@ -1,7 +1,7 @@
 import { useClock } from '@shopify/react-native-skia';
 import { useNavigation } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useFrameCallback, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
 import { NoteSynth } from '../../modules/note-synth';
@@ -52,6 +52,9 @@ const SLOT_SIZE = [12, 15, 18, 22, 26]; // empty slot diameter by level
 const RR = 26; // ripple base radius
 const PULSE = 0.1; // pop/ripple duration as a fraction of the loop
 const POP = 0.6; // extra scale at the moment the hand touches a dot
+const EVERY_VALUES = [2, 4, 6, 8]; // the skip options in the editor
+const BTN = 54; // editor button diameter
+const BTN_GAP = 14;
 
 type Fan = { idx: number; total: number } | null;
 
@@ -72,7 +75,6 @@ export default function OverlappingRings2() {
   const [active, setActive] = useState<boolean[][]>(() => RINGS.map(() => new Array(M).fill(false)));
   const [every, setEvery] = useState<number[][]>(() => RINGS.map(() => new Array(M).fill(1))); // play once per N rotations
   const [editing, setEditing] = useState<{ ring: number; step: number } | null>(null);
-  const [editText, setEditText] = useState('1');
   const currentSV = useSharedValue(0);
   const editingSV = useSharedValue(0);
   const rotation = useSharedValue(0);
@@ -184,13 +186,11 @@ export default function OverlappingRings2() {
   const openEdit = (ring: number, step: number) => {
     if (!activeRef.current[ring][step]) return;
     setEditing({ ring, step });
-    setEditText(String(everyRef.current[ring][step] || 1));
   };
   const closeEdit = () => setEditing(null);
-  const onEditText = (t: string) => {
-    const c = t.replace(/[^0-9]/g, '').slice(0, 2);
-    setEditText(c);
-    if (editing) setEveryAt(editing.ring, editing.step, c === '' ? 1 : Math.max(1, parseInt(c, 10)));
+  const applyEvery = (n: number) => {
+    if (editing) setEveryAt(editing.ring, editing.step, n);
+    setEditing(null);
   };
   const goTilt = (v: number) => {
     'worklet';
@@ -230,7 +230,20 @@ export default function OverlappingRings2() {
     .maxDistance(16)
     .onEnd((e) => {
       if (editingSV.value === 1) {
-        runOnJS(closeEdit)();
+        // hit-test the 2/4/6/8 buttons; a tap elsewhere dismisses
+        const rowW = EVERY_VALUES.length * BTN + (EVERY_VALUES.length - 1) * BTN_GAP;
+        const startX = cx - rowW / 2;
+        const by = cy - BTN / 2;
+        let picked = 0;
+        for (let i = 0; i < EVERY_VALUES.length; i++) {
+          const bx = startX + i * (BTN + BTN_GAP);
+          if (e.x >= bx && e.x <= bx + BTN && e.y >= by && e.y <= by + BTN) {
+            picked = EVERY_VALUES[i];
+            break;
+          }
+        }
+        if (picked > 0) runOnJS(applyEvery)(picked);
+        else runOnJS(closeEdit)();
         return;
       }
       if (tilted.value === 0) {
@@ -289,21 +302,25 @@ export default function OverlappingRings2() {
           ))}
         </View>
 
-        {/* center editor for "play every N rotations" */}
+        {/* center overlay: pick how many rotations this dot skips. Purely visual —
+            the tap gesture hit-tests the buttons, so no gesture conflict. */}
         {editing && (
-          <View style={{ position: 'absolute', left: cx - 70, top: cy - 44, width: 140, alignItems: 'center' }}>
-            <TextInput
-              value={editText}
-              onChangeText={onEditText}
-              keyboardType="number-pad"
-              returnKeyType="done"
-              autoFocus
-              selectTextOnFocus
-              onSubmitEditing={closeEdit}
-              onBlur={closeEdit}
-              style={styles.editNum}
-            />
-            <Text style={styles.editLabel}>every {editText || 1} {Number(editText || 1) === 1 ? 'rotation' : 'rotations'}</Text>
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.4)' }]} />
+            <Text style={[styles.editLabel, { top: cy - BTN / 2 - 30 }]}>play every … rotations</Text>
+            {EVERY_VALUES.map((v, i) => {
+              const rowW = EVERY_VALUES.length * BTN + (EVERY_VALUES.length - 1) * BTN_GAP;
+              const bx = cx - rowW / 2 + i * (BTN + BTN_GAP);
+              const isCur = editing && every[editing.ring][editing.step] === v;
+              return (
+                <View
+                  key={v}
+                  style={{ position: 'absolute', left: bx, top: cy - BTN / 2, width: BTN, height: BTN, borderRadius: BTN / 2, borderWidth: 2, borderColor: isCur ? '#fff' : 'rgba(255,255,255,0.4)', backgroundColor: isCur ? 'rgba(255,255,255,0.16)' : 'transparent', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 22, fontWeight: '600' }}>{v}</Text>
+                </View>
+              );
+            })}
           </View>
         )}
       </View>
@@ -472,6 +489,5 @@ function ActiveDot({
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
   pager: { position: 'absolute', bottom: 60, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  editNum: { color: '#fff', fontSize: 52, fontWeight: '200', textAlign: 'center', minWidth: 90, fontVariant: ['tabular-nums'] },
-  editLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
+  editLabel: { position: 'absolute', left: 0, right: 0, textAlign: 'center', color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
 });

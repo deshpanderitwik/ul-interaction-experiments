@@ -75,6 +75,7 @@ export default function OverlappingRings2() {
   const [active, setActive] = useState<boolean[][]>(() => RINGS.map(() => new Array(M).fill(false)));
   const [every, setEvery] = useState<number[][]>(() => RINGS.map(() => new Array(M).fill(1))); // play once per N rotations
   const [editing, setEditing] = useState<{ ring: number; step: number } | null>(null);
+  const [rotCount, setRotCount] = useState(0); // completed spins, for the per-dot cycle counter
   const currentSV = useSharedValue(0);
   const editingSV = useSharedValue(0);
   const rotation = useSharedValue(0);
@@ -133,7 +134,10 @@ export default function OverlappingRings2() {
     const beatMs = 60000 / tempoSV.value;
     const loopMs = LOOP_BARS * BEATS_PER_BAR * beatMs;
     const p = (now % loopMs) / loopMs;
-    if (hitStarted.value === 1 && p < prevPhase.value - 0.5) rotation.value += 1; // a full spin elapsed
+    if (hitStarted.value === 1 && p < prevPhase.value - 0.5) {
+      rotation.value += 1; // a full spin elapsed
+      runOnJS(setRotCount)(rotation.value);
+    }
     prevPhase.value = p;
     phase.value = p;
     // The hand reaches dot s when floor(phase*M) becomes s → fire that step.
@@ -293,6 +297,7 @@ export default function OverlappingRings2() {
             color={r.color}
             active={active[i]}
             every={every[i]}
+            rotCount={rotCount}
             fan={fan[i]}
             phase={phase}
             rotation={rotation}
@@ -344,6 +349,7 @@ function RingLayer({
   color,
   active,
   every,
+  rotCount,
   fan,
   phase,
   rotation,
@@ -359,6 +365,7 @@ function RingLayer({
   color: string;
   active: boolean[];
   every: number[];
+  rotCount: number;
   fan: Fan[];
   phase: SharedValue<number>;
   rotation: SharedValue<number>;
@@ -429,7 +436,7 @@ function RingLayer({
         return (
           <View key={s} pointerEvents="none">
             {extras}
-            <ActiveDot phase={phase} rotation={rotation} step={s} every={every[s] || 1} x={dx} y={dy} size={sz} color={color} isCurrent={isCurrent} />
+            <ActiveDot phase={phase} rotation={rotation} rotCount={rotCount} step={s} every={every[s] || 1} x={dx} y={dy} size={sz} color={color} isCurrent={isCurrent} />
           </View>
         );
       })}
@@ -442,6 +449,7 @@ function RingLayer({
 function ActiveDot({
   phase,
   rotation,
+  rotCount,
   step,
   every,
   x,
@@ -452,6 +460,7 @@ function ActiveDot({
 }: {
   phase: SharedValue<number>;
   rotation: SharedValue<number>;
+  rotCount: number;
   step: number;
   every: number;
   x: number;
@@ -487,8 +496,10 @@ function ActiveDot({
         style={[{ position: 'absolute', left: x - size / 2, top: y - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }, dotStyle]}
       />
       {every > 1 && (
-        <View pointerEvents="none" style={{ position: 'absolute', left: x + size / 2 - 2, top: y - size / 2 - 10, minWidth: 14, paddingHorizontal: 3, height: 14, borderRadius: 7, backgroundColor: '#000', borderWidth: 1, borderColor: color, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color, fontSize: 9, fontWeight: '800' }}>{every}</Text>
+        <View pointerEvents="none" style={{ position: 'absolute', left: x + size / 2 - 2, top: y - size / 2 - 11, minWidth: 22, paddingHorizontal: 4, height: 15, borderRadius: 7.5, backgroundColor: '#000', borderWidth: 1, borderColor: color, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color, fontSize: 9, fontWeight: '800', fontVariant: ['tabular-nums'] }}>
+            {(rotCount % every) + 1}/{every}
+          </Text>
         </View>
       )}
     </>

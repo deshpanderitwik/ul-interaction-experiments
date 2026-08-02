@@ -105,6 +105,8 @@ export default function OverlappingRings3() {
   const pStartTY = useSharedValue(0);
   const pOriginX = useSharedValue(0);
   const pOriginY = useSharedValue(0);
+  const bandStart = useSharedValue(0); // 1 if a horizontal drag began on the dot band
+  const panStartTX = useSharedValue(0); // camera translateX at the start of an interior drag
   const focus = RINGS.map((_, i) => useSharedValue(i === 0 ? 1 : 0));
   useEffect(() => {
     tempoSV.value = tempo;
@@ -273,12 +275,32 @@ export default function OverlappingRings3() {
       }
     });
 
-  // Swipe left/right = change the layer. Horizontal-only.
-  const hSwipe = Gesture.Pan()
+  // Horizontal drag. Over the dot band (or in the isometric stack) it swipes to
+  // change the layer; over the circle's empty interior it pans the zoomed camera
+  // instead, so you can move around a close-up without flipping rings.
+  const hPan = Gesture.Pan()
     .activeOffsetX([-14, 14])
     .failOffsetY([-28, 28])
+    .onBegin((e) => {
+      const Lx = scx + (e.x - scx - zoomTX.value) / zoomScale.value;
+      const Ly = scy + (e.y - scy - zoomTY.value) / zoomScale.value;
+      const dx = Lx - cx;
+      const dy = Ly - cy;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      bandStart.value = tilted.value !== 0 || (r > R - 42 && r < R + 42) ? 1 : 0;
+      panStartTX.value = zoomTX.value;
+    })
+    .onUpdate((e) => {
+      if (bandStart.value === 1) return; // dot band → ring change (handled onEnd)
+      if (zoomScale.value <= 1.0001) return; // nothing to pan at 1x
+      const maxTX = (zoomScale.value - 1) * scx;
+      let tx = panStartTX.value + e.translationX;
+      if (tx > maxTX) tx = maxTX;
+      else if (tx < -maxTX) tx = -maxTX;
+      zoomTX.value = tx;
+    })
     .onEnd((e) => {
-      if (Math.abs(e.translationX) > 40) runOnJS(cycle)(e.translationX < 0 ? 1 : -1);
+      if (bandStart.value === 1 && Math.abs(e.translationX) > 40) runOnJS(cycle)(e.translationX < 0 ? 1 : -1);
     });
 
   // Double-tap = toggle the isometric camera.
@@ -360,7 +382,7 @@ export default function OverlappingRings3() {
   }));
 
   return (
-    <GestureDetector gesture={Gesture.Race(pinch, vDrag, hSwipe, longPress, Gesture.Exclusive(doubleTap, tap))}>
+    <GestureDetector gesture={Gesture.Race(pinch, vDrag, hPan, longPress, Gesture.Exclusive(doubleTap, tap))}>
       <View style={styles.fill}>
         <Text style={styles.subdivLabel} pointerEvents="none">
           {subdiv} subdivisions

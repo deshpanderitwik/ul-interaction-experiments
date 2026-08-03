@@ -111,6 +111,15 @@ export const experiments: Experiment[] = [
     accent: '#ffd166',
     audio: true,
     load: () => import('./combinations'),
+    variations: [
+      {
+        id: 'ring-joining',
+        title: 'Ring Joining',
+        blurb: 'Combine several Overlapping Rings IV stacks on one clock. The surface shows each stack top-down as a small live token; a + adds one (up to four) and dragging a token sideways off-screen removes it. Pinch open on a token to zoom into the full Rings IV editor, pinch closed to pop back out — every stack keeps playing, phase-locked.',
+        audio: true,
+        load: () => import('./time/ring-joining'),
+      },
+    ],
   },
   {
     id: 'drums',

@@ -66,7 +66,7 @@ export default function RingJoining() {
   const [zoom, setZoom] = useState<number | null>(null);
   const [rotCount, setRotCount] = useState(0);
   const [draggingId, setDraggingId] = useState<number | null>(null);
-  const [activeMovement, setActiveMovement] = useState(0); // which stack is currently playing
+  const [activeId, setActiveId] = useState(0); // id of the stack currently playing (user-selected)
 
   const phase = useSharedValue(0);
   const rotation = useSharedValue(0);
@@ -79,8 +79,6 @@ export default function RingJoining() {
   const zoomP = useSharedValue(0);
   const dragX = useSharedValue(0);
   const dragAbsY = useSharedValue(0); // finger y for the dragged token
-  const movementSV = useSharedValue(0); // current movement on the UI thread
-  const nStacksSV = useSharedValue(1); // stack count for the worklet
 
   useEffect(() => {
     tempoSV.value = tempo;
@@ -102,21 +100,17 @@ export default function RingJoining() {
   const draggingIdRef = useRef<number | null>(null);
   const zoomRef = useRef<number | null>(null);
   zoomRef.current = zoom;
+  const activeIdRef = useRef(0);
+  activeIdRef.current = activeId;
 
-  useEffect(() => {
-    nStacksSV.value = stacks.length;
-  }, [stacks.length, nStacksSV]);
-
-  // Sequential movements: one stack plays per full rotation cycle (16 rotations),
-  // then the next, looping. While a stack is zoomed in (being edited) it solos so
-  // you can hear your edits.
+  // Only the active stack plays (user-selects it by tapping a token). While a
+  // stack is zoomed in (being edited) it solos so you can hear your edits.
   const fireAll = (step: number) => {
     const list = stacksRef.current;
     if (!list.length) return;
     const pos = rotation.value % ROT_CYCLE;
     const z = zoomRef.current;
-    const idx = z != null && z >= 0 && z < list.length ? z : Math.floor(rotation.value / ROT_CYCLE) % list.length;
-    const st = list[idx].data;
+    const st = (z != null && z >= 0 && z < list.length ? list[z] : list.find((s) => s.id === activeIdRef.current) ?? list[0]).data;
     const f = freqsRef.current;
     for (let i = 0; i < N; i++) {
       if (!st.active[i][step] || st.velocity[i][step] <= 0) continue;
@@ -137,12 +131,6 @@ export default function RingJoining() {
     if (hitStarted.value === 1 && ph < prevPhase.value - 0.5) {
       rotation.value += 1;
       runOnJS(setRotCount)(rotation.value);
-      const len = nStacksSV.value > 0 ? nStacksSV.value : 1;
-      const mv = Math.floor(rotation.value / ROT_CYCLE) % len;
-      if (mv !== movementSV.value) {
-        movementSV.value = mv;
-        runOnJS(setActiveMovement)(mv);
-      }
     }
     prevPhase.value = ph;
     phase.value = ph;
@@ -208,9 +196,7 @@ export default function RingJoining() {
     alignOffset.value = t;
     hitStarted.value = 0;
     rotation.value = 0;
-    movementSV.value = 0;
     setRotCount(0);
-    setActiveMovement(0);
     if (times.length >= 2) {
       let sum = 0;
       for (let i = 1; i < times.length; i++) sum += times[i] - times[i - 1];
@@ -298,7 +284,13 @@ export default function RingJoining() {
   };
   const finishRemove = () => {
     const id = draggingIdRef.current;
-    if (id != null) setStacks((prev) => (prev.length > 1 ? prev.filter((s) => s.id !== id) : prev));
+    if (id != null) {
+      const remaining = stacksRef.current.filter((s) => s.id !== id);
+      if (remaining.length) {
+        setStacks(remaining);
+        if (id === activeIdRef.current) setActiveId(remaining[0].id); // active removed → pick another
+      }
+    }
     dragX.value = 0;
     clearDragging();
   };
@@ -322,11 +314,28 @@ export default function RingJoining() {
       if (Math.abs(e.translationX) > 0.32 * width) runOnJS(finishRemove)();
       else runOnJS(dropDrag)();
     });
+  // Tap the + to add, or tap a token to make it the active (playing) stack.
+  const surfaceHit = (x: number, y: number) => {
+    if (Math.hypot(x - plusX, y - plusY) <= plusR + 12) {
+      addStack();
+      return;
+    }
+    const s = surfaceRef.current;
+    let best = -1;
+    let bd = 1e9;
+    s.forEach((t, i) => {
+      const d = Math.hypot(x - t.x, y - t.y);
+      if (d < t.R + 14 && d < bd) {
+        bd = d;
+        best = i;
+      }
+    });
+    if (best >= 0) setActiveId(stacksRef.current[best].id);
+  };
   const surfaceTap = Gesture.Tap()
     .maxDistance(16)
     .onEnd((e) => {
-      const d = Math.hypot(e.x - plusX, e.y - plusY);
-      if (d <= plusR + 12) runOnJS(addStack)();
+      runOnJS(surfaceHit)(e.x, e.y);
     });
   const surfaceGesture = Gesture.Simultaneous(pinch, Gesture.Race(drag, surfaceTap));
 
@@ -351,17 +360,13 @@ export default function RingJoining() {
             );
           })}
           {stacks.map((st, i) => (
-            <StackMini key={st.id} data={st.data} pos={surface[i]} phase={phase} playing={i === activeMovement % stacks.length} dragging={draggingId === st.id} dragX={dragX} dragAbsY={dragAbsY} />
+            <StackMini key={st.id} data={st.data} pos={surface[i]} phase={phase} playing={st.id === activeId} dragging={draggingId === st.id} dragX={dragX} dragAbsY={dragAbsY} />
           ))}
 
           {/* add-stack button */}
           <View pointerEvents="none" style={{ position: 'absolute', left: plusX - plusR, top: plusY - plusR, width: 2 * plusR, height: 2 * plusR, borderRadius: plusR, borderWidth: 2, borderColor: canAdd ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' }}>
             <Text style={{ color: canAdd ? '#fff' : 'rgba(255,255,255,0.25)', fontSize: 30, fontWeight: '300', marginTop: -3 }}>+</Text>
           </View>
-
-          <Text pointerEvents="none" style={styles.hint}>
-            {stacks.length === 1 ? 'pinch a stack to edit · + to add' : 'pinch to edit · drag to reorder · off-screen to remove'}
-          </Text>
         </Animated.View>
       </GestureDetector>
 
@@ -766,5 +771,4 @@ const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
   repTimer: { position: 'absolute', bottom: 108, left: 0, right: 0, alignItems: 'center' },
   repText: { color: '#fff', fontSize: 30, fontWeight: '300', fontVariant: ['tabular-nums'] },
-  hint: { position: 'absolute', top: 58, left: 0, right: 0, textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
 });

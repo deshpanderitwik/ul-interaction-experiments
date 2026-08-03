@@ -205,11 +205,11 @@ export default function RingJoining() {
   const enterZoom = (i: number) => {
     setZoom(i);
     zoomP.value = 0;
-    zoomP.value = withTiming(1, { duration: 280 });
+    zoomP.value = withTiming(1, { duration: 380 });
   };
   const clearZoom = () => setZoom(null);
   const exitZoom = () => {
-    zoomP.value = withTiming(0, { duration: 260 }, (fin) => {
+    zoomP.value = withTiming(0, { duration: 340 }, (fin) => {
       'worklet';
       if (fin) runOnJS(clearZoom)();
     });
@@ -441,16 +441,23 @@ export default function RingJoining() {
   const zt = zoom != null && surface[zoom] ? surface[zoom] : null;
   const s0 = zt ? zt.R / fullR : 1; // token size relative to full
   const tokenY = zt ? zt.y : cyEditor;
-  const surfaceStyle = useAnimatedStyle(() => ({ opacity: 1 - zoomP.value, transform: [{ scale: 1 + 0.06 * zoomP.value }] }));
+  // Staggered choreography: the ring expands over the first RING_END of the zoom,
+  // then the chrome UI fades in over the rest; reversed on the way out.
+  const RING_END = 0.6;
+  const surfaceStyle = useAnimatedStyle(() => {
+    const rp = Math.min(1, zoomP.value / RING_END);
+    return { opacity: 1 - rp, transform: [{ scale: 1 + 0.06 * rp }] };
+  });
   const editorOuterStyle = useAnimatedStyle(() => {
-    const s = s0 + (1 - s0) * zoomP.value;
-    const ty = cyEditor + (tokenY - cyEditor) * (1 - zoomP.value) - scy - s * (cyEditor - scy);
+    const rp = Math.min(1, zoomP.value / RING_END);
+    const s = s0 + (1 - s0) * rp;
+    const ty = cyEditor + (tokenY - cyEditor) * (1 - rp) - scy - s * (cyEditor - scy);
     return { transform: [{ translateY: ty }] };
   });
   const editorInnerStyle = useAnimatedStyle(() => {
-    const s = s0 + (1 - s0) * zoomP.value;
-    // Mostly opaque immediately — the motion is the scale/grow, not a crossfade.
-    return { opacity: Math.min(1, 0.7 + zoomP.value * 4), transform: [{ scale: s }] };
+    const rp = Math.min(1, zoomP.value / RING_END);
+    const s = s0 + (1 - s0) * rp;
+    return { opacity: Math.min(1, 0.7 + rp * 5), transform: [{ scale: s }] };
   });
 
   return (
@@ -488,6 +495,7 @@ export default function RingJoining() {
           <StackEditor
             data={stacks[zoom].data}
             setData={(u) => setStackData(zoom, u)}
+            zoomP={zoomP}
             phase={phase}
             rotation={rotation}
             rotCount={rotCount}
@@ -594,6 +602,7 @@ function StackMini({
 function StackEditor({
   data,
   setData,
+  zoomP,
   phase,
   rotation,
   rotCount,
@@ -605,6 +614,7 @@ function StackEditor({
 }: {
   data: StackData;
   setData: (u: (s: StackData) => StackData) => void;
+  zoomP: SharedValue<number>;
   phase: SharedValue<number>;
   rotation: SharedValue<number>;
   rotCount: number;
@@ -836,6 +846,9 @@ function StackEditor({
   const centerStyle = useAnimatedStyle(() => ({ opacity: 1 - tilt.value, transform: [{ scale: 1 + 0.16 * tapPulse.value }] }));
   const numbersStyle = useAnimatedStyle(() => ({ opacity: editP.value, transform: [{ scale: 0.8 + 0.2 * editP.value }] }));
   const scrimStyle = useAnimatedStyle(() => ({ opacity: editP.value }));
+  // Chrome (BPM hub, counter, ring picker) fades in only after the ring has
+  // finished expanding, and fades out first on the way back.
+  const chromeStyle = useAnimatedStyle(() => ({ opacity: Math.max(0, Math.min(1, (zoomP.value - 0.6) / 0.4)) }));
 
   return (
     <GestureDetector gesture={Gesture.Simultaneous(pinchExit, Gesture.Race(vDrag, longPress, tap))}>
@@ -863,29 +876,31 @@ function StackEditor({
           />
         ))}
 
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            { position: 'absolute', left: cx - CENTER_R, top: cy - CENTER_R, width: 2 * CENTER_R, height: 2 * CENTER_R, borderRadius: CENTER_R, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.4)', backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', zIndex: 200 },
-            centerStyle,
-          ]}
-        >
-          <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700', fontVariant: ['tabular-nums'] }}>{tempo}</Text>
-          <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 9, fontWeight: '800', letterSpacing: 1.5, marginTop: -1 }}>BPM</Text>
+        {/* chrome fades in after the ring expands, out before it contracts */}
+        <Animated.View style={[StyleSheet.absoluteFill, chromeStyle]} pointerEvents="none">
+          <Animated.View
+            style={[
+              { position: 'absolute', left: cx - CENTER_R, top: cy - CENTER_R, width: 2 * CENTER_R, height: 2 * CENTER_R, borderRadius: CENTER_R, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.4)', backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', zIndex: 200 },
+              centerStyle,
+            ]}
+          >
+            <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700', fontVariant: ['tabular-nums'] }}>{tempo}</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 9, fontWeight: '800', letterSpacing: 1.5, marginTop: -1 }}>BPM</Text>
+          </Animated.View>
+
+          <View style={styles.repTimer}>
+            <Text style={styles.repText}>{rotCount % ROT_CYCLE}</Text>
+          </View>
+
+          <View>
+            {RINGS.map((r, i) => (
+              <View
+                key={i}
+                style={{ position: 'absolute', left: pickStartX + i * (PICK_SIZE + PICK_GAP), top: pickTop, width: PICK_SIZE, height: PICK_SIZE, borderRadius: PICK_SIZE / 2, backgroundColor: r.color, opacity: i === current ? 1 : 0.32, borderWidth: i === current ? 3 : 0, borderColor: '#fff' }}
+              />
+            ))}
+          </View>
         </Animated.View>
-
-        <View style={styles.repTimer} pointerEvents="none">
-          <Text style={styles.repText}>{rotCount % ROT_CYCLE}</Text>
-        </View>
-
-        <View pointerEvents="none">
-          {RINGS.map((r, i) => (
-            <View
-              key={i}
-              style={{ position: 'absolute', left: pickStartX + i * (PICK_SIZE + PICK_GAP), top: pickTop, width: PICK_SIZE, height: PICK_SIZE, borderRadius: PICK_SIZE / 2, backgroundColor: r.color, opacity: i === current ? 1 : 0.32, borderWidth: i === current ? 3 : 0, borderColor: '#fff' }}
-            />
-          ))}
-        </View>
 
         {editing && editAnchor && (
           <View style={[StyleSheet.absoluteFill, { zIndex: 1000 }]} pointerEvents="none">

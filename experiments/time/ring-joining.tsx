@@ -3,7 +3,7 @@ import { useNavigation } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { runOnJS, useAnimatedStyle, useFrameCallback, useSharedValue, withSpring, withTiming, type SharedValue } from 'react-native-reanimated';
+import Animated, { runOnJS, useAnimatedStyle, useFrameCallback, useSharedValue, withDelay, withSequence, withSpring, withTiming, type SharedValue } from 'react-native-reanimated';
 import { NoteSynth } from '../../modules/note-synth';
 import { useExperimentActive } from '../_host';
 import { useSharedClock } from '../combinations/clock';
@@ -49,6 +49,10 @@ import {
 // and pinch closed to pop back out to the surface.
 
 const MAX_STACKS = 4;
+// Staged add/remove: rings land, then the new ring grows, then the connector draws.
+const LAND_MS = 260; // existing rings spring to their new slots
+const GROW_MS = 220; // new ring grows in from zero
+const DRAW_MS = 180; // connector draws in
 
 type Stack = { id: number; data: StackData };
 
@@ -66,7 +70,7 @@ export default function RingJoining() {
   const [zoom, setZoom] = useState<number | null>(null);
   const [rotCount, setRotCount] = useState(0);
   const [draggingId, setDraggingId] = useState<number | null>(null);
-  const [dragActive, setDragActive] = useState(false); // finger currently down on a token
+  const [lastAddedId, setLastAddedId] = useState<number | null>(null); // token to delay-grow on add
   const [activeId, setActiveId] = useState(0); // id of the stack currently playing (user-selected)
 
   const phase = useSharedValue(0);
@@ -80,6 +84,7 @@ export default function RingJoining() {
   const zoomP = useSharedValue(0);
   const dragX = useSharedValue(0);
   const dragAbsY = useSharedValue(0); // finger y for the dragged token
+  const connDraw = useSharedValue(1); // connector draw progress (0 hidden … 1 drawn)
 
   useEffect(() => {
     tempoSV.value = tempo;
@@ -175,7 +180,14 @@ export default function RingJoining() {
   const canAdd = stacks.length < MAX_STACKS;
 
   const setStackData = (i: number, updater: (s: StackData) => StackData) => setStacks((prev) => prev.map((s, idx) => (idx === i ? { ...s, data: updater(s.data) } : s)));
-  const addStack = () => setStacks((prev) => (prev.length >= MAX_STACKS ? prev : [...prev, { id: nextId.current++, data: emptyStack() }]));
+  const addStack = () => {
+    if (stacks.length >= MAX_STACKS) return;
+    const id = nextId.current++;
+    setLastAddedId(id); // this token delay-grows after the others land
+    setStacks((prev) => [...prev, { id, data: emptyStack() }]); // existing tokens spring to new slots
+    // sequence: undraw, wait for land + grow, then draw the connectors
+    connDraw.value = withSequence(withTiming(0, { duration: 110 }), withDelay(LAND_MS + GROW_MS - 110, withTiming(1, { duration: DRAW_MS })));
+  };
 
   const enterZoom = (i: number) => {
     setZoom(i);
@@ -245,7 +257,7 @@ export default function RingJoining() {
     const id = stacksRef.current[best].id;
     draggingIdRef.current = id;
     setDraggingId(id);
-    setDragActive(true);
+    connDraw.value = withTiming(0, { duration: 120 }); // undraw connectors while dragging
   };
   // Live reorder: as the dragged token crosses a slot centre, move it there so
   // the others snap around it into the vertical column.
@@ -277,7 +289,6 @@ export default function RingJoining() {
     setDraggingId(null);
   };
   const dropDrag = () => {
-    setDragActive(false); // finger up → bring the connectors straight back
     const id = draggingIdRef.current;
     const list = stacksRef.current;
     const idx = list.findIndex((s) => s.id === id);
@@ -288,9 +299,11 @@ export default function RingJoining() {
       'worklet';
       if (fin) runOnJS(clearDragging)();
     });
+    connDraw.value = withTiming(1, { duration: 140 }); // displaced (not removed) → connectors come straight back
   };
   const finishRemove = () => {
-    setDragActive(false);
+    // reverse of add: connectors already undrawn (during drag), the ring is gone
+    // (dragged off), the rest land back, then the connectors redraw.
     const id = draggingIdRef.current;
     if (id != null) {
       const remaining = stacksRef.current.filter((s) => s.id !== id);
@@ -301,6 +314,7 @@ export default function RingJoining() {
     }
     dragX.value = 0;
     clearDragging();
+    connDraw.value = withDelay(LAND_MS, withTiming(1, { duration: DRAW_MS }));
   };
 
   const pinch = Gesture.Pinch().onEnd((e) => {
@@ -354,22 +368,16 @@ export default function RingJoining() {
     <View style={styles.fill}>
       <GestureDetector gesture={surfaceGesture}>
         <Animated.View style={[StyleSheet.absoluteFill, surfaceStyle]} pointerEvents={zoom == null ? 'auto' : 'none'}>
-          {/* connectors joining consecutive stacks (hidden only while a finger is
-              actively dragging; they return the instant it lifts) */}
-          {!dragActive && surface.slice(0, -1).map((s, i) => {
+          {/* connectors joining consecutive stacks; drawn/undrawn via connDraw */}
+          {surface.slice(0, -1).map((s, i) => {
             const next = surface[i + 1];
             const y1 = s.y + s.R;
             const y2 = next.y - next.R;
             if (y2 <= y1) return null;
-            return (
-              <View key={`c${i}`} pointerEvents="none" style={{ position: 'absolute', left: width / 2 - 1.5, top: y1, width: 3, height: y2 - y1, backgroundColor: 'rgba(255,255,255,0.28)' }}>
-                <View style={{ position: 'absolute', left: -3, top: -4, width: 9, height: 9, borderRadius: 4.5, backgroundColor: 'rgba(255,255,255,0.5)' }} />
-                <View style={{ position: 'absolute', left: -3, bottom: -4, width: 9, height: 9, borderRadius: 4.5, backgroundColor: 'rgba(255,255,255,0.5)' }} />
-              </View>
-            );
+            return <Connector key={`c${i}`} x={width / 2} y1={y1} y2={y2} connDraw={connDraw} />;
           })}
           {stacks.map((st, i) => (
-            <StackMini key={st.id} data={st.data} pos={surface[i]} phase={phase} playing={st.id === activeId} dragging={draggingId === st.id} dragX={dragX} dragAbsY={dragAbsY} />
+            <StackMini key={st.id} data={st.data} pos={surface[i]} phase={phase} playing={st.id === activeId} dragging={draggingId === st.id} enterDelay={st.id === lastAddedId ? LAND_MS : 0} dragX={dragX} dragAbsY={dragAbsY} />
           ))}
 
           {/* add-stack button */}
@@ -402,12 +410,25 @@ export default function RingJoining() {
 // A live top-down token: one faint ring, the composite of active dots (colour +
 // opacity = velocity), and a sweeping hand. Purpose-built for the small scale so
 // strokes stay crisp. When dragged it follows the finger and fades toward the edge.
+// The connector between two stacks; draws in/out from the top via connDraw.
+function Connector({ x, y1, y2, connDraw }: { x: number; y1: number; y2: number; connDraw: SharedValue<number> }) {
+  const full = y2 - y1;
+  const style = useAnimatedStyle(() => ({ opacity: Math.min(1, connDraw.value * 1.4), height: full * connDraw.value }));
+  return (
+    <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: x - 1.5, top: y1, width: 3, backgroundColor: 'rgba(255,255,255,0.28)' }, style]}>
+      <View style={{ position: 'absolute', left: -3, top: -4, width: 9, height: 9, borderRadius: 4.5, backgroundColor: 'rgba(255,255,255,0.5)' }} />
+      <View style={{ position: 'absolute', left: -3, bottom: -4, width: 9, height: 9, borderRadius: 4.5, backgroundColor: 'rgba(255,255,255,0.5)' }} />
+    </Animated.View>
+  );
+}
+
 function StackMini({
   data,
   pos,
   phase,
   playing,
   dragging,
+  enterDelay,
   dragX,
   dragAbsY,
 }: {
@@ -416,6 +437,7 @@ function StackMini({
   phase: SharedValue<number>;
   playing: boolean;
   dragging: boolean;
+  enterDelay: number;
   dragX: SharedValue<number>;
   dragAbsY: SharedValue<number>;
 }) {
@@ -441,7 +463,8 @@ function StackMini({
   }, [y]);
   const mountScale = useSharedValue(0);
   useEffect(() => {
-    mountScale.value = withSpring(1, { damping: 15, stiffness: 190, mass: 0.7 });
+    // A freshly added ring waits for the others to land, then grows in.
+    mountScale.value = withDelay(enterDelay, withSpring(1, { damping: 15, stiffness: 190, mass: 0.7 }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const boxStyle = useAnimatedStyle(() => {

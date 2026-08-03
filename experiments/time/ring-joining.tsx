@@ -139,26 +139,15 @@ export default function RingJoining() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, frame]);
 
-  // Surface layout: a centred grid of token positions (up to 2 per row).
+  // Surface layout: a centred vertical column of stacks, joined by connectors.
   const surface = useMemo(() => {
     const n = stacks.length;
-    const cols = n <= 1 ? 1 : 2;
     const top = 104;
     const bottom = 150;
     const areaH = height - top - bottom;
-    const rows = Math.ceil(n / cols);
-    const cellW = width / cols;
-    const cellH = areaH / rows;
-    const tokenR = Math.min(cellW, cellH) * 0.34;
-    return stacks.map((_, i) => {
-      const r = Math.floor(i / cols);
-      const rowCount = Math.min(cols, n - r * cols);
-      const rowW = rowCount * cellW;
-      const startX = (width - rowW) / 2;
-      const x = startX + (i - r * cols) * cellW + cellW / 2;
-      const y = top + r * cellH + cellH / 2;
-      return { x, y, R: tokenR };
-    });
+    const cellH = areaH / n;
+    const tokenR = Math.min(width * 0.3, cellH * 0.4);
+    return stacks.map((_, i) => ({ x: width / 2, y: top + cellH * i + cellH / 2, R: tokenR }));
   }, [stacks.length, width, height]);
   const surfaceRef = useRef(surface);
   surfaceRef.current = surface;
@@ -283,6 +272,20 @@ export default function RingJoining() {
     <View style={styles.fill}>
       <GestureDetector gesture={surfaceGesture}>
         <Animated.View style={[StyleSheet.absoluteFill, surfaceStyle]} pointerEvents={zoom == null ? 'auto' : 'none'}>
+          {/* connectors joining consecutive stacks (skip the one being dragged) */}
+          {surface.slice(0, -1).map((s, i) => {
+            if (draggingIdx === i || draggingIdx === i + 1) return null;
+            const next = surface[i + 1];
+            const y1 = s.y + s.R;
+            const y2 = next.y - next.R;
+            if (y2 <= y1) return null;
+            return (
+              <View key={`c${i}`} pointerEvents="none" style={{ position: 'absolute', left: width / 2 - 1.5, top: y1, width: 3, height: y2 - y1, backgroundColor: 'rgba(255,255,255,0.28)' }}>
+                <View style={{ position: 'absolute', left: -3, top: -4, width: 9, height: 9, borderRadius: 4.5, backgroundColor: 'rgba(255,255,255,0.5)' }} />
+                <View style={{ position: 'absolute', left: -3, bottom: -4, width: 9, height: 9, borderRadius: 4.5, backgroundColor: 'rgba(255,255,255,0.5)' }} />
+              </View>
+            );
+          })}
           {stacks.map((st, i) => (
             <StackMini key={i} data={st} pos={surface[i]} phase={phase} dragging={draggingIdx === i} dragX={dragX} dragY={dragY} />
           ))}

@@ -93,6 +93,7 @@ export default function RingJoining() {
     navigation.setOptions({ gestureEnabled: false });
     return () => navigation.setOptions({ gestureEnabled: true });
   }, [navigation]);
+  useEffect(() => () => { if (connTimer.current) clearTimeout(connTimer.current); }, []);
 
   const scale = useScale();
   const freqs = useMemo(() => {
@@ -104,6 +105,7 @@ export default function RingJoining() {
   const freqsRef = useRef(freqs);
   freqsRef.current = freqs;
   const draggingIdRef = useRef<number | null>(null);
+  const connTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const zoomRef = useRef<number | null>(null);
   zoomRef.current = zoom;
   const activeIdRef = useRef(0);
@@ -185,10 +187,14 @@ export default function RingJoining() {
     const id = nextId.current++;
     setLastAddedId(id); // this token delay-grows after the others land
     setStacks((prev) => [...prev, { id, data: emptyStack() }]); // existing tokens spring to new slots
-    // undraw instantly (so the new connector never flashes in), then draw it
-    // after the rings land and the new one grows.
+    // Keep connDraw a PLAIN 0 so the new connector mounts deterministically
+    // invisible (assigning an animation here makes its first render read a
+    // non-zero value → a one-frame flash). Start the draw-in on a timer instead.
     connDraw.value = 0;
-    connDraw.value = withDelay(LAND_MS + GROW_MS, withTiming(1, { duration: DRAW_MS }));
+    if (connTimer.current) clearTimeout(connTimer.current);
+    connTimer.current = setTimeout(() => {
+      connDraw.value = withTiming(1, { duration: DRAW_MS });
+    }, LAND_MS + GROW_MS);
   };
 
   const enterZoom = (i: number) => {
@@ -316,7 +322,10 @@ export default function RingJoining() {
     }
     dragX.value = 0;
     clearDragging();
-    connDraw.value = withDelay(LAND_MS, withTiming(1, { duration: DRAW_MS }));
+    if (connTimer.current) clearTimeout(connTimer.current);
+    connTimer.current = setTimeout(() => {
+      connDraw.value = withTiming(1, { duration: DRAW_MS });
+    }, LAND_MS);
   };
 
   const pinch = Gesture.Pinch().onEnd((e) => {

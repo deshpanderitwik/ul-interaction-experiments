@@ -226,12 +226,14 @@ export function ActiveDot({
   isCurrent: boolean;
 }) {
   const dotOpacity = Math.max(0.12, Math.min(1, vel));
+  // Conditional hit muted this rotation: dim it (and skip the pop/ripple, already
+  // gated by `plays`), brightening on the rotations when it actually sounds.
   const dotStyle = useAnimatedStyle(() => {
     const plays = every <= 1 || (rotation.value % ROT_CYCLE) % every === 0;
     let g = phase.value - frac;
     g = g - Math.floor(g);
     const w = plays && g < PULSE ? 1 - g / PULSE : 0;
-    return { transform: [{ scale: 1 + POP * w }] };
+    return { transform: [{ scale: 1 + POP * w }], opacity: plays ? dotOpacity : Math.max(0.1, dotOpacity * 0.3) };
   });
   const rippleStyle = useAnimatedStyle(() => {
     const plays = every <= 1 || (rotation.value % ROT_CYCLE) % every === 0;
@@ -241,12 +243,16 @@ export function ActiveDot({
     const t = g / PULSE;
     return { opacity: (1 - t) * 0.5, transform: [{ scale: 0.3 + t * 1.4 }] };
   });
+  // Badge sits radially inward from the dot so it clears the circumference.
+  const ang = frac * 2 * Math.PI - Math.PI / 2;
+  const bx = x - Math.cos(ang) * (size / 2 + 10);
+  const by = y - Math.sin(ang) * (size / 2 + 10);
   return (
     <>
       <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: x - RR, top: y - RR, width: 2 * RR, height: 2 * RR, borderRadius: RR, borderWidth: 2, borderColor: color }, rippleStyle]} />
-      <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: x - size / 2, top: y - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: color, opacity: dotOpacity, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }, dotStyle]} />
+      <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: x - size / 2, top: y - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: color, borderWidth: isCurrent ? 2 : 0, borderColor: '#fff' }, dotStyle]} />
       {every > 1 && (
-        <View pointerEvents="none" style={{ position: 'absolute', left: x + size / 2 - 2, top: y - size / 2 - 10, minWidth: 14, paddingHorizontal: 3, height: 14, borderRadius: 7, backgroundColor: '#000', borderWidth: 1, borderColor: color, alignItems: 'center', justifyContent: 'center' }}>
+        <View pointerEvents="none" style={{ position: 'absolute', left: bx - 8, top: by - 7, width: 16, height: 14, borderRadius: 7, backgroundColor: '#000', borderWidth: 1, borderColor: color, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color, fontSize: 9, fontWeight: '800' }}>{every}</Text>
         </View>
       )}

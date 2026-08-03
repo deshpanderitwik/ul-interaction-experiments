@@ -115,7 +115,7 @@ export const experiments: Experiment[] = [
       {
         id: 'ring-joining',
         title: 'Ring Joining',
-        blurb: 'Chain Overlapping Rings IV stacks into one composition. The surface shows them top-down as small live tokens in a vertical column joined by connectors; tap a token to make it the active (playing) one — only the active stack sounds. A + adds one (up to four), drag a token to reorder the column, and drag it sideways off-screen to remove it. Double-tap or pinch open on a token to zoom into the full Rings IV editor (it solos while you edit), pinch closed to pop back out.',
+        blurb: 'Chain Overlapping Rings IV stacks into one composition. The surface shows them top-down as small live tokens in a vertical column joined by connectors; tap a token to make it the active (playing) one — only the active stack sounds. A + adds one (up to four), drag a token to reorder the column, drag it onto the + to duplicate it, and drag it sideways off-screen to remove it. Double-tap or pinch open on a token to zoom into the full Rings IV editor (it solos while you edit), pinch closed to pop back out.',
         audio: true,
         load: () => import('./time/ring-joining'),
       },

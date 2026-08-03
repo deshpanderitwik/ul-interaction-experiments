@@ -56,6 +56,18 @@ const DRAW_MS = 180; // connector draws in
 
 type Stack = { id: number; data: StackData };
 
+// Centred vertical column geometry (shared by the layout memo and drop maths).
+function columnLayout(count: number, width: number, height: number) {
+  const top = 104;
+  const bottom = 150;
+  const areaH = height - top - bottom;
+  const centerY = top + areaH / 2;
+  const tokenR = Math.min(width * 0.26, (areaH / MAX_STACKS) * 0.4);
+  const pitch = 2 * tokenR + 34;
+  const firstY = count > 0 ? centerY - ((count - 1) * pitch) / 2 : centerY;
+  return { firstY, pitch, tokenR };
+}
+
 export default function RingJoining() {
   const live = useExperimentActive();
   const tempo = useTempo();
@@ -163,14 +175,7 @@ export default function RingJoining() {
   // connectors. Fixed token size so add/remove only moves positions (which the
   // tokens animate toward).
   const surface = useMemo(() => {
-    const n = stacks.length;
-    const top = 104;
-    const bottom = 150;
-    const areaH = height - top - bottom;
-    const centerY = top + areaH / 2;
-    const tokenR = Math.min(width * 0.26, (areaH / MAX_STACKS) * 0.4);
-    const pitch = 2 * tokenR + 34;
-    const firstY = centerY - ((n - 1) * pitch) / 2;
+    const { firstY, pitch, tokenR } = columnLayout(stacks.length, width, height);
     return stacks.map((_, i) => ({ x: width / 2, y: firstY + i * pitch, R: tokenR }));
   }, [stacks.length, width, height]);
   const surfaceRef = useRef(surface);
@@ -327,6 +332,39 @@ export default function RingJoining() {
       connDraw.value = withTiming(1, { duration: DRAW_MS });
     }, LAND_MS);
   };
+  // Dropped on the +: add a duplicate of the dragged ring; the original settles
+  // back into its slot.
+  const duplicateDragged = () => {
+    const id = draggingIdRef.current;
+    const list = stacksRef.current;
+    const idx = list.findIndex((s) => s.id === id);
+    const src = idx >= 0 ? list[idx] : null;
+    const canDupe = src != null && list.length < MAX_STACKS;
+    if (canDupe && src) {
+      const newId = nextId.current++;
+      const dup: StackData = {
+        active: src.data.active.map((r) => r.slice()),
+        every: src.data.every.map((r) => r.slice()),
+        velocity: src.data.velocity.map((r) => r.slice()),
+      };
+      setLastAddedId(newId);
+      setStacks((prev) => [...prev, { id: newId, data: dup }]);
+      connDraw.value = 0;
+      if (connTimer.current) clearTimeout(connTimer.current);
+      connTimer.current = setTimeout(() => {
+        connDraw.value = withTiming(1, { duration: DRAW_MS });
+      }, LAND_MS + GROW_MS);
+    }
+    // settle the dragged ring back into its slot in the (possibly grown) column
+    const newCount = canDupe ? list.length + 1 : list.length;
+    const { firstY, pitch } = columnLayout(newCount, width, height);
+    const targetY = idx >= 0 ? firstY + idx * pitch : dragAbsY.value;
+    dragX.value = withSpring(0, { damping: 22, stiffness: 340, mass: 0.7 });
+    dragAbsY.value = withSpring(targetY, { damping: 22, stiffness: 340, mass: 0.7 }, (fin) => {
+      'worklet';
+      if (fin) runOnJS(clearDragging)();
+    });
+  };
 
   const pinch = Gesture.Pinch().onEnd((e) => {
     if (e.scale >= 1.3) runOnJS(tryEnter)(e.focalX, e.focalY);
@@ -344,7 +382,8 @@ export default function RingJoining() {
       runOnJS(maybeReorder)(e.y);
     })
     .onEnd((e) => {
-      if (Math.abs(e.translationX) > 0.32 * width) runOnJS(finishRemove)();
+      if (Math.hypot(e.x - plusX, e.y - plusY) <= plusR + 30) runOnJS(duplicateDragged)();
+      else if (Math.abs(e.translationX) > 0.32 * width) runOnJS(finishRemove)();
       else runOnJS(dropDrag)();
     });
   // Tap the + to add, or tap a token to make it the active (playing) stack.
@@ -411,10 +450,16 @@ export default function RingJoining() {
             <StackMini key={st.id} data={st.data} pos={surface[i]} phase={phase} playing={st.id === activeId} dragging={draggingId === st.id} enterDelay={st.id === lastAddedId ? LAND_MS : 0} dragX={dragX} dragAbsY={dragAbsY} />
           ))}
 
-          {/* add-stack button */}
-          <View pointerEvents="none" style={{ position: 'absolute', left: plusX - plusR, top: plusY - plusR, width: 2 * plusR, height: 2 * plusR, borderRadius: plusR, borderWidth: 2, borderColor: canAdd ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ color: canAdd ? '#fff' : 'rgba(255,255,255,0.25)', fontSize: 30, fontWeight: '300', marginTop: -3 }}>+</Text>
-          </View>
+          {/* add-stack button — also a drop target to duplicate a dragged ring */}
+          {(() => {
+            const dropping = draggingId != null && canAdd;
+            const r = dropping ? plusR + 5 : plusR;
+            return (
+              <View pointerEvents="none" style={{ position: 'absolute', left: plusX - r, top: plusY - r, width: 2 * r, height: 2 * r, borderRadius: r, borderWidth: dropping ? 2.5 : 2, borderColor: dropping ? '#fff' : canAdd ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.18)', backgroundColor: dropping ? 'rgba(255,255,255,0.1)' : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ color: canAdd ? '#fff' : 'rgba(255,255,255,0.25)', fontSize: 30, fontWeight: '300', marginTop: -3 }}>+</Text>
+              </View>
+            );
+          })()}
         </Animated.View>
       </GestureDetector>
 

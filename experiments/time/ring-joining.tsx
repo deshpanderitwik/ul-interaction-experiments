@@ -63,6 +63,7 @@ export default function RingJoining() {
   const [zoom, setZoom] = useState<number | null>(null);
   const [rotCount, setRotCount] = useState(0);
   const [draggingIdx, setDraggingIdx] = useState(-1);
+  const [activeMovement, setActiveMovement] = useState(0); // which stack is currently playing
 
   const phase = useSharedValue(0);
   const rotation = useSharedValue(0);
@@ -75,6 +76,8 @@ export default function RingJoining() {
   const zoomP = useSharedValue(0);
   const dragX = useSharedValue(0);
   const dragY = useSharedValue(0);
+  const movementSV = useSharedValue(0); // current movement on the UI thread
+  const nStacksSV = useSharedValue(1); // stack count for the worklet
 
   useEffect(() => {
     tempoSV.value = tempo;
@@ -94,18 +97,30 @@ export default function RingJoining() {
   const freqsRef = useRef(freqs);
   freqsRef.current = freqs;
   const draggingRef = useRef(-1);
+  const zoomRef = useRef<number | null>(null);
+  zoomRef.current = zoom;
 
+  useEffect(() => {
+    nStacksSV.value = stacks.length;
+  }, [stacks.length, nStacksSV]);
+
+  // Sequential movements: one stack plays per full rotation cycle (16 rotations),
+  // then the next, looping. While a stack is zoomed in (being edited) it solos so
+  // you can hear your edits.
   const fireAll = (step: number) => {
+    const list = stacksRef.current;
+    if (!list.length) return;
     const pos = rotation.value % ROT_CYCLE;
+    const z = zoomRef.current;
+    const idx = z != null && z >= 0 && z < list.length ? z : Math.floor(rotation.value / ROT_CYCLE) % list.length;
+    const st = list[idx];
     const f = freqsRef.current;
-    for (const st of stacksRef.current) {
-      for (let i = 0; i < N; i++) {
-        if (!st.active[i][step] || st.velocity[i][step] <= 0) continue;
-        const e = st.every[i][step] || 1;
-        if (pos % e === 0) {
-          const gain = VEL_GAIN_MIN + st.velocity[i][step] * (VEL_GAIN_MAX - VEL_GAIN_MIN);
-          NoteSynth?.pluck(f[i], gain, 0.5).catch(() => {});
-        }
+    for (let i = 0; i < N; i++) {
+      if (!st.active[i][step] || st.velocity[i][step] <= 0) continue;
+      const e = st.every[i][step] || 1;
+      if (pos % e === 0) {
+        const gain = VEL_GAIN_MIN + st.velocity[i][step] * (VEL_GAIN_MAX - VEL_GAIN_MIN);
+        NoteSynth?.pluck(f[i], gain, 0.5).catch(() => {});
       }
     }
   };
@@ -119,6 +134,12 @@ export default function RingJoining() {
     if (hitStarted.value === 1 && ph < prevPhase.value - 0.5) {
       rotation.value += 1;
       runOnJS(setRotCount)(rotation.value);
+      const len = nStacksSV.value > 0 ? nStacksSV.value : 1;
+      const mv = Math.floor(rotation.value / ROT_CYCLE) % len;
+      if (mv !== movementSV.value) {
+        movementSV.value = mv;
+        runOnJS(setActiveMovement)(mv);
+      }
     }
     prevPhase.value = ph;
     phase.value = ph;
@@ -184,7 +205,9 @@ export default function RingJoining() {
     alignOffset.value = t;
     hitStarted.value = 0;
     rotation.value = 0;
+    movementSV.value = 0;
     setRotCount(0);
+    setActiveMovement(0);
     if (times.length >= 2) {
       let sum = 0;
       for (let i = 1; i < times.length; i++) sum += times[i] - times[i - 1];
@@ -287,7 +310,7 @@ export default function RingJoining() {
             );
           })}
           {stacks.map((st, i) => (
-            <StackMini key={i} data={st} pos={surface[i]} phase={phase} dragging={draggingIdx === i} dragX={dragX} dragY={dragY} />
+            <StackMini key={i} data={st} pos={surface[i]} phase={phase} playing={i === activeMovement % stacks.length} dragging={draggingIdx === i} dragX={dragX} dragY={dragY} />
           ))}
 
           {/* add-stack button */}
@@ -328,6 +351,7 @@ function StackMini({
   data,
   pos,
   phase,
+  playing,
   dragging,
   dragX,
   dragY,
@@ -335,6 +359,7 @@ function StackMini({
   data: StackData;
   pos: { x: number; y: number; R: number };
   phase: SharedValue<number>;
+  playing: boolean;
   dragging: boolean;
   dragX: SharedValue<number>;
   dragY: SharedValue<number>;
@@ -356,11 +381,15 @@ function StackMini({
   const handStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${phase.value * 360}deg` }] }));
   return (
     <Animated.View style={[StyleSheet.absoluteFill, dragStyle]} pointerEvents="none">
-      <View style={{ position: 'absolute', left: x - R, top: y - R, width: 2 * R, height: 2 * R }}>
-        <View style={{ position: 'absolute', left: 0, top: 0, width: 2 * R, height: 2 * R, borderRadius: R, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.3)' }} />
-        <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: 2 * R, height: 2 * R }, handStyle]}>
-          <View style={{ position: 'absolute', left: R - 1, top: 4, width: 2, height: R - 4, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.85)' }} />
-        </Animated.View>
+      <View style={{ position: 'absolute', left: x - R, top: y - R, width: 2 * R, height: 2 * R, opacity: playing ? 1 : 0.42 }}>
+        {/* glow ring on the movement that's currently playing */}
+        {playing && <View style={{ position: 'absolute', left: -7, top: -7, width: 2 * R + 14, height: 2 * R + 14, borderRadius: R + 7, borderWidth: 2, borderColor: 'rgba(255,255,255,0.28)' }} />}
+        <View style={{ position: 'absolute', left: 0, top: 0, width: 2 * R, height: 2 * R, borderRadius: R, borderWidth: playing ? 2 : 1.5, borderColor: playing ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.24)' }} />
+        {playing && (
+          <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: 2 * R, height: 2 * R }, handStyle]}>
+            <View style={{ position: 'absolute', left: R - 1, top: 4, width: 2, height: R - 4, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.9)' }} />
+          </Animated.View>
+        )}
         {dots.map((d, k) => (
           <View key={k} style={{ position: 'absolute', left: d.x - d.size / 2, top: d.y - d.size / 2, width: d.size, height: d.size, borderRadius: d.size / 2, backgroundColor: d.color, opacity: Math.max(0.2, d.vel) }} />
         ))}

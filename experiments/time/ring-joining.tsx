@@ -50,6 +50,8 @@ import {
 
 const MAX_STACKS = 4;
 
+type Stack = { id: number; data: StackData };
+
 export default function RingJoining() {
   const live = useExperimentActive();
   const tempo = useTempo();
@@ -59,10 +61,11 @@ export default function RingJoining() {
   const { width, height } = useWindowDimensions();
   const navigation = useNavigation();
 
-  const [stacks, setStacks] = useState<StackData[]>(() => [emptyStack()]);
+  const nextId = useRef(1);
+  const [stacks, setStacks] = useState<Stack[]>(() => [{ id: 0, data: emptyStack() }]);
   const [zoom, setZoom] = useState<number | null>(null);
   const [rotCount, setRotCount] = useState(0);
-  const [draggingIdx, setDraggingIdx] = useState(-1);
+  const [draggingId, setDraggingId] = useState<number | null>(null);
   const [activeMovement, setActiveMovement] = useState(0); // which stack is currently playing
 
   const phase = useSharedValue(0);
@@ -75,7 +78,7 @@ export default function RingJoining() {
   const tapPulse = useSharedValue(0);
   const zoomP = useSharedValue(0);
   const dragX = useSharedValue(0);
-  const dragY = useSharedValue(0);
+  const dragAbsY = useSharedValue(0); // finger y for the dragged token
   const movementSV = useSharedValue(0); // current movement on the UI thread
   const nStacksSV = useSharedValue(1); // stack count for the worklet
 
@@ -96,7 +99,7 @@ export default function RingJoining() {
   stacksRef.current = stacks;
   const freqsRef = useRef(freqs);
   freqsRef.current = freqs;
-  const draggingRef = useRef(-1);
+  const draggingIdRef = useRef<number | null>(null);
   const zoomRef = useRef<number | null>(null);
   zoomRef.current = zoom;
 
@@ -113,7 +116,7 @@ export default function RingJoining() {
     const pos = rotation.value % ROT_CYCLE;
     const z = zoomRef.current;
     const idx = z != null && z >= 0 && z < list.length ? z : Math.floor(rotation.value / ROT_CYCLE) % list.length;
-    const st = list[idx];
+    const st = list[idx].data;
     const f = freqsRef.current;
     for (let i = 0; i < N; i++) {
       if (!st.active[i][step] || st.velocity[i][step] <= 0) continue;
@@ -178,8 +181,8 @@ export default function RingJoining() {
   const plusR = 27;
   const canAdd = stacks.length < MAX_STACKS;
 
-  const setStackData = (i: number, updater: (s: StackData) => StackData) => setStacks((prev) => prev.map((s, idx) => (idx === i ? updater(s) : s)));
-  const addStack = () => setStacks((prev) => (prev.length >= MAX_STACKS ? prev : [...prev, emptyStack()]));
+  const setStackData = (i: number, updater: (s: StackData) => StackData) => setStacks((prev) => prev.map((s, idx) => (idx === i ? { ...s, data: updater(s.data) } : s)));
+  const addStack = () => setStacks((prev) => (prev.length >= MAX_STACKS ? prev : [...prev, { id: nextId.current++, data: emptyStack() }]));
 
   const enterZoom = (i: number) => {
     setZoom(i);
@@ -244,19 +247,60 @@ export default function RingJoining() {
         best = i;
       }
     });
-    draggingRef.current = best;
-    setDraggingIdx(best);
+    if (best < 0) {
+      draggingIdRef.current = null;
+      return;
+    }
+    const id = stacksRef.current[best].id;
+    draggingIdRef.current = id;
+    setDraggingId(id);
   };
-  const endDrag = () => {
-    draggingRef.current = -1;
-    setDraggingIdx(-1);
+  // Live reorder: as the dragged token crosses a slot centre, move it there so
+  // the others snap around it into the vertical column.
+  const maybeReorder = (absY: number) => {
+    const id = draggingIdRef.current;
+    if (id == null) return;
+    const list = stacksRef.current;
+    const from = list.findIndex((s) => s.id === id);
+    if (from < 0) return;
+    const s = surfaceRef.current;
+    let to = 0;
+    let bd = 1e9;
+    s.forEach((p, i) => {
+      const d = Math.abs(absY - p.y);
+      if (d < bd) {
+        bd = d;
+        to = i;
+      }
+    });
+    if (to !== from) setStacks((prev) => {
+      const arr = prev.slice();
+      const [item] = arr.splice(from, 1);
+      arr.splice(to, 0, item);
+      return arr;
+    });
+  };
+  const clearDragging = () => {
+    draggingIdRef.current = null;
+    setDraggingId(null);
+  };
+  const dropDrag = () => {
+    const id = draggingIdRef.current;
+    const list = stacksRef.current;
+    const idx = list.findIndex((s) => s.id === id);
+    const s = surfaceRef.current;
+    const targetY = idx >= 0 && s[idx] ? s[idx].y : dragAbsY.value;
+    dragX.value = withSpring(0);
+    dragAbsY.value = withSpring(targetY, { damping: 18, stiffness: 200 }, (fin) => {
+      'worklet';
+      if (fin) runOnJS(clearDragging)();
+    });
   };
   const finishRemove = () => {
-    const i = draggingRef.current;
+    const id = draggingIdRef.current;
+    if (id != null) setStacks((prev) => (prev.length > 1 ? prev.filter((s) => s.id !== id) : prev));
     dragX.value = 0;
-    dragY.value = 0;
-    if (i >= 0) setStacks((prev) => (prev.length > 1 ? prev.filter((_, idx) => idx !== i) : prev));
-    endDrag();
+    clearDragging();
   };
 
   const pinch = Gesture.Pinch().onEnd((e) => {
@@ -264,21 +308,19 @@ export default function RingJoining() {
   });
   const drag = Gesture.Pan()
     .maxPointers(1)
-    .onBegin((e) => {
+    .onStart((e) => {
+      dragX.value = 0;
+      dragAbsY.value = e.y;
       runOnJS(beginDrag)(e.x, e.y);
     })
     .onUpdate((e) => {
       dragX.value = e.translationX;
-      dragY.value = e.translationY;
+      dragAbsY.value = e.y;
+      runOnJS(maybeReorder)(e.y);
     })
     .onEnd((e) => {
-      if (Math.abs(e.translationX) > 0.32 * width) {
-        runOnJS(finishRemove)();
-      } else {
-        dragX.value = withSpring(0);
-        dragY.value = withSpring(0);
-        runOnJS(endDrag)();
-      }
+      if (Math.abs(e.translationX) > 0.32 * width) runOnJS(finishRemove)();
+      else runOnJS(dropDrag)();
     });
   const surfaceTap = Gesture.Tap()
     .maxDistance(16)
@@ -295,9 +337,8 @@ export default function RingJoining() {
     <View style={styles.fill}>
       <GestureDetector gesture={surfaceGesture}>
         <Animated.View style={[StyleSheet.absoluteFill, surfaceStyle]} pointerEvents={zoom == null ? 'auto' : 'none'}>
-          {/* connectors joining consecutive stacks (skip the one being dragged) */}
-          {surface.slice(0, -1).map((s, i) => {
-            if (draggingIdx === i || draggingIdx === i + 1) return null;
+          {/* connectors joining consecutive stacks (hidden while rearranging) */}
+          {draggingId == null && surface.slice(0, -1).map((s, i) => {
             const next = surface[i + 1];
             const y1 = s.y + s.R;
             const y2 = next.y - next.R;
@@ -310,7 +351,7 @@ export default function RingJoining() {
             );
           })}
           {stacks.map((st, i) => (
-            <StackMini key={i} data={st} pos={surface[i]} phase={phase} playing={i === activeMovement % stacks.length} dragging={draggingIdx === i} dragX={dragX} dragY={dragY} />
+            <StackMini key={st.id} data={st.data} pos={surface[i]} phase={phase} playing={i === activeMovement % stacks.length} dragging={draggingId === st.id} dragX={dragX} dragAbsY={dragAbsY} />
           ))}
 
           {/* add-stack button */}
@@ -319,7 +360,7 @@ export default function RingJoining() {
           </View>
 
           <Text pointerEvents="none" style={styles.hint}>
-            {stacks.length === 1 ? 'pinch a stack to edit · + to add' : 'pinch to edit · drag off to remove · + to add'}
+            {stacks.length === 1 ? 'pinch a stack to edit · + to add' : 'pinch to edit · drag to reorder · off-screen to remove'}
           </Text>
         </Animated.View>
       </GestureDetector>
@@ -327,7 +368,7 @@ export default function RingJoining() {
       {zoom != null && stacks[zoom] && (
         <Animated.View style={[StyleSheet.absoluteFill, editorStyle]}>
           <StackEditor
-            data={stacks[zoom]}
+            data={stacks[zoom].data}
             setData={(u) => setStackData(zoom, u)}
             phase={phase}
             rotation={rotation}
@@ -354,7 +395,7 @@ function StackMini({
   playing,
   dragging,
   dragX,
-  dragY,
+  dragAbsY,
 }: {
   data: StackData;
   pos: { x: number; y: number; R: number };
@@ -362,7 +403,7 @@ function StackMini({
   playing: boolean;
   dragging: boolean;
   dragX: SharedValue<number>;
-  dragY: SharedValue<number>;
+  dragAbsY: SharedValue<number>;
 }) {
   const { x, y, R } = pos;
   const dots = useMemo(() => {
@@ -377,23 +418,26 @@ function StackMini({
     }
     return out;
   }, [data, R]);
-  const dragStyle = useAnimatedStyle(() => (dragging ? { opacity: Math.max(0.15, 1 - Math.abs(dragX.value) / 280), transform: [{ translateX: dragX.value }, { translateY: dragY.value }] } : {}));
+  // When not dragging, sit in the slot; when dragging, float at the finger (x can
+  // slide for the off-screen dismiss).
+  const boxStyle = useAnimatedStyle(() => {
+    if (!dragging) return { left: x - R, top: y - R, opacity: playing ? 1 : 0.42 };
+    return { left: x - R + dragX.value, top: dragAbsY.value - R, opacity: Math.max(0.15, 1 - Math.abs(dragX.value) / 280) };
+  });
   const handStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${phase.value * 360}deg` }] }));
+  const lit = playing || dragging;
   return (
-    <Animated.View style={[StyleSheet.absoluteFill, dragStyle]} pointerEvents="none">
-      <View style={{ position: 'absolute', left: x - R, top: y - R, width: 2 * R, height: 2 * R, opacity: playing ? 1 : 0.42 }}>
-        {/* glow ring on the movement that's currently playing */}
-        {playing && <View style={{ position: 'absolute', left: -7, top: -7, width: 2 * R + 14, height: 2 * R + 14, borderRadius: R + 7, borderWidth: 2, borderColor: 'rgba(255,255,255,0.28)' }} />}
-        <View style={{ position: 'absolute', left: 0, top: 0, width: 2 * R, height: 2 * R, borderRadius: R, borderWidth: playing ? 2 : 1.5, borderColor: playing ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.24)' }} />
-        {playing && (
-          <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: 2 * R, height: 2 * R }, handStyle]}>
-            <View style={{ position: 'absolute', left: R - 1, top: 4, width: 2, height: R - 4, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.9)' }} />
-          </Animated.View>
-        )}
-        {dots.map((d, k) => (
-          <View key={k} style={{ position: 'absolute', left: d.x - d.size / 2, top: d.y - d.size / 2, width: d.size, height: d.size, borderRadius: d.size / 2, backgroundColor: d.color, opacity: Math.max(0.2, d.vel) }} />
-        ))}
-      </View>
+    <Animated.View pointerEvents="none" style={[{ position: 'absolute', width: 2 * R, height: 2 * R }, boxStyle]}>
+      {playing && <View style={{ position: 'absolute', left: -7, top: -7, width: 2 * R + 14, height: 2 * R + 14, borderRadius: R + 7, borderWidth: 2, borderColor: 'rgba(255,255,255,0.28)' }} />}
+      <View style={{ position: 'absolute', left: 0, top: 0, width: 2 * R, height: 2 * R, borderRadius: R, borderWidth: lit ? 2 : 1.5, borderColor: lit ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.24)' }} />
+      {playing && (
+        <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: 2 * R, height: 2 * R }, handStyle]}>
+          <View style={{ position: 'absolute', left: R - 1, top: 4, width: 2, height: R - 4, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.9)' }} />
+        </Animated.View>
+      )}
+      {dots.map((d, k) => (
+        <View key={k} style={{ position: 'absolute', left: d.x - d.size / 2, top: d.y - d.size / 2, width: d.size, height: d.size, borderRadius: d.size / 2, backgroundColor: d.color, opacity: Math.max(0.2, d.vel) }} />
+      ))}
     </Animated.View>
   );
 }

@@ -365,12 +365,32 @@ export default function RingJoining() {
     });
     if (best >= 0) setActiveId(stacksRef.current[best].id);
   };
+  // Double-tap a token to zoom into it (same as pinching open).
+  const zoomAt = (x: number, y: number) => {
+    const s = surfaceRef.current;
+    let best = -1;
+    let bd = 1e9;
+    s.forEach((t, i) => {
+      const d = Math.hypot(x - t.x, y - t.y);
+      if (d < t.R + 14 && d < bd) {
+        bd = d;
+        best = i;
+      }
+    });
+    if (best >= 0) enterZoom(best);
+  };
   const surfaceTap = Gesture.Tap()
     .maxDistance(16)
     .onEnd((e) => {
       runOnJS(surfaceHit)(e.x, e.y);
     });
-  const surfaceGesture = Gesture.Simultaneous(pinch, Gesture.Race(drag, surfaceTap));
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .maxDistance(28)
+    .onEnd((e) => {
+      runOnJS(zoomAt)(e.x, e.y);
+    });
+  const surfaceGesture = Gesture.Simultaneous(pinch, Gesture.Race(drag, Gesture.Exclusive(doubleTap, surfaceTap)));
 
   const surfaceStyle = useAnimatedStyle(() => ({ opacity: 1 - zoomP.value, transform: [{ scale: 1 + 0.12 * zoomP.value }] }));
   const editorStyle = useAnimatedStyle(() => ({ opacity: zoomP.value, transform: [{ scale: 0.9 + 0.1 * zoomP.value }] }));

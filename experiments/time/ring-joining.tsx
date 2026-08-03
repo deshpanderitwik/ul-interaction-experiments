@@ -3,7 +3,7 @@ import { useNavigation } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { runOnJS, useAnimatedStyle, useFrameCallback, useSharedValue, withDelay, withSequence, withSpring, withTiming, type SharedValue } from 'react-native-reanimated';
+import Animated, { runOnJS, useAnimatedStyle, useFrameCallback, useSharedValue, withDelay, withSpring, withTiming, type SharedValue } from 'react-native-reanimated';
 import { NoteSynth } from '../../modules/note-synth';
 import { useExperimentActive } from '../_host';
 import { useSharedClock } from '../combinations/clock';
@@ -185,8 +185,10 @@ export default function RingJoining() {
     const id = nextId.current++;
     setLastAddedId(id); // this token delay-grows after the others land
     setStacks((prev) => [...prev, { id, data: emptyStack() }]); // existing tokens spring to new slots
-    // sequence: undraw, wait for land + grow, then draw the connectors
-    connDraw.value = withSequence(withTiming(0, { duration: 110 }), withDelay(LAND_MS + GROW_MS - 110, withTiming(1, { duration: DRAW_MS })));
+    // undraw instantly (so the new connector never flashes in), then draw it
+    // after the rings land and the new one grows.
+    connDraw.value = 0;
+    connDraw.value = withDelay(LAND_MS + GROW_MS, withTiming(1, { duration: DRAW_MS }));
   };
 
   const enterZoom = (i: number) => {

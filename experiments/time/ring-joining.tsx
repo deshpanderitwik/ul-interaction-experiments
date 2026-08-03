@@ -66,6 +66,7 @@ export default function RingJoining() {
   const [zoom, setZoom] = useState<number | null>(null);
   const [rotCount, setRotCount] = useState(0);
   const [draggingId, setDraggingId] = useState<number | null>(null);
+  const [dragActive, setDragActive] = useState(false); // finger currently down on a token
   const [activeId, setActiveId] = useState(0); // id of the stack currently playing (user-selected)
 
   const phase = useSharedValue(0);
@@ -240,6 +241,7 @@ export default function RingJoining() {
     const id = stacksRef.current[best].id;
     draggingIdRef.current = id;
     setDraggingId(id);
+    setDragActive(true);
   };
   // Live reorder: as the dragged token crosses a slot centre, move it there so
   // the others snap around it into the vertical column.
@@ -271,18 +273,20 @@ export default function RingJoining() {
     setDraggingId(null);
   };
   const dropDrag = () => {
+    setDragActive(false); // finger up → bring the connectors straight back
     const id = draggingIdRef.current;
     const list = stacksRef.current;
     const idx = list.findIndex((s) => s.id === id);
     const s = surfaceRef.current;
     const targetY = idx >= 0 && s[idx] ? s[idx].y : dragAbsY.value;
-    dragX.value = withSpring(0);
-    dragAbsY.value = withSpring(targetY, { damping: 18, stiffness: 200 }, (fin) => {
+    dragX.value = withSpring(0, { damping: 22, stiffness: 340, mass: 0.7 });
+    dragAbsY.value = withSpring(targetY, { damping: 22, stiffness: 340, mass: 0.7 }, (fin) => {
       'worklet';
       if (fin) runOnJS(clearDragging)();
     });
   };
   const finishRemove = () => {
+    setDragActive(false);
     const id = draggingIdRef.current;
     if (id != null) {
       const remaining = stacksRef.current.filter((s) => s.id !== id);
@@ -346,8 +350,9 @@ export default function RingJoining() {
     <View style={styles.fill}>
       <GestureDetector gesture={surfaceGesture}>
         <Animated.View style={[StyleSheet.absoluteFill, surfaceStyle]} pointerEvents={zoom == null ? 'auto' : 'none'}>
-          {/* connectors joining consecutive stacks (hidden while rearranging) */}
-          {draggingId == null && surface.slice(0, -1).map((s, i) => {
+          {/* connectors joining consecutive stacks (hidden only while a finger is
+              actively dragging; they return the instant it lifts) */}
+          {!dragActive && surface.slice(0, -1).map((s, i) => {
             const next = surface[i + 1];
             const y1 = s.y + s.R;
             const y2 = next.y - next.R;

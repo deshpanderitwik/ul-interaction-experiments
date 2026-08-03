@@ -431,8 +431,27 @@ export default function RingJoining() {
     });
   const surfaceGesture = Gesture.Simultaneous(pinch, Gesture.Race(drag, Gesture.Exclusive(doubleTap, surfaceTap)));
 
-  const surfaceStyle = useAnimatedStyle(() => ({ opacity: 1 - zoomP.value, transform: [{ scale: 1 + 0.12 * zoomP.value }] }));
-  const editorStyle = useAnimatedStyle(() => ({ opacity: zoomP.value, transform: [{ scale: 0.9 + 0.1 * zoomP.value }] }));
+  // Zoom morph: the editor stack grows FROM the tapped token's position & size to
+  // full-screen (and shrinks back on exit), so the ring physically expands and
+  // grows its dots rather than crossfading. Nested views: outer translates
+  // (screen-space), inner scales about the screen centre.
+  const fullR = Math.min(width * 0.42, height * 0.24); // editor ring radius
+  const cyEditor = height * 0.44; // editor ring-centre y
+  const scy = height / 2; // screen centre (inner scale origin)
+  const zt = zoom != null && surface[zoom] ? surface[zoom] : null;
+  const s0 = zt ? zt.R / fullR : 1; // token size relative to full
+  const tokenY = zt ? zt.y : cyEditor;
+  const surfaceStyle = useAnimatedStyle(() => ({ opacity: 1 - zoomP.value, transform: [{ scale: 1 + 0.06 * zoomP.value }] }));
+  const editorOuterStyle = useAnimatedStyle(() => {
+    const s = s0 + (1 - s0) * zoomP.value;
+    const ty = cyEditor + (tokenY - cyEditor) * (1 - zoomP.value) - scy - s * (cyEditor - scy);
+    return { transform: [{ translateY: ty }] };
+  });
+  const editorInnerStyle = useAnimatedStyle(() => {
+    const s = s0 + (1 - s0) * zoomP.value;
+    // Mostly opaque immediately — the motion is the scale/grow, not a crossfade.
+    return { opacity: Math.min(1, 0.7 + zoomP.value * 4), transform: [{ scale: s }] };
+  });
 
   return (
     <View style={styles.fill}>
@@ -447,7 +466,7 @@ export default function RingJoining() {
             return <Connector key={`c${i}`} x={width / 2} y1={y1} y2={y2} connDraw={connDraw} />;
           })}
           {stacks.map((st, i) => (
-            <StackMini key={st.id} data={st.data} pos={surface[i]} phase={phase} playing={st.id === activeId} dragging={draggingId === st.id} enterDelay={st.id === lastAddedId ? LAND_MS : 0} dragX={dragX} dragAbsY={dragAbsY} />
+            <StackMini key={st.id} data={st.data} pos={surface[i]} phase={phase} playing={st.id === activeId} dragging={draggingId === st.id} hidden={zoom === i} enterDelay={st.id === lastAddedId ? LAND_MS : 0} dragX={dragX} dragAbsY={dragAbsY} />
           ))}
 
           {/* add-stack button — also a drop target to duplicate a dragged ring */}
@@ -464,7 +483,8 @@ export default function RingJoining() {
       </GestureDetector>
 
       {zoom != null && stacks[zoom] && (
-        <Animated.View style={[StyleSheet.absoluteFill, editorStyle]}>
+        <Animated.View style={[StyleSheet.absoluteFill, editorOuterStyle]}>
+          <Animated.View style={[StyleSheet.absoluteFill, editorInnerStyle]}>
           <StackEditor
             data={stacks[zoom].data}
             setData={(u) => setStackData(zoom, u)}
@@ -477,6 +497,7 @@ export default function RingJoining() {
             onTapTempo={onTapTempo}
             onExit={exitZoom}
           />
+          </Animated.View>
         </Animated.View>
       )}
     </View>
@@ -504,6 +525,7 @@ function StackMini({
   phase,
   playing,
   dragging,
+  hidden,
   enterDelay,
   dragX,
   dragAbsY,
@@ -513,6 +535,7 @@ function StackMini({
   phase: SharedValue<number>;
   playing: boolean;
   dragging: boolean;
+  hidden: boolean;
   enterDelay: number;
   dragX: SharedValue<number>;
   dragAbsY: SharedValue<number>;
@@ -544,6 +567,7 @@ function StackMini({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const boxStyle = useAnimatedStyle(() => {
+    if (hidden) return { left: x - R, top: y - R, opacity: 0, transform: [{ scale: 1 }] }; // the editor represents it while zoomed
     if (dragging) return { left: x - R + dragX.value, top: dragAbsY.value - R, opacity: Math.max(0.15, 1 - Math.abs(dragX.value) / 280), transform: [{ scale: 1 }] };
     return { left: x - R, top: animY.value - R, opacity: (playing ? 1 : 0.42) * Math.min(1, mountScale.value * 1.6), transform: [{ scale: mountScale.value }] };
   });

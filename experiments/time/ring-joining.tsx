@@ -152,15 +152,19 @@ export default function RingJoining() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, frame]);
 
-  // Surface layout: a centred vertical column of stacks, joined by connectors.
+  // Surface layout: a centred vertical column of same-size stacks, joined by
+  // connectors. Fixed token size so add/remove only moves positions (which the
+  // tokens animate toward).
   const surface = useMemo(() => {
     const n = stacks.length;
     const top = 104;
     const bottom = 150;
     const areaH = height - top - bottom;
-    const cellH = areaH / n;
-    const tokenR = Math.min(width * 0.3, cellH * 0.4);
-    return stacks.map((_, i) => ({ x: width / 2, y: top + cellH * i + cellH / 2, R: tokenR }));
+    const centerY = top + areaH / 2;
+    const tokenR = Math.min(width * 0.26, (areaH / MAX_STACKS) * 0.4);
+    const pitch = 2 * tokenR + 34;
+    const firstY = centerY - ((n - 1) * pitch) / 2;
+    return stacks.map((_, i) => ({ x: width / 2, y: firstY + i * pitch, R: tokenR }));
   }, [stacks.length, width, height]);
   const surfaceRef = useRef(surface);
   surfaceRef.current = surface;
@@ -428,11 +432,21 @@ function StackMini({
     }
     return out;
   }, [data, R]);
-  // When not dragging, sit in the slot; when dragging, float at the finger (x can
-  // slide for the off-screen dismiss).
+  // Position springs toward its slot so add/remove reflow smoothly; a fresh token
+  // grows in from scale 0.
+  const animY = useSharedValue(y);
+  useEffect(() => {
+    animY.value = withSpring(y, { damping: 20, stiffness: 220 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [y]);
+  const mountScale = useSharedValue(0);
+  useEffect(() => {
+    mountScale.value = withSpring(1, { damping: 15, stiffness: 190, mass: 0.7 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const boxStyle = useAnimatedStyle(() => {
-    if (!dragging) return { left: x - R, top: y - R, opacity: playing ? 1 : 0.42 };
-    return { left: x - R + dragX.value, top: dragAbsY.value - R, opacity: Math.max(0.15, 1 - Math.abs(dragX.value) / 280) };
+    if (dragging) return { left: x - R + dragX.value, top: dragAbsY.value - R, opacity: Math.max(0.15, 1 - Math.abs(dragX.value) / 280), transform: [{ scale: 1 }] };
+    return { left: x - R, top: animY.value - R, opacity: (playing ? 1 : 0.42) * Math.min(1, mountScale.value * 1.6), transform: [{ scale: mountScale.value }] };
   });
   const handStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${phase.value * 360}deg` }] }));
   const lit = playing || dragging;

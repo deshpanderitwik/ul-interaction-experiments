@@ -1,4 +1,4 @@
-import type { Scale } from '../scale';
+import { scaleSteps, type Scale } from '../scale';
 
 // Bodies — the atom of solo composition. A "body" is a persistent, looping voice
 // you plant in the scene: it sits at a point, plays one note on its subdivision,
@@ -39,14 +39,10 @@ export function periodMs(denom: number, bpm: number): number {
   return 240000 / (bpm * denom);
 }
 
-const MAJOR = [0, 2, 4, 5, 7, 9, 11];
-const MINOR = [0, 2, 3, 5, 7, 8, 10];
-
 // Scale-member MIDI notes within [minMidi, maxMidi], ascending. The note picker
 // steps through this so every body lands on the shared scale — coherence for free.
 export function scaleMidiLadder(scale: Scale, minMidi: number, maxMidi: number): number[] {
-  const steps = scale.type === 'major' ? MAJOR : MINOR;
-  const set = new Set(steps.map((s) => (scale.root + s) % 12));
+  const set = new Set(scaleSteps(scale.type).map((s) => (scale.root + s) % 12));
   const out: number[] = [];
   for (let m = minMidi; m <= maxMidi; m++) {
     if (set.has(((m % 12) + 12) % 12)) out.push(m);

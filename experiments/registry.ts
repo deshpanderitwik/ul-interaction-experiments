@@ -385,6 +385,13 @@ export const experiments: Experiment[] = [
     accent: '#ff9f43',
     load: () => import('./adsr'),
   },
+  {
+    id: 'sampler',
+    title: 'Sampler',
+    blurb: 'The phone starts listening: press start and the mic streams the room in live, drawn as a scrolling waveform; stop pauses it. The first step toward sampling the world as musical material.',
+    accent: '#ff7d9c',
+    load: () => import('./sampler'),
+  },
 ];
 
 export function getExperiment(id: string | undefined): Experiment | undefined {

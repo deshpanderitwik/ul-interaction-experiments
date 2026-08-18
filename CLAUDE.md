@@ -9,7 +9,7 @@ multiple agents/threads work at once.
 ## The one shared resource to respect
 
 Almost everything here is safely isolated per branch. The exception is the
-**OTA channel + runtime** (`preview` channel @ `runtimeVersion 1.0.0`). EAS
+**OTA channel + runtime** (`preview` channel @ `runtimeVersion 1.2.0`). EAS
 Update serves **only the latest publish per channel** to every install. If two
 threads both `eas update --channel preview`, the last one wins and silently
 replaces what everyone's phone pulls — including work from a branch that doesn't
@@ -41,12 +41,12 @@ contain yours.
   seconds, no rebuild.
 - **Native** (Swift in `modules/`, a new native dependency, `ios.infoPlist`, the
   app `version`) → `eas build` + reinstall via TestFlight. An OTA update only
-  reaches installs on the **matching `runtimeVersion`** (`1.0.0`), so bumping the
+  reaches installs on the **matching `runtimeVersion`** (`1.2.0`), so bumping the
   version strands existing installs until they reinstall the new build.
 
 ## Identity that must not change
 `projectId e5405cda…`, bundle `com.ritdeshpande.hello`, slug `hello`,
-`runtimeVersion 1.0.0`, channel `preview`. These pin the installed app and its
+`runtimeVersion 1.2.0`, channel `preview`. These pin the installed app and its
 OTA stream — changing any of them orphans every existing install. The
 user-facing display name (`ul-interaction-experiments-v2`) is separate and safe
 to change (it's baked in at build time).

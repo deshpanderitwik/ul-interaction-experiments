@@ -14,6 +14,13 @@ _Working draft — wording not locked:_
 > image are one material — and that accumulate into whole compositions**, not just
 > one-off patterns.
 
+_Alt draft (post-corpus, sharper on what the sketches proved):_
+
+> On the phone's glass, what you see can be what sounds. A gesture doesn't
+> trigger a note — it leaves a **living trace** that keeps playing. And the
+> traces are themselves instruments: **playable, pluckable, revisable** — until
+> a whole composition is standing in front of you, with no timeline in sight.
+
 ## What we're arguing
 
 - **Buttons/pads/sliders aren't the enemy.** They're legible because they're
@@ -168,13 +175,91 @@ modulation)** — cheap, extends the scroll code, and instantly gives the piece 
 emotional arc. #1 + #2 alone are enough to shoot a 1–3 min video; #3 and #4 are the
 second act once the core loop feels good.
 
+## Where the corpus stands — audit (late Aug 2026)
+
+Everything above froze when the corpus was bodies / paths / emitters / slingshot
++ fence. Since then the sketches answered several of the doc's own open
+questions — the story should now be told from what exists.
+
+**Level 2 got its answer: motion = melody, and the aliveness dial is per-node.**
+The predicted shape ("a deterministic path with a thin generative jitter") is
+literally what got built:
+- **Paths → Extended Grid** — draw a path and the body travels it, playing as it
+  goes. Melody is motion; spatial persistence keeps it real across the scrolling
+  window.
+- **Bent Paths** — press a path's length and it bows to the finger like a
+  string; release and it twangs, sounding its segment. **Revision as physics,
+  not menus** — the first real answer to "how do you edit a committed gesture."
+- **Path Explorations** — each waypoint carries its own aliveness setting:
+  📌 static / 🎲 wander (bounded ±2, re-rolled at cycle start so you see where
+  it's headed) / ✏️ sub-path (a laid orbit of points the node steps through,
+  returning home each cycle). Repeatability and variation coexist per node.
+
+**Level 3 got its first answer — in the *time* family, not bodies.** A second
+substrate grew that this doc never recorded: Time → Eight/Sixteen Step → 3D
+Clock → Overlapping Rings I–IV (layers in colour, velocity bars, every-N
+rotation skips, live resolution) → **Ring Joining**: whole ring-stacks as live
+tokens in a column, one active, reorder / duplicate / remove, zoom *into* a
+token to edit its sub-scene. That is **structure without a timeline** — an
+arrangement you hold as an object (tilt into the isometric stack) — the
+frontier facet, first-pass solved, via exactly the "nesting" move sketched
+above.
+
+**DEVELOP is half-built.** The scroll window shifts register; the **seven
+diatonic modes** (just shipped) re-harmonize every experiment at once. Missing
+for the film: the *performance-gesture* version — mode/transpose as a touch on
+the field, not a settings sheet.
+
+**Coherence machinery is real and crosses experiments.** One shared scheduler
+phase-locks everything — including across sketch families (**Combinations**:
+Path Explorations + drums on one clock). Drums add the percussion floor.
+
+**A new axis appeared that the statement doesn't yet claim: sensing.** The
+**Sampler** (mic → live scrolling waveform; native module built, awaiting
+TestFlight) and the camera (in the shipped binary, unused) point at the *world*
+as material. Stance for now: a **coda / sequel thread**, not this video's
+spine — but see the closing-shot candidate below.
+
 ## The video
 
 - Length: **1–3 minutes** — needs an arc (build → develop → move → resolve), not a
   single-gesture clip.
-- Format / language: _TBD_
+- Format / language: leaning **filmed hands-on-glass** (overhead) intercut with
+  clean screen captures — pure screencap hides the gesture; a tap with no
+  visible finger reads as autoplay. _Not locked._
 - Capture: iOS screen recording (screen + audio together). Keep sketches
   capture-ready — clean attract state, no dev chrome.
+
+### Story arc (draft v1 — cast entirely from built sketches)
+
+1. **Provocation (~5s).** The inherited pad grid, named and dismissed in one
+   beat. Then black.
+2. **Coupling (~10s).** One touch → light and note as a single event (duet /
+   raindrops language). Sound made visible, before any structure.
+3. **BUILD (~25s).** Extended Grid: bodies planted one by one, each joining the
+   groove phase-locked; ripples layer; position=pitch reads like a staff. A
+   scene accumulates in front of you.
+4. **COME ALIVE (~35s) — the core.** Lay a path; the body travels — melody is
+   motion. Reach into it: drag a waypoint, then **pluck** a segment — twang.
+   Flip a node 🎲, give another a ✏️ sub-path — the piece starts developing
+   itself.
+5. **DEVELOP (~20s).** The field modulates under the music: scroll shifts
+   register; a mode flip re-harmonizes the same motion; drums enter
+   (Combinations).
+6. **MOVE (~25s).** Rings: the loop as a circle; layers stack; tilt into the 3D
+   arrangement-as-object; Ring Joining chains sections and zooms into one.
+   Structure without a timeline.
+7. **RESOLVE (~10s).** Hands off — the composition plays itself.
+   _Stretch coda (needs the new build): the phone lifts and listens; the room's
+   waveform breathes into frame — the world is next._
+
+### Pre-shoot gaps (small, OTA-able)
+
+- A **performance gesture for mode/transpose** in one bodies sketch — the
+  settings sheet is invisible on film.
+- **Attract / hide states** everywhere the camera goes (Extended Grid has the
+  eye toggle; audit the rest).
+- Pick the per-beat sketches and lock their look (stark B/W reads best).
 
 ## Open questions
 

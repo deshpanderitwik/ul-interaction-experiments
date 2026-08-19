@@ -222,6 +222,11 @@ spine — but see the closing-shot candidate below.
 
 ## The video
 
+> **The script now lives in `SCRIPT.md`** — the workshopped core framing (the
+> five-joint argument), the act/claim spine, per-beat scaffold with VO slots,
+> and the open production decisions. This section stays as the argument-level
+> summary; write the words over there.
+
 - Length: **1–3 minutes** — needs an arc (build → develop → move → resolve), not a
   single-gesture clip.
 - Format / language: leaning **filmed hands-on-glass** (overhead) intercut with

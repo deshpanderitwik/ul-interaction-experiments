@@ -392,6 +392,21 @@ export const experiments: Experiment[] = [
     accent: '#ff7d9c',
     load: () => import('./sampler'),
   },
+  {
+    id: 'channels',
+    title: 'Channels',
+    blurb: 'Parallel voices and the attention gesture — glass-born takes on the DAW track. What does it feel like to move focus through an ensemble instead of clicking a tab?',
+    accent: '#66e0d0',
+    load: () => import('./channels'),
+    variations: [
+      {
+        id: 'one',
+        title: 'Channels 1',
+        blurb: 'The bare skeleton: colored squares at different depths. Swipe left/right to pull focus — continuous under the finger, snapping to a channel on release; the focused square is sharp, the rest blur behind.',
+        load: () => import('./channels/one'),
+      },
+    ],
+  },
 ];
 
 export function getExperiment(id: string | undefined): Experiment | undefined {

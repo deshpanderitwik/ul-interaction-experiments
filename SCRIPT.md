@@ -43,7 +43,9 @@ single spoken line:
 **Optional bigger frame** (cold-open candidate): every new medium begins by
 imitating the old one — early cinema filmed stage plays until it discovered the
 close-up and the cut. This *predicts* a native grammar exists and is findable,
-and recasts the corpus as the search for music's close-up.
+and recasts the corpus as the search for music's close-up. _(Research grounding —
+remediation, skeuomorphism, mechanisms, caveats, and the "impossible on a piano"
+test — lives in THESIS.md → "Grounding: imitation-first is a law of new media.")_
 
 ## Voice & register
 

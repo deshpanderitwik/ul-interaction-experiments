@@ -43,6 +43,65 @@ _Alt draft (post-corpus, sharper on what the sketches proved):_
 - **The video is itself a provocation.** Its job is to argue the serious
   instrument is possible and worth wanting — not to be one yet.
 
+## Grounding: imitation-first is a law of new media (research notes)
+
+The "we painted the piano on the screen" beat is an instance of a genuinely
+well-studied phenomenon — several fields discovered it independently:
+
+- **Media theory** — McLuhan: "the content of any new medium is always another
+  medium"; his rearview-mirror line ("we march backwards into the future") is
+  Act I in one sentence. The canonical treatment is Bolter & Grusin,
+  *Remediation* (1999): new media define themselves by refashioning old ones.
+- **Design history / archaeology** — **skeuomorphism** (term coined 1880s):
+  ceramic pots imitating metal rivets; Greek temple triglyphs are petrified
+  wooden beam-ends. The pattern predates screens by ~3,000 years.
+- **History of technology** — "horseless carriage syndrome"; new media even get
+  *named* in the old medium's vocabulary (wireless, e-mail, horseless carriage).
+- Everywhere once you look: Gutenberg's type imitated scribal hands (gaps left
+  for hand-illuminated initials); photography spent decades imitating painting
+  before "straight photography"; early TV was radio with a camera; early web
+  was brochures. **Our purest specimen: the piano roll** — the dominant music
+  editing surface in 2026 is named after, and shaped like, a 1900s player-piano
+  paper roll.
+
+**Why it happens (mechanisms — they have different fates):**
+1. *Legibility* — borrowed forms are instant mental models; skeuomorphs are
+   training wheels (early Apple did it deliberately).
+2. *Maker inheritance* — early films were made by stage directors, early TV by
+   radio people, DAWs by and for hardware-studio musicians. The old medium's
+   categories of thought port with them.
+3. *Economics* — cheapest first content is ported content; first audience comes
+   from the old medium.
+4. *Early constraints masquerade as the medium's nature* — early film cameras
+   were heavy/static, so stage framing was partly forced. Native grammar
+   becomes possible only as constraints lift — then someone has to notice.
+5. *Path dependence* — the ported form outlives its rationale (piano roll >
+   100 years past the player piano).
+
+**The arc:** imitation → adaptation → native forms. Film's native grammar was
+proven by shots *impossible on a stage* — the close-up, the cut.
+
+**Caveats (for the essay version, not the 5s VO line):** film historians note
+early cinema was wilder than "filmed plays" (Méliès, actualités) and editing
+emerged collectively, not in one genius stroke — the Film d'Art movement (1908)
+did literally film stage plays, so the line is true, just avoid a
+single-inventor telling. Bolter & Grusin would add that remediation never fully
+ends — media borrow in both directions forever.
+
+**What this gives the script:**
+- The sharper Act I indictment: the imitation was *rational* (legibility,
+  trained habits, real early constraints) — but **the constraints have expired
+  and the imitation persists out of habit. The bridge was supposed to be
+  temporary, and we're still living on it.**
+- **The "impossible on a piano" test** for every demo beat: film proved its
+  grammar with shots impossible on a stage, so each sketch shown should be
+  something a piano cannot do — a trace that keeps playing, a melody you pluck
+  mid-flight, a composition you tilt into.
+- Predictive confidence: the pattern has run to completion in every prior
+  medium — the native grammar always existed, was always found, always looked
+  obvious in retrospect. Music on glass hasn't had its close-up moment yet;
+  the video's job is to make people *want* it to exist.
+
 ## The three levels of solo composition
 
 The problem decomposes into a hierarchy. A composition is made of scenes; a scene

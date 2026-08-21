@@ -48,6 +48,8 @@ public class MicTapModule: Module {
   private var grainEngine: GrainEngine?
   private var grainNode: AVAudioSourceNode?
   private let grainRate: Double = 48000
+  // Ceiling guard on the grain bus (mirrors the synth bus's mastering limiter).
+  private var grainLimiter: MiniLimiter?
 
   public func definition() -> ModuleDefinition {
     Name("MicTap")
@@ -223,6 +225,20 @@ public class MicTapModule: Module {
       self.lock.unlock()
     }
 
+    // Grain-bus ceiling guard (a lookahead limiter matching the synth bus's
+    // mastering limiter): gain/ceiling in dB, release ms. Pass -999 to leave
+    // a field as-is.
+    AsyncFunction("setSampleLimiter") { (onOff: Double, gain: Double, ceiling: Double, release: Double) in
+      self.lock.lock()
+      if let lim = self.grainLimiter {
+        if onOff > -900 { lim.on = onOff }
+        if gain > -900 { lim.gainDb = gain }
+        if ceiling > -900 { lim.ceilingDb = ceiling }
+        if release > -900 { lim.releaseMs = release }
+      }
+      self.lock.unlock()
+    }
+
     // Write a stored sample to Documents as a WAV; returns the file path.
     AsyncFunction("saveWav") { (id: Int) -> String in
       guard let s = self.samples[id],
@@ -299,6 +315,7 @@ public class MicTapModule: Module {
     // through the same delay → reverb tail).
     let ge = GrainEngine(sampleRate: grainRate)
     grainEngine = ge
+    grainLimiter = MiniLimiter(sampleRate: grainRate)
     if let stereo = AVAudioFormat(standardFormatWithSampleRate: grainRate, channels: 2) {
       let node = AVAudioSourceNode(format: stereo) { [weak self] _, _, frameCount, ablPtr -> OSStatus in
         guard let self = self, let engine = self.grainEngine else { return noErr }
@@ -306,9 +323,10 @@ public class MicTapModule: Module {
         let frames = Int(frameCount)
         self.lock.lock()
         for frame in 0..<frames {
-          let (l, r) = engine.processSample()
-          let sL = Float(max(-1.5, min(1.5, l)))
-          let sR = Float(max(-1.5, min(1.5, r)))
+          var (l, r) = engine.processSample()
+          self.grainLimiter?.process(&l, &r)
+          let sL = Float(max(-1.0, min(1.0, l)))
+          let sR = Float(max(-1.0, min(1.0, r)))
           for (ci, buffer) in abl.enumerated() {
             guard let data = buffer.mData else { continue }
             data.assumingMemoryBound(to: Float.self)[frame] = ci == 0 ? sL : sR

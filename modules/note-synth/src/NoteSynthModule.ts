@@ -52,6 +52,35 @@ export type PatchParams = Record<string, number>;
  */
 export type FxParams = Record<string, number>;
 
+/**
+ * Mastering chain (requires runtime >= 1.4.0): input gain → 5-band EQ →
+ * 3-band multiband compressor → per-band stereo width → exciter → lookahead
+ * brickwall limiter. Off by default (master.on 0 = the legacy soft-clip
+ * sound). Flat keys:
+ * - master.on / master.gain (dB)
+ * - eq.lowGain/lowFreq (shelf) · eq.pNGain/pNFreq/pNQ (N = 1..3, peaking) ·
+ *   eq.highGain/highFreq (shelf) — gains in dB
+ * - comp.on / comp.xover1 / comp.xover2 (Hz) · comp.bN.thresh (dB) /
+ *   comp.bN.ratio / comp.bN.attack (ms) / comp.bN.release (ms) /
+ *   comp.bN.gain (makeup dB), N = 1 low / 2 mid / 3 high
+ * - width.b1/b2/b3 (0 mono … 1 as-is … 2 wide; width.b1 0 = bass mono)
+ * - exciter.on/drive/mix
+ * - limiter.on / limiter.gain (dB in) / limiter.ceiling (dB, <= 0) /
+ *   limiter.release (ms)
+ */
+export type MasterParams = Record<string, number>;
+
+/** Mastering meters, dB: RMS in/out, held peak, per-band + limiter reduction. */
+export type MasterMeters = {
+  inRms: number;
+  outRms: number;
+  outPeak: number;
+  grLow: number;
+  grMid: number;
+  grHigh: number;
+  grLimiter: number;
+};
+
 // The shape of the native synth, as seen from JS. Each method maps 1:1 to a
 // Function/AsyncFunction in NoteSynthModule.swift.
 declare class NoteSynthModule extends NativeModule {
@@ -128,6 +157,14 @@ declare class NoteSynthModule extends NativeModule {
    * An empty array returns the tremolo to its LFO.
    */
   setTremPattern(steps: number[]): Promise<void>;
+  /** Set one mastering parameter (see MasterParams for the key reference). */
+  setMasterParam(key: string, value: number): Promise<void>;
+  /** Set many mastering parameters at once (a preset). */
+  setMasterPreset(params: MasterParams): Promise<void>;
+  /** Read the mastering meters (poll at UI rate for display). */
+  getMasterMeters(): MasterMeters;
+  /** Clear the held output-peak meter. */
+  resetMasterPeak(): void;
   /**
    * Shared synth FX tail: reverbMix/delayMix wet % (0–100, default dry);
    * delayTime seconds (max 2); feedback 0–95. Negative leaves a field as-is.

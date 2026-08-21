@@ -32,6 +32,10 @@ public class NoteSynthModule: Module {
   // Soundtoys-flavored insert rack (FxRack.swift), processing the stereo mix
   // pre-master-clip. Self-bypasses when every unit is off.
   private var fxRack: FxRack?
+  // Mastering chain (MasterChain.swift): EQ → multiband comp → width →
+  // exciter → lookahead limiter. When on, it owns the ceiling (the legacy
+  // tanh soft-clip is bypassed); off = exactly the old sound.
+  private var masterChain: MasterChain?
 
   // MARK: - Legacy voice pool (unchanged behavior)
 
@@ -349,6 +353,41 @@ public class NoteSynthModule: Module {
     AsyncFunction("setTremPattern") { (steps: [Double]) in
       self.lock.lock()
       self.fxRack?.setPattern(steps)
+      self.lock.unlock()
+    }
+
+    // ---- mastering chain (MasterChain.swift) ----
+
+    // Set one mastering parameter. Keys: master.on/gain · eq.lowGain/lowFreq/
+    // p1Gain/p1Freq/p1Q/p2…/p3…/highGain/highFreq · comp.on/xover1/xover2 and
+    // comp.bN.thresh/ratio/attack/release/gain (N = 1..3) · width.b1/b2/b3
+    // (0 mono … 1 … 2 wide; width.b1 0 = bass mono) · exciter.on/drive/mix ·
+    // limiter.on/gain/ceiling/release.
+    AsyncFunction("setMasterParam") { (key: String, value: Double) in
+      self.lock.lock()
+      self.masterChain?.setParam(key, value)
+      self.lock.unlock()
+    }
+
+    // Set many mastering parameters at once (a preset).
+    AsyncFunction("setMasterPreset") { (params: [String: Double]) in
+      self.lock.lock()
+      for (k, v) in params { self.masterChain?.setParam(k, v) }
+      self.lock.unlock()
+    }
+
+    // Meters for UI display: inRms/outRms (dBFS-ish), outPeak (dB, held —
+    // resetMasterPeak clears), grLow/grMid/grHigh/grLimiter (dB reduction).
+    Function("getMasterMeters") { () -> [String: Double] in
+      self.lock.lock()
+      let m = self.masterChain?.meters() ?? [:]
+      self.lock.unlock()
+      return m
+    }
+
+    Function("resetMasterPeak") {
+      self.lock.lock()
+      self.masterChain?.resetPeak()
       self.lock.unlock()
     }
 
@@ -737,6 +776,7 @@ public class NoteSynthModule: Module {
     try? session.setActive(true)
     if session.sampleRate > 0 { sampleRate = session.sampleRate }
     fxRack = FxRack(sampleRate: sampleRate)
+    masterChain = MasterChain(sampleRate: sampleRate)
 
     guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else {
       return
@@ -988,11 +1028,21 @@ public class NoteSynthModule: Module {
         mixR += vR * amp * (pan >= 0 ? 1.0 : 1.0 + pan)
       }
 
-      // Insert rack (Soundtoys chain) before the master soft-clip.
+      // Insert rack (Soundtoys chain) before mastering.
       fxRack?.process(&mixL, &mixR)
 
-      let sampleL = Float(tanh(mixL))
-      let sampleR = Float(tanh(mixR))
+      // Mastering chain owns the ceiling when on; otherwise the legacy tanh
+      // soft-clip keeps the pre-mastering sound byte-identical.
+      let sampleL: Float
+      let sampleR: Float
+      if let mc = masterChain, mc.on > 0.5 {
+        mc.process(&mixL, &mixR)
+        sampleL = Float(max(-1.0, min(1.0, mixL)))
+        sampleR = Float(max(-1.0, min(1.0, mixR)))
+      } else {
+        sampleL = Float(tanh(mixL))
+        sampleR = Float(tanh(mixR))
+      }
       for (ci, buffer) in abl.enumerated() {
         guard let data = buffer.mData else { continue }
         data.assumingMemoryBound(to: Float.self)[frame] = ci == 0 ? sampleL : sampleR

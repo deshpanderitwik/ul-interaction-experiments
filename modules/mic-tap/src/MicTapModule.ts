@@ -110,6 +110,12 @@ declare class MicTapModule extends NativeModule<MicTapEvents> {
   grainSet(voice: number, position: number, gain: number, pan: number, semis: number): Promise<void>;
   /** All clouds → release (soft panic). */
   grainReleaseAll(): Promise<void>;
+  /**
+   * Grain-bus ceiling guard (lookahead limiter matching the synth's mastering
+   * limiter): on 0/1; gain/ceiling in dB; release ms. Pass -999 to leave a
+   * field as-is.
+   */
+  setSampleLimiter(on: number, gain: number, ceiling: number, release: number): Promise<void>;
 }
 
 // requireOptional → null (instead of throwing) on a build that lacks the native

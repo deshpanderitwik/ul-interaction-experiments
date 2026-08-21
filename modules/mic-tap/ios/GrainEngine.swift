@@ -352,3 +352,49 @@ final class GrainEngine {
     return (l, r)
   }
 }
+
+// A ceiling guard for the grain bus: a lookahead limiter, alone — the same
+// instant-down / smooth-up gain envelope over a short delay used by the synth
+// bus's mastering chain.
+final class MiniLimiter {
+  private let sr: Double
+  private let lookahead: Int
+  private var dlL: [Double]
+  private var dlR: [Double]
+  private var dlW = 0
+  private var env = 1.0
+  var on = 1.0
+  var gainDb = 0.0
+  var ceilingDb = -0.5
+  var releaseMs = 120.0
+
+  init(sampleRate: Double) {
+    sr = sampleRate
+    lookahead = max(16, Int(sampleRate * 0.0015))
+    dlL = [Double](repeating: 0, count: lookahead)
+    dlR = [Double](repeating: 0, count: lookahead)
+  }
+
+  func process(_ l: inout Double, _ r: inout Double) {
+    if on < 0.5 { return }
+    let g = pow(10.0, gainDb / 20.0)
+    l *= g
+    r *= g
+    let ceiling = pow(10.0, min(0.0, ceilingDb) / 20.0)
+    let peakIn = max(abs(l), abs(r))
+    let target = peakIn > ceiling ? ceiling / peakIn : 1.0
+    let rel = 1.0 - exp(-1.0 / (max(10.0, releaseMs) * 0.001 * sr))
+    if target < env {
+      env = target
+    } else {
+      env += rel * (min(1.0, target) - env)
+    }
+    let outL = dlL[dlW] * env
+    let outR = dlR[dlW] * env
+    dlL[dlW] = l
+    dlR[dlW] = r
+    dlW = (dlW + 1) % lookahead
+    l = max(-ceiling, min(ceiling, outL))
+    r = max(-ceiling, min(ceiling, outR))
+  }
+}

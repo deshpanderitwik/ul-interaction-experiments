@@ -9,6 +9,16 @@ export const FILTERS = { off: 0, lowpass: 1, highpass: 2, bandpass: 3, notch: 4 
 export const LFO_SHAPES = { sine: 0, triangle: 1, saw: 2, square: 3, sampleHold: 4 } as const;
 export type PatchParams = Record<string, number>;
 export type FxParams = Record<string, number>;
+export type MasterParams = Record<string, number>;
+export type MasterMeters = {
+  inRms: number;
+  outRms: number;
+  outPeak: number;
+  grLow: number;
+  grMid: number;
+  grHigh: number;
+  grLimiter: number;
+};
 
 // No synth on web — no-ops so sketches can run in the browser during
 // development without crashing.
@@ -68,6 +78,12 @@ class NoteSynthModule extends NativeModule {
   async setFxParam(_key: string, _value: number): Promise<void> {}
   async setFxPreset(_params: Record<string, number>): Promise<void> {}
   async setTremPattern(_steps: number[]): Promise<void> {}
+  async setMasterParam(_key: string, _value: number): Promise<void> {}
+  async setMasterPreset(_params: Record<string, number>): Promise<void> {}
+  getMasterMeters(): MasterMeters {
+    return { inRms: -90, outRms: -90, outPeak: -90, grLow: 0, grMid: 0, grHigh: 0, grLimiter: 0 };
+  }
+  resetMasterPeak(): void {}
   async setSynthFx(
     _reverbMix: number,
     _delayMix: number,

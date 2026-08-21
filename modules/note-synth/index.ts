@@ -9,6 +9,8 @@ export {
   WARPS,
   WAVES,
   type FxParams,
+  type MasterMeters,
+  type MasterParams,
   type PatchParams,
   type WaveName,
 } from './src/NoteSynthModule';

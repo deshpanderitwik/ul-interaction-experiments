@@ -5,12 +5,19 @@ import { NativeModule, requireOptionalNativeModule } from 'expo';
 // `rms` is the buffer's overall level (0..1-ish).
 export type MicFrame = { peaks: number[]; rms: number; sampleRate: number };
 
+// A captured take, stored natively by id (PCM never crosses the bridge).
+export type Sample = { id: number; duration: number; sampleRate: number };
+
 type MicTapEvents = {
   onAudio: (frame: MicFrame) => void;
+  /** A non-looping voice finished on its own (stopVoice does not emit this). */
+  onVoiceEnd: (e: { voice: number }) => void;
 };
 
-// The shape of the native mic tap, as seen from JS. Each method maps 1:1 to a
-// Function/AsyncFunction in MicTapModule.swift.
+// The shape of the native mic tap + sample engine, as seen from JS. Each
+// method maps 1:1 to a Function/AsyncFunction in MicTapModule.swift. The
+// capture/playback surface requires a binary with runtime >= 1.3.0 — on older
+// builds the whole module is null.
 declare class MicTapModule extends NativeModule<MicTapEvents> {
   /** True while the mic tap is installed and capturing. */
   isRunning(): boolean;
@@ -21,6 +28,41 @@ declare class MicTapModule extends NativeModule<MicTapEvents> {
   start(): Promise<boolean>;
   /** Stop capturing (idempotent). Frames already delivered stay with JS. */
   stop(): Promise<void>;
+  /** Begin keeping the tap's PCM (mic must be running; capped ~60s). */
+  recordStart(): Promise<boolean>;
+  /** Stop keeping PCM; stores the take. id is -1 if nothing was recorded. */
+  recordStop(): Promise<Sample>;
+  /** Drop a stored sample. */
+  discard(id: number): Promise<void>;
+  /**
+   * Play a stored sample on a free voice. rate re-pitches (0.25–4, 1 = as
+   * recorded); gain 0..1; pan -1..1; cutoff Hz (<= 0 bypasses the lowpass);
+   * loop repeats until stopVoice; startFrac/endFrac select a 0..1 window
+   * (endFrac <= 0 means "to the end"). Resolves the voice handle, -1 if none
+   * was free.
+   */
+  play(
+    id: number,
+    rate: number,
+    gain: number,
+    pan: number,
+    cutoff: number,
+    loop: boolean,
+    startFrac: number,
+    endFrac: number
+  ): Promise<number>;
+  /** Retune a sounding voice; pass -999 for any field to leave it as-is. */
+  setVoice(voice: number, rate: number, gain: number, pan: number, cutoff: number): Promise<void>;
+  /** Stop a voice and free it for reuse. */
+  stopVoice(voice: number): Promise<void>;
+  /**
+   * Global sample-bus FX: reverbMix/delayMix are wet % (0–100, both default
+   * 0 = dry); delayTime seconds (max 2); feedback 0–95. Negative delayTime or
+   * feedback leaves that field as-is.
+   */
+  setFx(reverbMix: number, delayMix: number, delayTime: number, feedback: number): Promise<void>;
+  /** Write a stored sample to Documents as WAV; resolves the file path. */
+  saveWav(id: number): Promise<string>;
 }
 
 // requireOptional → null (instead of throwing) on a build that lacks the native

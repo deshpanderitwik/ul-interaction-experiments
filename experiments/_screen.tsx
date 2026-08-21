@@ -1,3 +1,4 @@
+import { useKeepAwake } from 'expo-keep-awake';
 import React, { Suspense, useMemo } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { ExperimentHost } from './_host';
@@ -19,6 +20,9 @@ export function HostedExperiment({
   settingsKey?: string;
 }) {
   const Lazy = useMemo(() => (load ? React.lazy(load) : null), [load]);
+  // The screen never sleeps while an experiment is open — compositions play on
+  // and filming isn't interrupted.
+  useKeepAwake();
 
   return (
     <ExperimentHost settingsKey={settingsKey}>

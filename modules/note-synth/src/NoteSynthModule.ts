@@ -1,5 +1,9 @@
 import { NativeModule, requireOptionalNativeModule } from 'expo';
 
+/** Oscillator shapes for the v2 voices, by native index. */
+export const WAVES = { sine: 0, triangle: 1, saw: 2, square: 3 } as const;
+export type WaveName = keyof typeof WAVES;
+
 // The shape of the native synth, as seen from JS. Each method maps 1:1 to a
 // Function/AsyncFunction in NoteSynthModule.swift.
 declare class NoteSynthModule extends NativeModule {
@@ -20,6 +24,32 @@ declare class NoteSynthModule extends NativeModule {
     sustain: number,
     hold: number,
     release: number
+  ): Promise<void>;
+  /**
+   * v2 pluck with timbre (requires a binary with runtime >= 1.3.0): wave is a
+   * WAVES index, cutoff a lowpass in Hz (<= 0 bypasses), pan -1..1 (balance
+   * law — 0 sounds identical to the legacy mono pluck).
+   */
+  pluck2(
+    frequency: number,
+    gain: number,
+    decay: number,
+    wave: number,
+    cutoff: number,
+    pan: number
+  ): Promise<void>;
+  /** v2 ADSR note with the same timbre controls as pluck2. */
+  playADSR2(
+    frequency: number,
+    gain: number,
+    attack: number,
+    decay: number,
+    sustain: number,
+    hold: number,
+    release: number,
+    wave: number,
+    cutoff: number,
+    pan: number
   ): Promise<void>;
   /** Gate on the sustained bend voice at a frequency/gain. */
   bendStart(frequency: number, gain: number): Promise<void>;

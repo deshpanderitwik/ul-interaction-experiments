@@ -37,6 +37,14 @@ public class NoteSynthModule: Module {
     var decInc: Double = 0       // per-sample fall during decay
     var relInc: Double = 0       // per-sample fall during release
     var holdSamples: Int = 0     // samples to hold sustain before release
+    // timbre (v2): waveform, one-pole lowpass, stereo balance.
+    // wave: 0 sine, 1 triangle, 2 saw, 3 square. lpAlpha 1 = filter bypassed.
+    // gL/gR are balance-law gains (center = 1/1, matching the old mono path).
+    var wave: Int = 0
+    var lpAlpha: Double = 1
+    var lpState: Double = 0
+    var gL: Double = 1
+    var gR: Double = 1
   }
   private let voiceCount = 16
   private var voices = [Voice]()
@@ -80,6 +88,27 @@ public class NoteSynthModule: Module {
       self.triggerADSR(
         frequency: frequency, gain: gain, attack: attack, decay: decay,
         sustain: sustain, hold: hold, release: release)
+    }
+
+    // v2 pluck with timbre: wave 0 sine / 1 triangle / 2 saw / 3 square;
+    // cutoff in Hz (<= 0 bypasses the one-pole lowpass); pan -1..1 (balance
+    // law — center leaves loudness identical to the legacy mono pluck).
+    AsyncFunction("pluck2") {
+      (frequency: Double, gain: Double, decay: Double, wave: Int, cutoff: Double, pan: Double) in
+      self.trigger(
+        frequency: frequency, gain: gain, decay: decay,
+        wave: wave, cutoff: cutoff, pan: pan)
+    }
+
+    // v2 ADSR note with the same timbre controls as pluck2.
+    AsyncFunction("playADSR2") {
+      (frequency: Double, gain: Double, attack: Double, decay: Double,
+       sustain: Double, hold: Double, release: Double,
+       wave: Int, cutoff: Double, pan: Double) in
+      self.triggerADSR(
+        frequency: frequency, gain: gain, attack: attack, decay: decay,
+        sustain: sustain, hold: hold, release: release,
+        wave: wave, cutoff: cutoff, pan: pan)
     }
 
     // Gate on the sustained bend voice at a frequency/gain.
@@ -140,8 +169,10 @@ public class NoteSynthModule: Module {
 
       self.lock.lock()
       for frame in 0..<frames {
-        var mix = 0.0
+        var mixL = 0.0
+        var mixR = 0.0
         for i in 0..<self.voiceCount where self.voices[i].active {
+          var env = 0.0
           if self.voices[i].isADSR {
             // Advance the linear ADSR stage machine one sample.
             switch self.voices[i].stage {
@@ -170,29 +201,56 @@ public class NoteSynthModule: Module {
                 self.voices[i].active = false
               }
             }
-            mix += sin(self.voices[i].phase) * self.voices[i].env * self.voices[i].peak
+            env = self.voices[i].env * self.voices[i].peak
           } else {
-            mix += sin(self.voices[i].phase) * self.voices[i].amp
+            env = self.voices[i].amp
             self.voices[i].amp *= self.voices[i].decayMul
             if self.voices[i].amp < 0.0002 { self.voices[i].active = false }
           }
+
+          // Oscillator: sine / triangle / saw / square from the shared phase.
+          var s: Double
+          switch self.voices[i].wave {
+          case 1:
+            let t = self.voices[i].phase / twoPi
+            s = t < 0.25 ? 4.0 * t : (t < 0.75 ? 2.0 - 4.0 * t : 4.0 * t - 4.0)
+          case 2:
+            s = 2.0 * (self.voices[i].phase / twoPi) - 1.0
+          case 3:
+            s = self.voices[i].phase < Double.pi ? 1.0 : -1.0
+          default:
+            s = sin(self.voices[i].phase)
+          }
+          var out = s * env
+          // One-pole lowpass tames the bright waves (and the aliasing of the
+          // naive saw/square); alpha 1 = bypass.
+          if self.voices[i].lpAlpha < 1.0 {
+            self.voices[i].lpState += self.voices[i].lpAlpha * (out - self.voices[i].lpState)
+            out = self.voices[i].lpState
+          }
+          mixL += out * self.voices[i].gL
+          mixR += out * self.voices[i].gR
+
           self.voices[i].phase += self.voices[i].phaseInc
           if self.voices[i].phase >= twoPi { self.voices[i].phase -= twoPi }
         }
         // Sustained bend voice: ramp amp toward the gate target (~5ms) so on/off
-        // is click-free, slide pitch via phaseInc with no phase reset.
+        // is click-free, slide pitch via phaseInc with no phase reset. Centered.
         if self.bendOn || self.bendAmp > 0.00001 {
           let target = self.bendOn ? self.bendGain : 0.0
           self.bendAmp += (target - self.bendAmp) * 0.006
-          mix += sin(self.bendPhase) * self.bendAmp
+          let b = sin(self.bendPhase) * self.bendAmp
+          mixL += b
+          mixR += b
           self.bendPhase += self.bendPhaseInc
           if self.bendPhase >= twoPi { self.bendPhase -= twoPi }
         }
         // tanh soft-clip keeps summed voices bounded without harsh clipping.
-        let sample = Float(tanh(mix))
-        for buffer in abl {
+        let sampleL = Float(tanh(mixL))
+        let sampleR = Float(tanh(mixR))
+        for (ci, buffer) in abl.enumerated() {
           guard let data = buffer.mData else { continue }
-          data.assumingMemoryBound(to: Float.self)[frame] = sample
+          data.assumingMemoryBound(to: Float.self)[frame] = ci == 0 ? sampleL : sampleR
         }
       }
       self.lock.unlock()
@@ -206,7 +264,21 @@ public class NoteSynthModule: Module {
     try? engine.start()
   }
 
-  private func trigger(frequency: Double, gain: Double, decay: Double) {
+  // Lowpass cutoff (Hz) → one-pole smoothing coefficient. Out-of-range = bypass.
+  private func lpAlpha(for cutoff: Double) -> Double {
+    guard cutoff > 0, cutoff < sampleRate * 0.45 else { return 1 }
+    return 1.0 - exp(-2.0 * Double.pi * cutoff / sampleRate)
+  }
+  // Balance-law pan: center keeps both sides at 1 (legacy mono loudness).
+  private func panGains(_ pan: Double) -> (Double, Double) {
+    let p = max(-1.0, min(1.0, pan))
+    return (p <= 0 ? 1.0 : 1.0 - p, p >= 0 ? 1.0 : 1.0 + p)
+  }
+
+  private func trigger(
+    frequency: Double, gain: Double, decay: Double,
+    wave: Int = 0, cutoff: Double = 0, pan: Double = 0
+  ) {
     // The engine can stop on its own (interruption, backgrounding) — restart.
     if !engine.isRunning {
       try? AVAudioSession.sharedInstance().setActive(true)
@@ -217,6 +289,8 @@ public class NoteSynthModule: Module {
     // Per-sample multiplier so amplitude falls ~60dB (×0.001) over `decay` sec.
     let decayMul = pow(0.001, 1.0 / (safeDecay * sampleRate))
     let inc = 2.0 * Double.pi * frequency / sampleRate
+    let alpha = lpAlpha(for: cutoff)
+    let (gL, gR) = panGains(pan)
 
     lock.lock()
     let idx = nextVoice
@@ -227,12 +301,18 @@ public class NoteSynthModule: Module {
     voices[idx].phaseInc = inc
     voices[idx].amp = max(0.0, min(1.0, gain))
     voices[idx].decayMul = decayMul
+    voices[idx].wave = max(0, min(3, wave))
+    voices[idx].lpAlpha = alpha
+    voices[idx].lpState = 0
+    voices[idx].gL = gL
+    voices[idx].gR = gR
     lock.unlock()
   }
 
   private func triggerADSR(
     frequency: Double, gain: Double, attack: Double, decay: Double,
-    sustain: Double, hold: Double, release: Double
+    sustain: Double, hold: Double, release: Double,
+    wave: Int = 0, cutoff: Double = 0, pan: Double = 0
   ) {
     if !engine.isRunning {
       try? AVAudioSession.sharedInstance().setActive(true)
@@ -245,6 +325,8 @@ public class NoteSynthModule: Module {
     let decSamples = max(1.0, decay * sampleRate)
     let relSamples = max(1.0, release * sampleRate)
     let inc = 2.0 * Double.pi * frequency / sampleRate
+    let alpha = lpAlpha(for: cutoff)
+    let (gL, gR) = panGains(pan)
 
     lock.lock()
     let idx = nextVoice
@@ -261,6 +343,11 @@ public class NoteSynthModule: Module {
     voices[idx].decInc = (1.0 - sus) / decSamples
     voices[idx].relInc = max(sus, 0.0001) / relSamples
     voices[idx].holdSamples = Int(max(0.0, hold) * sampleRate)
+    voices[idx].wave = max(0, min(3, wave))
+    voices[idx].lpAlpha = alpha
+    voices[idx].lpState = 0
+    voices[idx].gL = gL
+    voices[idx].gR = gR
     lock.unlock()
   }
 }

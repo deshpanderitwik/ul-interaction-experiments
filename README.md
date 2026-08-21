@@ -29,7 +29,7 @@ see [Archived: the original sketchbook](#archived-the-original-sketchbook).
 | iOS bundle id | `com.ritdeshpande.hello` |
 | App Store Connect app | `6782713709` |
 | OTA channel | `preview` |
-| runtimeVersion | `1.2.0` (explicitly pinned in `app.json`; bump on every native change) |
+| runtimeVersion | `1.3.0` (explicitly pinned in `app.json`; bump on every native change) |
 
 The home-screen **display name** is `ul-interaction-experiments-v2`; the `hello`
 slug/bundle are internal plumbing kept for continuity (renaming them would orphan

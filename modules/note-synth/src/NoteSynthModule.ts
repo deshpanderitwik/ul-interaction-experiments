@@ -4,6 +4,32 @@ import { NativeModule, requireOptionalNativeModule } from 'expo';
 export const WAVES = { sine: 0, triangle: 1, saw: 2, square: 3 } as const;
 export type WaveName = keyof typeof WAVES;
 
+// ---- wavetable engine (requires a binary with runtime >= 1.3.0) ----
+
+/** Built-in wavetable slots (0–2 may be overwritten via loadTable). */
+export const TABLES = { basic: 0, buzz: 1, vowel: 2 } as const;
+/** Oscillator warp modes (phase shapers; fmFromB modulates osc A by osc B). */
+export const WARPS = { none: 0, sync: 1, bend: 2, mirror: 3, pwm: 4, quantize: 5, fmFromB: 6 } as const;
+/** Per-voice filter types. */
+export const FILTERS = { off: 0, lowpass: 1, highpass: 2, bandpass: 3, notch: 4 } as const;
+/** LFO shapes. */
+export const LFO_SHAPES = { sine: 0, triangle: 1, saw: 2, square: 3, sampleHold: 4 } as const;
+
+/**
+ * A patch is a flat {key: number} dictionary; missing keys keep defaults.
+ * Keys (per osc, X = A or B): oscX.on, oscX.table, oscX.pos (0..1 morph),
+ * oscX.unison (1–7), oscX.detune (cents), oscX.spread (0..1),
+ * oscX.level, oscX.semi, oscX.warp (WARPS), oscX.warpAmt (0..1),
+ * oscX.phaseRand (0..1). Mixers: sub.level, noise.level. Envelopes:
+ * amp.a/d/s/r and env2.a/d/s/r (seconds / levels), env2.toCutoff (Hz),
+ * env2.toPos, env2.toPitch (semitones). LFOs (N = 1 or 2): lfoN.shape,
+ * lfoN.hz, lfoN.toPitch (semis), lfoN.toCutoff (Hz), lfoN.toPos,
+ * lfoN.toAmp, lfoN.toPan. Filter: filter.type (FILTERS), filter.cutoff (Hz),
+ * filter.res (0..1), filter.keytrack (0..1). Also: drive (0..1),
+ * glide (sec/octave-ish).
+ */
+export type PatchParams = Record<string, number>;
+
 // The shape of the native synth, as seen from JS. Each method maps 1:1 to a
 // Function/AsyncFunction in NoteSynthModule.swift.
 declare class NoteSynthModule extends NativeModule {
@@ -51,6 +77,32 @@ declare class NoteSynthModule extends NativeModule {
     cutoff: number,
     pan: number
   ): Promise<void>;
+  // ---- wavetable engine (null-guard AND runtime >= 1.3.0) ----
+
+  /**
+   * Upload a wavetable: `data` is frames × 2048 samples (frame-major, each
+   * frame one cycle in -1..1). Mip-mapped (anti-aliased) at load. Up to 8
+   * slots; 16 frames max. Resolves false on bad arguments.
+   */
+  loadTable(slot: number, frames: number, data: number[]): Promise<boolean>;
+  /** Set a patch slot (8 slots). Sounding voices read the patch live. */
+  setPatch(slot: number, params: PatchParams): Promise<void>;
+  /** Live-tweak one patch parameter — a macro knob for sweeps and morphs. */
+  setPatchParam(slot: number, key: string, value: number): Promise<void>;
+  /** Gate a wavetable note on; resolves a voice handle for noteOff (or -1). */
+  noteOn(patch: number, midi: number, gain: number, pan: number): Promise<number>;
+  /** Release a gated note (enters its amp release). */
+  noteOff(voice: number): Promise<void>;
+  /** One-shot: gate on, hold `hold` seconds, then auto-release. */
+  noteFire(patch: number, midi: number, gain: number, pan: number, hold: number): Promise<number>;
+  /** All wavetable voices → release (soft panic). */
+  releaseAll(): Promise<void>;
+  /**
+   * Shared synth FX tail: reverbMix/delayMix wet % (0–100, default dry);
+   * delayTime seconds (max 2); feedback 0–95. Negative leaves a field as-is.
+   */
+  setSynthFx(reverbMix: number, delayMix: number, delayTime: number, feedback: number): Promise<void>;
+
   /** Gate on the sustained bend voice at a frequency/gain. */
   bendStart(frequency: number, gain: number): Promise<void>;
   /** Slide the bend voice to a new frequency (smooth, legato glide). */

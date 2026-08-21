@@ -43,6 +43,12 @@ public class MicTapModule: Module {
   private let reverb = AVAudioUnitReverb()
   private let lock = NSLock()
 
+  // Granular engine (GrainEngine.swift): grain clouds over captured samples,
+  // rendered by a dedicated source node into the same FX tail.
+  private var grainEngine: GrainEngine?
+  private var grainNode: AVAudioSourceNode?
+  private let grainRate: Double = 48000
+
   public func definition() -> ModuleDefinition {
     Name("MicTap")
 
@@ -156,6 +162,67 @@ public class MicTapModule: Module {
       if feedback >= 0 { self.delay.feedback = Float(min(95.0, feedback)) }
     }
 
+    // ---- granulator (GrainEngine.swift) ----
+
+    // Set one grain-patch parameter (4 slots). Keys: position, spray, scan,
+    // size (ms), sizeJitter, density (grains/s), timeJitter, pitch (semis),
+    // pitchJitter, reverse (probability), attack, release (window fractions),
+    // panSpray, gainJitter, quantize (1 = snap grain pitch to the scale),
+    // amp.a/d/s/r (cloud envelope).
+    AsyncFunction("setGrainParam") { (slot: Int, key: String, value: Double) in
+      self.lock.lock()
+      self.grainEngine?.setParam(slot, key, value)
+      self.lock.unlock()
+    }
+
+    // Set many grain-patch parameters at once.
+    AsyncFunction("setGrainPatch") { (slot: Int, params: [String: Double]) in
+      self.lock.lock()
+      for (k, v) in params { self.grainEngine?.setParam(slot, k, v) }
+      self.lock.unlock()
+    }
+
+    // Scale for quantized grains: semitone pitch classes (e.g. [0,2,3,5,7,8,10]).
+    // Empty = chromatic.
+    AsyncFunction("setGrainScale") { (pitchClasses: [Double]) in
+      self.lock.lock()
+      self.grainEngine?.setScale(pitchClasses)
+      self.lock.unlock()
+    }
+
+    // Gate a grain cloud on over a captured sample: semis transposes every
+    // grain (0 = as recorded). Returns a voice handle, or -1.
+    AsyncFunction("grainOn") { (patch: Int, sample: Int, semis: Double, gain: Double, pan: Double) -> Int in
+      return self.startGrainVoice(patch: patch, sample: sample, semis: semis, gain: gain, pan: pan, hold: -1)
+    }
+
+    // One-shot cloud: gate on, hold `hold` seconds, then auto-release.
+    AsyncFunction("grainFire") { (patch: Int, sample: Int, semis: Double, gain: Double, pan: Double, hold: Double) -> Int in
+      return self.startGrainVoice(patch: patch, sample: sample, semis: semis, gain: gain, pan: pan, hold: max(0, hold))
+    }
+
+    // Release a cloud (enters its envelope release).
+    AsyncFunction("grainOff") { (voice: Int) in
+      self.lock.lock()
+      self.grainEngine?.noteOff(voice)
+      self.lock.unlock()
+    }
+
+    // Live per-cloud control — scrubbing: position 0..1 moves the read head
+    // under the finger. Pass -999 for any field to leave it as-is.
+    AsyncFunction("grainSet") { (voice: Int, position: Double, gain: Double, pan: Double, semis: Double) in
+      self.lock.lock()
+      self.grainEngine?.set(voice, position: position, gain: gain, pan: pan, semis: semis)
+      self.lock.unlock()
+    }
+
+    // All clouds → release (soft panic).
+    AsyncFunction("grainReleaseAll") {
+      self.lock.lock()
+      self.grainEngine?.releaseAll()
+      self.lock.unlock()
+    }
+
     // Write a stored sample to Documents as a WAV; returns the file path.
     AsyncFunction("saveWav") { (id: Int) -> String in
       guard let s = self.samples[id],
@@ -227,6 +294,50 @@ public class MicTapModule: Module {
     engine.connect(engine.mainMixerNode, to: delay, format: nil)
     engine.connect(delay, to: reverb, format: nil)
     engine.connect(reverb, to: engine.outputNode, format: nil)
+
+    // Granulator: its own stereo source node into the main mix (and so
+    // through the same delay → reverb tail).
+    let ge = GrainEngine(sampleRate: grainRate)
+    grainEngine = ge
+    if let stereo = AVAudioFormat(standardFormatWithSampleRate: grainRate, channels: 2) {
+      let node = AVAudioSourceNode(format: stereo) { [weak self] _, _, frameCount, ablPtr -> OSStatus in
+        guard let self = self, let engine = self.grainEngine else { return noErr }
+        let abl = UnsafeMutableAudioBufferListPointer(ablPtr)
+        let frames = Int(frameCount)
+        self.lock.lock()
+        for frame in 0..<frames {
+          let (l, r) = engine.processSample()
+          let sL = Float(max(-1.5, min(1.5, l)))
+          let sR = Float(max(-1.5, min(1.5, r)))
+          for (ci, buffer) in abl.enumerated() {
+            guard let data = buffer.mData else { continue }
+            data.assumingMemoryBound(to: Float.self)[frame] = ci == 0 ? sL : sR
+          }
+        }
+        self.lock.unlock()
+        return noErr
+      }
+      engine.attach(node)
+      engine.connect(node, to: engine.mainMixerNode, format: stereo)
+      grainNode = node
+    }
+  }
+
+  private func startGrainVoice(
+    patch: Int, sample: Int, semis: Double, gain: Double, pan: Double, hold: Double
+  ) -> Int {
+    guard let s = samples[sample], let ge = grainEngine else { return -1 }
+    do {
+      try ensurePlaybackRunning()
+    } catch {
+      return -1
+    }
+    lock.lock()
+    let voice = ge.noteOn(
+      patch: patch, data: s.data, srcRate: s.rate, semis: semis,
+      gain: gain, pan: pan, hold: hold)
+    lock.unlock()
+    return voice
   }
 
   private func setCutoff(voice: Int, cutoff: Double) {
@@ -411,11 +522,11 @@ public class MicTapModule: Module {
     lock.lock()
     recording = false
     lock.unlock()
-    // Keep the engine alive if any sample voice is still sounding; otherwise
-    // stop it and hand the session back to playback-only so the synth stays on
-    // the loud speaker route with the mic released.
+    // Keep the engine alive if any sample voice or grain cloud is still
+    // sounding; otherwise stop it and hand the session back to playback-only
+    // so the synth stays on the loud speaker route with the mic released.
     lock.lock()
-    let anyVoice = busyVoice.contains(true)
+    let anyVoice = busyVoice.contains(true) || (grainEngine?.anyActive ?? false)
     lock.unlock()
     if !anyVoice {
       engine.stop()

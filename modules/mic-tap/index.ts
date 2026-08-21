@@ -4,4 +4,4 @@
 // The capture/playback surface (recordStart, play, setFx, …) additionally
 // needs a binary with runtime >= 1.3.0.
 export { default as MicTap } from './src/MicTapModule';
-export type { MicFrame, Sample } from './src/MicTapModule';
+export type { GrainParams, MicFrame, Sample } from './src/MicTapModule';

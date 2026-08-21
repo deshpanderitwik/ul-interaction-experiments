@@ -8,6 +8,18 @@ export type MicFrame = { peaks: number[]; rms: number; sampleRate: number };
 // A captured take, stored natively by id (PCM never crosses the bridge).
 export type Sample = { id: number; duration: number; sampleRate: number };
 
+/**
+ * Granulator patch parameters (4 slots; requires runtime >= 1.4.0), flat keys:
+ * - position (0..1 read-head center) / spray (0..1 position randomness) /
+ *   scan (×realtime drift: 0 freezes a texture, 1 natural, negative reverse)
+ * - size (grain ms) / sizeJitter (0..1) / density (grains/s) / timeJitter (0..1)
+ * - pitch (semitones) / pitchJitter (± semis of spray) / reverse (per-grain
+ *   probability) / quantize (1 = snap each grain's pitch to setGrainScale)
+ * - attack / release (grain window fractions, 0..0.5) / panSpray / gainJitter
+ * - amp.a/d/s/r (the cloud's envelope, seconds / levels)
+ */
+export type GrainParams = Record<string, number>;
+
 type MicTapEvents = {
   onAudio: (frame: MicFrame) => void;
   /** A non-looping voice finished on its own (stopVoice does not emit this). */
@@ -63,6 +75,41 @@ declare class MicTapModule extends NativeModule<MicTapEvents> {
   setFx(reverbMix: number, delayMix: number, delayTime: number, feedback: number): Promise<void>;
   /** Write a stored sample to Documents as WAV; resolves the file path. */
   saveWav(id: number): Promise<string>;
+
+  // ---- granulator ----
+
+  /** Set one grain-patch parameter (see GrainParams for keys). */
+  setGrainParam(slot: number, key: string, value: number): Promise<void>;
+  /** Set many grain-patch parameters at once. */
+  setGrainPatch(slot: number, params: GrainParams): Promise<void>;
+  /**
+   * Scale for quantized grains: semitone pitch classes (e.g. [0,2,3,5,7,8,10]
+   * for minor). Empty array = chromatic.
+   */
+  setGrainScale(pitchClasses: number[]): Promise<void>;
+  /**
+   * Gate a grain cloud on over a captured sample; semis transposes every grain
+   * (0 = as recorded). Resolves a voice handle for grainOff/grainSet, or -1.
+   */
+  grainOn(patch: number, sample: number, semis: number, gain: number, pan: number): Promise<number>;
+  /** One-shot cloud: gate on, hold `hold` seconds, then auto-release. */
+  grainFire(
+    patch: number,
+    sample: number,
+    semis: number,
+    gain: number,
+    pan: number,
+    hold: number
+  ): Promise<number>;
+  /** Release a cloud (enters its envelope release). */
+  grainOff(voice: number): Promise<void>;
+  /**
+   * Live per-cloud control — scrubbing: position 0..1 moves the read head
+   * under the finger. Pass -999 for any field to leave it as-is.
+   */
+  grainSet(voice: number, position: number, gain: number, pan: number, semis: number): Promise<void>;
+  /** All clouds → release (soft panic). */
+  grainReleaseAll(): Promise<void>;
 }
 
 // requireOptional → null (instead of throwing) on a build that lacks the native

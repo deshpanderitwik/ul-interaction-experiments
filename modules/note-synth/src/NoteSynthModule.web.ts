@@ -8,6 +8,7 @@ export const WARPS = { none: 0, sync: 1, bend: 2, mirror: 3, pwm: 4, quantize: 5
 export const FILTERS = { off: 0, lowpass: 1, highpass: 2, bandpass: 3, notch: 4 } as const;
 export const LFO_SHAPES = { sine: 0, triangle: 1, saw: 2, square: 3, sampleHold: 4 } as const;
 export type PatchParams = Record<string, number>;
+export type FxParams = Record<string, number>;
 
 // No synth on web — no-ops so sketches can run in the browser during
 // development without crashing.
@@ -64,6 +65,9 @@ class NoteSynthModule extends NativeModule {
     return -1;
   }
   async releaseAll(): Promise<void> {}
+  async setFxParam(_key: string, _value: number): Promise<void> {}
+  async setFxPreset(_params: Record<string, number>): Promise<void> {}
+  async setTremPattern(_steps: number[]): Promise<void> {}
   async setSynthFx(
     _reverbMix: number,
     _delayMix: number,

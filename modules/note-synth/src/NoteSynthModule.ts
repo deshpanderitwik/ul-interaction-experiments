@@ -30,6 +30,28 @@ export const LFO_SHAPES = { sine: 0, triangle: 1, saw: 2, square: 3, sampleHold:
  */
 export type PatchParams = Record<string, number>;
 
+/**
+ * The insert FX rack (Soundtoys-flavored, requires runtime >= 1.4.0), fixed
+ * chain order, every unit off by default:
+ *   saturator → filter → phaser → chorus/flanger → tremolo/auto-pan →
+ *   micro-shift → crystallizer (granular pitch echo) → analog echo.
+ * Flat keys (each unit has `.on` 0/1; mixes 0..1):
+ * - sat.drive (0..1) / sat.style (0 tape, 1 tube, 2 fuzz) / sat.tone (0..1) / sat.mix
+ * - filt.type (0 LP, 1 HP, 2 BP) / filt.cutoff (Hz) / filt.res (0..1) /
+ *   filt.lfoHz / filt.lfoAmt (0..1) / filt.envAmt (0..1) / filt.mix
+ * - phaser.rate (Hz) / phaser.depth / phaser.center (Hz) / phaser.fb /
+ *   phaser.stages (2–8) / phaser.mix
+ * - chorus.rate (Hz) / chorus.depth / chorus.delay (ms; 1–5ms + fb = flanger) /
+ *   chorus.fb / chorus.spread / chorus.mix
+ * - trem.rate (Hz) / trem.depth / trem.shape (0 sine, 1 square, 2 saw) /
+ *   trem.pan (1 = auto-pan)
+ * - micro.cents (± detune width) / micro.mix
+ * - cryst.pitch (semitones) / cryst.size (ms) / cryst.fb / cryst.reverse / cryst.mix
+ * - echo.time (ms) / echo.offset (ms, R vs L) / echo.fb / echo.pingpong /
+ *   echo.toneLo (Hz) / echo.toneHi (Hz) / echo.wow (0..1) / echo.sat (0..1) / echo.mix
+ */
+export type FxParams = Record<string, number>;
+
 // The shape of the native synth, as seen from JS. Each method maps 1:1 to a
 // Function/AsyncFunction in NoteSynthModule.swift.
 declare class NoteSynthModule extends NativeModule {
@@ -97,6 +119,15 @@ declare class NoteSynthModule extends NativeModule {
   noteFire(patch: number, midi: number, gain: number, pan: number, hold: number): Promise<number>;
   /** All wavetable voices → release (soft panic). */
   releaseAll(): Promise<void>;
+  /** Set one insert-rack parameter (see FxParams for the key reference). */
+  setFxParam(key: string, value: number): Promise<void>;
+  /** Set many insert-rack parameters at once (a preset). */
+  setFxPreset(params: FxParams): Promise<void>;
+  /**
+   * Tremolator step pattern (0..1 levels; one step per trem.rate cycle).
+   * An empty array returns the tremolo to its LFO.
+   */
+  setTremPattern(steps: number[]): Promise<void>;
   /**
    * Shared synth FX tail: reverbMix/delayMix wet % (0–100, default dry);
    * delayTime seconds (max 2); feedback 0–95. Negative leaves a field as-is.

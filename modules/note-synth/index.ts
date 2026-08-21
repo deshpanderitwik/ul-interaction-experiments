@@ -8,6 +8,7 @@ export {
   TABLES,
   WARPS,
   WAVES,
+  type FxParams,
   type PatchParams,
   type WaveName,
 } from './src/NoteSynthModule';

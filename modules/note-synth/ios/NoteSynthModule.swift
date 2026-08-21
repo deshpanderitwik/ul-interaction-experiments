@@ -29,6 +29,9 @@ public class NoteSynthModule: Module {
   private var sampleRate: Double = 44100
   private let delayFx = AVAudioUnitDelay()
   private let reverbFx = AVAudioUnitReverb()
+  // Soundtoys-flavored insert rack (FxRack.swift), processing the stereo mix
+  // pre-master-clip. Self-bypasses when every unit is off.
+  private var fxRack: FxRack?
 
   // MARK: - Legacy voice pool (unchanged behavior)
 
@@ -317,6 +320,35 @@ public class NoteSynthModule: Module {
         self.wtVoices[i].gate = false
         self.wtVoices[i].holdSamples = 0
       }
+      self.lock.unlock()
+    }
+
+    // ---- insert FX rack (Soundtoys-flavored; see FxRack.swift) ----
+
+    // Set one rack parameter (e.g. "echo.time", "sat.drive"). Flat keys:
+    // sat.on/drive/style/tone/mix · filt.on/type/cutoff/res/lfoHz/lfoAmt/
+    // envAmt/mix · phaser.on/rate/depth/center/fb/stages/mix · chorus.on/rate/
+    // depth/delay/fb/spread/mix · trem.on/rate/depth/shape/pan · micro.on/
+    // cents/mix · cryst.on/pitch/size/fb/reverse/mix · echo.on/time/offset/fb/
+    // pingpong/toneLo/toneHi/wow/sat/mix.
+    AsyncFunction("setFxParam") { (key: String, value: Double) in
+      self.lock.lock()
+      self.fxRack?.setParam(key, value)
+      self.lock.unlock()
+    }
+
+    // Set many rack parameters at once (a preset).
+    AsyncFunction("setFxPreset") { (params: [String: Double]) in
+      self.lock.lock()
+      for (k, v) in params { self.fxRack?.setParam(k, v) }
+      self.lock.unlock()
+    }
+
+    // Tremolator step pattern (0..1 levels, one step per trem.rate cycle).
+    // An empty array returns the tremolo to its LFO.
+    AsyncFunction("setTremPattern") { (steps: [Double]) in
+      self.lock.lock()
+      self.fxRack?.setPattern(steps)
       self.lock.unlock()
     }
 
@@ -704,6 +736,7 @@ public class NoteSynthModule: Module {
     try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
     try? session.setActive(true)
     if session.sampleRate > 0 { sampleRate = session.sampleRate }
+    fxRack = FxRack(sampleRate: sampleRate)
 
     guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else {
       return
@@ -954,6 +987,9 @@ public class NoteSynthModule: Module {
         mixL += vL * amp * (pan <= 0 ? 1.0 : 1.0 - pan)
         mixR += vR * amp * (pan >= 0 ? 1.0 : 1.0 + pan)
       }
+
+      // Insert rack (Soundtoys chain) before the master soft-clip.
+      fxRack?.process(&mixL, &mixR)
 
       let sampleL = Float(tanh(mixL))
       let sampleR = Float(tanh(mixR))

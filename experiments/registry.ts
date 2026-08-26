@@ -393,6 +393,13 @@ export const experiments: Experiment[] = [
     load: () => import('./sampler'),
   },
   {
+    id: 'counter',
+    title: 'Counter',
+    blurb: 'A number that counts up — tap anywhere to increment. The hello-world of the OTA pipeline.',
+    accent: '#ffe08a',
+    load: () => import('./counter'),
+  },
+  {
     id: 'channels',
     title: 'Channels',
     blurb: 'Parallel voices and the attention gesture — glass-born takes on the DAW track. What does it feel like to move focus through an ensemble instead of clicking a tab?',

@@ -385,6 +385,13 @@ export const experiments: Experiment[] = [
     accent: '#ff9f43',
     load: () => import('./adsr'),
   },
+  {
+    id: 'counter',
+    title: 'Counter',
+    blurb: 'A number that counts up — tap anywhere to increment. The hello-world of the OTA pipeline.',
+    accent: '#ffe08a',
+    load: () => import('./counter'),
+  },
 ];
 
 export function getExperiment(id: string | undefined): Experiment | undefined {

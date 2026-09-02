@@ -134,8 +134,8 @@ How it works:
 `experiments/web.ts` holds `WEB_READY`, the allowlist of routes shown on the
 web home menu. Every route still resolves by URL, so to vet a sketch:
 
-1. `npm run web` (dev server) or `WEB_BASE_URL= npm run web:export` and serve
-   `dist/`; open `/experiments/<id>` or `/experiments/<id>/<variation>` on a
+1. `npm run web` (dev server at localhost:8081; your phone can open the LAN
+   address it prints) or `WEB_BASE_URL= npm run web:export` and serve `dist/`; open `/experiments/<id>` or `/experiments/<id>/<variation>` on a
    desktop browser *and* a phone.
 2. Fix what needs fixing (platform-gate with `Platform.OS === 'web'` — never
    fork the sketch).

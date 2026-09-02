@@ -93,7 +93,8 @@ export function ExperimentHost({
           ) : (
             <>
               <Pressable
-                onPress={() => router.back()}
+                // A deep link (web) has nothing to pop — go home instead.
+                onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
                 hitSlop={16}
                 accessibilityRole="button"
                 accessibilityLabel="Back to Home"

@@ -5,3 +5,8 @@ import type { ReactNode } from 'react';
 export function WebShell({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
+
+/** Web-only concept; no hash routes on native. */
+export function routeFromHash(): string | null {
+  return null;
+}

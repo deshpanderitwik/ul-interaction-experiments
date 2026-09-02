@@ -25,8 +25,51 @@ const FRAME_W = 390;
 const FRAME_H = 844;
 const DESKTOP_MIN_W = 768;
 const ROUTE_MSG = 'ul-route';
+const FRAME_PARAM = 'frame';
 
 const BASE = (process.env.EXPO_BASE_URL ?? '').replace(/\/$/, '');
+
+// Single-file builds (scripts/export-artifact.mjs) are served as one page at
+// a path the host owns, so the app's routes can't live in the pathname —
+// a reload of "/experiments/bodies" would be the host's 404. Keep them in
+// the hash instead: history writes are rewritten to "#/route", and
+// +not-found restores the route from the hash on load.
+const SINGLE_FILE = typeof window !== 'undefined' && !!(window as any).__SINGLE_FILE;
+
+function installHashHistory() {
+  if (!SINGLE_FILE || (window as any).__hashHistoryInstalled) return;
+  (window as any).__hashHistoryInstalled = true;
+  const rewrite = (url: string | URL | null | undefined) => {
+    if (url == null) return url;
+    const u = new URL(String(url), window.location.href);
+    if (u.origin !== window.location.origin) return url;
+    const host = window.location.pathname;
+    // The router normalises the host's own path on startup — that's not an
+    // app route, so leave the URL alone rather than hashing it.
+    if (u.pathname === host) return host + window.location.search + window.location.hash;
+    const route = u.pathname + u.search;
+    return host + window.location.search + '#' + route;
+  };
+  const push = window.history.pushState.bind(window.history);
+  const replace = window.history.replaceState.bind(window.history);
+  window.history.pushState = (data: any, unused: string, url?: string | URL | null) =>
+    push(data, unused, rewrite(url) as any);
+  window.history.replaceState = (data: any, unused: string, url?: string | URL | null) =>
+    replace(data, unused, rewrite(url) as any);
+}
+
+/** The route a single-file build should open on (from the hash), or null. */
+let lastHashRedirect: string | null = null;
+export function routeFromHash(): string | null {
+  if (!SINGLE_FILE) return null;
+  const h = window.location.hash.slice(1);
+  if (!h.startsWith('/') || h === window.location.pathname) return null;
+  // A hash route that itself lands on +not-found would loop; take it once.
+  if (h === lastHashRedirect) return null;
+  lastHashRedirect = h;
+  return h;
+}
+
 
 type Mode = 'pending' | 'app' | 'frame';
 
@@ -34,9 +77,13 @@ export function WebShell({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<Mode>('pending');
 
   useEffect(() => {
-    const embedded = window.self !== window.top;
+    installHashHistory();
+    // Inside our own phone frame (?frame=1) → render the app. Any other
+    // embedding (the personal site, a preview viewer) is treated like a
+    // top-level window, so a wide host still gets the phone composition.
+    const inOwnFrame = new URLSearchParams(window.location.search).has(FRAME_PARAM);
     const wide = window.innerWidth >= DESKTOP_MIN_W;
-    setMode(!embedded && wide ? 'frame' : 'app');
+    setMode(!inOwnFrame && wide ? 'frame' : 'app');
   }, []);
 
   if (mode === 'pending') return <View style={styles.black} />;
@@ -52,6 +99,7 @@ function SkiaGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    installInlineWasm();
     LoadSkiaWeb({ locateFile: (file: string) => `${BASE}/${file}` })
       .then(() => {
         if (!cancelled) setReady(true);
@@ -87,7 +135,11 @@ function SkiaGate({ children }: { children: ReactNode }) {
 
 function PhoneFrame() {
   const [size, setSize] = useState(() => frameSize());
-  const [src] = useState(() => window.location.pathname + window.location.search + window.location.hash);
+  const [src] = useState(() => {
+    const u = new URL(window.location.href);
+    u.searchParams.set(FRAME_PARAM, '1');
+    return u.pathname + u.search + u.hash;
+  });
 
   useEffect(() => {
     const onResize = () => setSize(frameSize());
@@ -116,6 +168,30 @@ function PhoneFrame() {
       </View>
     </View>
   );
+}
+
+// Single-file builds (scripts/export-artifact.mjs) carry the CanvasKit wasm
+// inline as base64 on window.__CANVASKIT_WASM_B64, for hosts that can't
+// serve a second file. The loader fetches "<base>/canvaskit.wasm"; answer
+// that one request from memory and leave every other fetch alone.
+function installInlineWasm() {
+  const b64 = (window as any).__CANVASKIT_WASM_B64 as string | undefined;
+  if (!b64 || (window as any).__inlineWasmInstalled) return;
+  (window as any).__inlineWasmInstalled = true;
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  (window as any).__CANVASKIT_WASM_B64 = undefined;
+  const realFetch = window.fetch.bind(window);
+  window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (url.endsWith('canvaskit.wasm')) {
+      return Promise.resolve(
+        new Response(bytes, { status: 200, headers: { 'Content-Type': 'application/wasm' } })
+      );
+    }
+    return realFetch(input as any, init);
+  }) as typeof window.fetch;
 }
 
 function frameSize() {

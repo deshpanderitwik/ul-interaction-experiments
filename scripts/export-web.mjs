@@ -24,6 +24,8 @@ execSync('npx expo export --platform web --clear', {
   env: { ...process.env, WEB_BASE_URL: base },
 });
 
+// public/ is copied into dist by expo export, but keep dist self-contained
+// even if public/ was never populated (fresh clone, export before dev).
 const wasm = join(root, 'node_modules/canvaskit-wasm/bin/full/canvaskit.wasm');
 cpSync(wasm, join(dist, 'canvaskit.wasm'));
 console.log('› copied canvaskit.wasm');

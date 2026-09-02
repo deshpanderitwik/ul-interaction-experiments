@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { RecordControl } from './recorder';
 import { getExperiment, getVariation } from './registry';
 import { SettingsGear, SettingsProvider, SettingsSheet } from './settings';
@@ -101,7 +101,8 @@ export function ExperimentHost({
               >
                 <Text style={styles.chevron}>‹</Text>
               </Pressable>
-              {audio ? (
+              {audio && Platform.OS !== 'web' ? (
+                // REC writes .mid files to on-device storage — not on the web.
                 <RecordControl experiment={variation?.title ?? exp?.title ?? 'Experiment'} />
               ) : null}
               <SettingsGear />

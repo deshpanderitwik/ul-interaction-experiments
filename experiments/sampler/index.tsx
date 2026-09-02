@@ -1,6 +1,6 @@
 import { Canvas, Line, Path, Skia, vec } from '@shopify/react-native-skia';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { MicTap, type MicFrame } from '../../modules/mic-tap';
 import { useExperimentActive } from '../_host';
 
@@ -113,7 +113,9 @@ export default function Sampler() {
       {MicTap == null ? (
         <View style={styles.notice} pointerEvents="none">
           <Text style={styles.noticeText}>
-            Sampler needs the new native build — install the latest TestFlight build.
+            {Platform.OS === 'web'
+              ? 'Sampler listens through a native mic engine — it runs on the phone app, not in the browser.'
+              : 'Sampler needs the new native build — install the latest TestFlight build.'}
           </Text>
         </View>
       ) : denied ? (

@@ -102,6 +102,53 @@ eas submit --platform ios --profile preview --id <buildId> --non-interactive
 `submit.preview.ios.ascAppId` is `6782713709` (this app). After processing, the
 build appears under TestFlight for the account holder to install.
 
+## The web target (browser build)
+
+The same experiments run in the browser — desktop and mobile web — from the
+same source, as a static site on GitHub Pages:
+
+    https://deshpanderitwik.github.io/ul-interaction-experiments/
+
+How it works:
+
+- **`expo export --platform web`** (Metro + react-native-web, static output:
+  one HTML per route). `scripts/export-web.mjs` wraps it, copies CanvasKit's
+  wasm next to the site, and reshapes `x.html` → `x/index.html` so
+  trailing-slash URLs resolve on Pages (and through the ritwik.design proxy).
+- **Skia** renders through CanvasKit (wasm); **Reanimated** and
+  **Gesture Handler** use their web backends. `components/WebShell.web.tsx`
+  loads CanvasKit before any experiment mounts.
+- **Audio** is a Web Audio port of the native sine engine
+  (`modules/note-synth/src/NoteSynthModule.web.ts`): `pluck`, the v2 timbre
+  calls and the bend voice are real; the wavetable engine, FX rack and
+  mastering chain stay native-only no-ops, exactly as on an older iOS binary.
+- **Desktop** renders the site inside a phone-sized iframe of itself (390×844)
+  so the compositions read as designed; **mobile web** fills the viewport.
+  Deep links and reloads work in both (the frame mirrors the inner route into
+  the address bar).
+- **Native-only:** `sampler` (mic-tap) and the Recordings library (on-device
+  `.mid` files); REC is hidden on web.
+
+### The one-by-one pipeline
+
+`experiments/web.ts` holds `WEB_READY`, the allowlist of routes shown on the
+web home menu. Every route still resolves by URL, so to vet a sketch:
+
+1. `npm run web` (dev server) or `WEB_BASE_URL= npm run web:export` and serve
+   `dist/`; open `/experiments/<id>` or `/experiments/<id>/<variation>` on a
+   desktop browser *and* a phone.
+2. Fix what needs fixing (platform-gate with `Platform.OS === 'web'` — never
+   fork the sketch).
+3. Add its key to `WEB_READY`. Merge to `main` → the `Web` workflow publishes.
+
+### Publishing
+
+`.github/workflows/web.yml` deploys `dist/` to GitHub Pages on every push to
+`main`, and on demand from any branch (Actions → Web → Run workflow) for a
+preview. One-time setup: **Settings → Pages → Source: GitHub Actions**.
+The web build is JS-only and shares nothing with the OTA channel or the
+runtime version — publishing it never touches installed phones.
+
 ## Archived: the original sketchbook
 
 The original app — **ulsketches** (`ul-interaction-experiments`, bundle

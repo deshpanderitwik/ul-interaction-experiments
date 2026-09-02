@@ -1,0 +1,49 @@
+# Publish the web target to GitHub Pages.
+#
+# Runs on every push to main (the same "integrated work" rule as the OTA
+# channel — see CLAUDE.md) and on demand from any branch via workflow_dispatch,
+# so a feature branch can be previewed before it lands.
+#
+# One-time setup: repo Settings → Pages → Source: "GitHub Actions".
+name: Web
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/export-web.mjs
+        env:
+          WEB_BASE_URL: /ul-interaction-experiments
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

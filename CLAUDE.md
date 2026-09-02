@@ -51,6 +51,15 @@ OTA stream — changing any of them orphans every existing install. The
 user-facing display name (`ul-interaction-experiments-v2`) is separate and safe
 to change (it's baked in at build time).
 
+## The web target
+`expo export --platform web` builds the same sketches for the browser; the
+`Web` GitHub Actions workflow publishes `dist/` to GitHub Pages from `main`
+(or on demand from a branch). It is JS-only and independent of the OTA
+channel and `runtimeVersion` — publishing the web build touches no phone. The
+web home menu shows only routes listed in `experiments/web.ts` (`WEB_READY`);
+vet a sketch in a desktop browser and on a phone, then add its key. See
+README → "The web target".
+
 ## Archived
 The original sketchbook app (**ulsketches**) and its engine were archived on the
 **`archive/ulsketches`** branch (`git checkout archive/ulsketches`). This repo no

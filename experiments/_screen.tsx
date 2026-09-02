@@ -21,8 +21,9 @@ export function HostedExperiment({
 }) {
   const Lazy = useMemo(() => (load ? React.lazy(load) : null), [load]);
   // The screen never sleeps while an experiment is open — compositions play on
-  // and filming isn't interrupted.
-  useKeepAwake();
+  // and filming isn't interrupted. (On web the wake lock is async; leaving a
+  // screen before the browser grants it would otherwise reject on release.)
+  useKeepAwake(undefined, { suppressDeactivateWarnings: true });
 
   return (
     <ExperimentHost settingsKey={settingsKey}>
